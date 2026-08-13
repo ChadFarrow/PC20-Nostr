@@ -40,18 +40,67 @@ to either — a third app needs only this document.
 
 ## The events
 
+Each event is a **list of Podcasting 2.0 GUIDs** — one per `i` tag, written in
+NIP-73 identifier form. That is the whole of it, and it is worth holding onto
+before the positions below arrive: an entry *is* its identifier string, and
+everything at positions 2–4 is a hint that never decides what is on the list.
+(GUID, not uuid — item guids are routinely permalink URLs.)
+
+**An entry is a `<podcast:remoteItem>`.** If you have written a musicL playlist
+you already know this data model, and nothing here replaces it. A remoteItem
+names an episode or track by the pair (parent feed's guid, item's guid), and
+that pair is what an `i` tag carries:
+
+```xml
+<podcast:remoteItem feedGuid="fc815bcf-3639-5395-ba7d-fa217ec93d32"
+                    itemGuid="b6e5fe83-267b-472e-b86e-1190e1fbea93"/>
+```
+
+becomes
+
+```jsonc
+["i", "podcast:item:guid:b6e5fe83-267b-472e-b86e-1190e1fbea93",
+      "", "fc815bcf-3639-5395-ba7d-fa217ec93d32"]
+//     position 1 = itemGuid, prefixed into a NIP-73 identifier
+//     position 3 = feedGuid, bare
+```
+
+A feed favorite is the same thing with no item — `podcast:guid:<feedGuid>` at
+position 1 and nothing at position 3. So the wire format is not an invention of
+this document: it is Podcasting 2.0's existing way of pointing at something in
+someone else's feed, moved onto a Nostr tag. What this document adds is what to
+do when **several apps write the same list**, which is the part no format
+answers on its own — see "The merge".
+
 Two [NIP-78](https://github.com/nostr-protocol/nips/blob/master/78.md)
 application-data events per user, at fixed, app-neutral addresses. Which one an
 entry belongs to is decided by its identifier, not by the app that adds it:
 
-| `d` tag | holds | identifier kinds |
-|---|---|---|
-| `podcast:favorites` | shows, albums, publishers | `podcast:guid`, `podcast:publisher:guid` |
-| `podcast:favorites:items` | episodes, tracks | `podcast:item:guid` |
+| name | `d` tag | holds | identifier kinds |
+|---|---|---|---|
+| Podcast Favorites | `podcast:favorites` | shows, albums, publishers | `podcast:guid`, `podcast:publisher:guid` |
+| Podcast Favorite Items | `podcast:favorites:items` | episodes, tracks | `podcast:item:guid` |
 
-Both are `kind 30078` with `content` an empty string and **public**, and both
-carry a `title` tag that nothing renders — `Podcast Favorites` and `Podcast
-Favorite Items` — to keep the event self-describing.
+**One event shape at two addresses.** Both are `kind 30078` with `content` an
+empty string and **public**, and both carry the name above as a `title` tag that
+nothing renders, to keep the event self-describing. Same tag layout, same `k`
+rule, same merge, same everything below — the only difference is the address
+and which identifier kinds live there. There is no second format to implement.
+
+**Why two events.** Item favorites accumulate an order of magnitude faster than
+feed favorites — a listener saving individual music tracks passes a thousand
+without trying, where the same person follows perhaps forty shows. Every
+publish replaces the whole event and relays cap event size, so one list means
+the tracks eventually make the publish fail and take the podcast subscriptions
+down with them. Two events mean the volume-heavy list can only break itself.
+You publish to every relay in your set, so the smallest cap binds — nos.lol at
+128 KB, which is roughly 2,250 feed entries or 1,080–1,389 item entries. See
+"Watch the size" under Publishing notes for the rest of the measured limits.
+
+Bytes per entry is the lever that matters here, and it is why position 3 carries
+a bare guid and position 2 carries nothing: on a list whose whole purpose is to
+hold as many items as it can, a field that restates what a position already
+means costs the user real favorites.
 
 **Placement is derived, never chosen.** Match the identifier's declared prefix
 against the recognized-kinds table above and the address follows. This is the
@@ -63,19 +112,6 @@ has no derivation, so put it on `podcast:favorites` and treat that as the
 default home. A new kind must be added to the table here before anyone writes
 it, or two apps will place it differently and the entry will bounce between
 the lists forever.
-
-**Why two events.** Item favorites accumulate an order of magnitude faster than
-feed favorites — a listener saving individual music tracks passes a thousand
-without trying, where the same person follows perhaps forty shows. Every
-publish replaces the whole event and relays cap event size, so one list means
-the tracks eventually make the publish fail and take the podcast subscriptions
-down with them. Two events mean the volume-heavy list can only break itself.
-See "Watch the size" under Publishing notes for the measured limits.
-
-Bytes per entry is the lever that matters here, and it is why position 3 carries
-a bare guid and position 2 carries nothing: on a list whose whole purpose is to
-hold as many items as it can, a field that restates what a position already
-means costs the user real favorites.
 
 ### It is a library, not a like
 
@@ -124,8 +160,9 @@ the tag-based structure below, not a runtime option within it.
 
 ### Why not a NIP-51 bookmark set?
 
-The obvious home is kind `30003`, and it's wrong. Kind 30003 is *user-named
-bookmark collections* — saved links and articles. Two things follow, and both
+The obvious home is a bookmark list — kind `10003`, or kind `30003` for a
+named set — and both are wrong for the same reasons. Kind 30003 is *user-named
+bookmark collections*, saved links and articles. Two things follow, and both
 are bad:
 
 - **A generic Nostr client lists someone's podcast favorites among their
@@ -135,60 +172,72 @@ are bad:
   have no reason to implement the merge discipline below.
 
 The second one is the real problem: it's silent data loss caused by a
-well-behaved third party. Kind 30078 is app-defined data at a `d`-addressed
-slot, so no generic client renders or rewrites it. That's exactly the property
-this needs, and it's available today with no coordination.
+well-behaved third party. NIP-51's own text is what makes that certain rather
+than merely likely. The bookmark kinds expect `e` tags (kind:1 notes) and `a`
+tags (kind:30023 articles); `i` tags appear nowhere in NIP-51 at all, so a
+Podcasting 2.0 GUID has no slot in the vocabulary those clients implement. And
+nothing in NIP-51 tells a client to preserve tags it doesn't recognize — its
+only instruction about editing an existing list is to append new items at the
+end. So a bookmark client that reads the set, parses the tags it has
+definitions for, and writes the list back is **conformant with the spec it
+implements** and has destroyed every favorite in it. Nothing on their side is
+broken, which is why nothing on our side can fix it.
 
-A dedicated kind number would be cleaner still, but that needs the NIP process
-and a number nobody else will use. Until there's a reason to spend that, 30078
-is the home.
+That failure is not theoretical. It is test vector 4 one level up, and Boost
+Me Bitch does it to itself today — an `i` tag parsed into a three-field struct
+and rebuilt from that struct on republish, dropping everything past position 3.
+A client with no notion of `i` tags at all drops the whole entry.
 
-Items are [NIP-73](https://github.com/nostr-protocol/nips/blob/master/73.md)
-external content identifiers, one `i` tag each:
+Kind 30078 is app-defined data at a `d`-addressed slot, so no generic client
+renders or rewrites it. That's exactly the property this needs, and it's
+available today with no coordination.
 
-```jsonc
-{
-  "kind": 30078,
-  "tags": [
-    ["d", "podcast:favorites"],
-    ["title", "Podcast Favorites"],
+### Why not a dedicated kind
 
-    // a podcast / album — Podcasting 2.0 <podcast:guid>. The second carries a
-    // <podcast:medium> at position 4, holding 2 and 3 open; the first was
-    // written by an app that didn't know the feed's medium, which is a
-    // different thing from knowing it is a podcast.
-    ["i", "podcast:guid:917393e3-1b1e-5cef-ace4-edaa54e1f810"],
-    ["i", "podcast:guid:d3f8b1a2-4c5e-5a6b-9c8d-7e6f5a4b3c2d", "", "", "music"],
+A dedicated kind number would be cleaner still. The reason to stay on 30078 is
+coordination cost, not fit, so it is worth writing down what the trade actually
+is rather than leaving it as a footnote.
 
-    // One per distinct IDENTIFIER kind. Never ["k", "music"] — see position 4.
-    ["k", "podcast:guid"]
-  ],
-  "content": ""
-}
-```
+**What it would buy.** Two numbers instead of one kind at two `d` values —
+NIP-51's own pattern, where a mute list (10000) and pinned notes (10001) are
+separate kinds rather than two addresses of one. Relay filters become
+kind-scoped, there is no `d` value for two apps to have to agree on, and the
+table above becomes a plain enumeration of the sort NIP-51 uses for two dozen
+list kinds without anyone reading them as two dozen formats.
 
-```jsonc
-{
-  "kind": 30078,
-  "tags": [
-    ["d", "podcast:favorites:items"],
-    ["title", "Podcast Favorite Items"],
+**And the category fits better, which is the stronger argument.** Kind 30078 is
+NIP-78 *application-specific* data. This is the opposite of that: app-neutral
+lists of standard Podcasting 2.0 GUIDs — app-neutral is the word this document
+uses for itself. So 30078 is the mirror of the kind-30003 objection above.
+There, podcast favorites were not the user-named bookmark collections that kind
+describes; here, they are not one application's private data. What 30078
+supplies is the right *mechanical* property — no generic client renders or
+rewrites it — in the wrong *semantic* slot.
 
-    // an episode / track — the RSS item's <guid>, then its parent feed's
-    // bare guid, then that PARENT FEED's medium. Position 2 is held open: it
-    // is NIP-73's URL slot, and this format no longer writes it.
-    ["i", "podcast:item:guid:https://example.com/ep/42",
-          "",
-          "917393e3-1b1e-5cef-ace4-edaa54e1f810",
-          "podcast"],
+**What it costs.** A number allocated through the NIP process. Taking an
+unallocated one unilaterally is worse than it sounds: a kind collision is not
+like a `d` collision, because relay filters are kind-scoped, so a later NIP
+landing on the same number puts two unrelated event types into every query
+either app makes. And it is a breaking change — both reference implementations
+publish 30078 today and those events are on relays now — so it needs a
+dual-read period and a second migration path beside "Migrating an existing
+list".
 
-    ["k", "podcast:item:guid"]
-  ],
-  "content": ""
-}
-```
+**Why not yet.** It would put this entire document ahead of both
+implementations. Exactly one rule here is ahead of one app today, and
+"Reference implementations" says so plainly rather than letting a reader find
+out; a new kind makes the whole file that, and spends the one thing this
+document has — that it describes what two apps independently do, rather than
+what someone thought would be good.
+
+Revisit it when there is a NIP-allocated number and an app willing to run the
+dual-read. Until then, 30078 is the home.
 
 ### Tag positions
+
+Entries are [NIP-73](https://github.com/nostr-protocol/nips/blob/master/73.md)
+external content identifiers, one `i` tag each, laid out as follows. This
+applies to both events; see "Examples" for each one worked out in full.
 
 - **Position 1** — the NIP-73 identifier. This is the merge key; nothing else
   identifies an entry.
@@ -897,6 +946,65 @@ one list the split exists to keep small.
 
 ---
 
+## Examples
+
+Two events, one format. Both illustrate the shape defined under "The events" and
+"Tag positions" above — they are not two formats, and an app that implements one
+has implemented the other.
+
+**Shows, albums and publishers** — `d = podcast:favorites`:
+
+```jsonc
+{
+  "kind": 30078,
+  "tags": [
+    ["d", "podcast:favorites"],
+    ["title", "Podcast Favorites"],
+
+    // a podcast / album — Podcasting 2.0 <podcast:guid>. The second carries a
+    // <podcast:medium> at position 4, holding 2 and 3 open; the first was
+    // written by an app that didn't know the feed's medium, which is a
+    // different thing from knowing it is a podcast.
+    ["i", "podcast:guid:917393e3-1b1e-5cef-ace4-edaa54e1f810"],
+    ["i", "podcast:guid:d3f8b1a2-4c5e-5a6b-9c8d-7e6f5a4b3c2d",
+          "", "", "music"],
+
+    // One per distinct IDENTIFIER kind. Never ["k", "music"] — see position 4.
+    ["k", "podcast:guid"]
+  ],
+  "content": ""
+}
+```
+
+**Episodes and tracks** — `d = podcast:favorites:items`. Same event shape, but
+position 3 carries the parent feed's guid and is required here:
+
+```jsonc
+{
+  "kind": 30078,
+  "tags": [
+    ["d", "podcast:favorites:items"],
+    ["title", "Podcast Favorite Items"],
+
+    // an episode / track — the RSS item's <guid>, then its parent feed's
+    // bare guid, then that PARENT FEED's medium. Position 2 is held open: it
+    // is NIP-73's URL slot, and this format no longer writes it.
+    ["i", "podcast:item:guid:https://example.com/ep/42",
+          "", "917393e3-1b1e-5cef-ace4-edaa54e1f810", "podcast"],
+
+    // Same rule: one per distinct IDENTIFIER kind, derived from position 1.
+    ["k", "podcast:item:guid"]
+  ],
+  "content": ""
+}
+```
+
+The second event's item entry names the first event's first favorite as its
+parent feed, which is what a real pair of lists looks like: the show on one, an
+episode of that show on the other.
+
+---
+
 ## Test vectors
 
 Concrete fixtures for the cases most worth pinning in a test suite. Identifiers
@@ -978,6 +1086,31 @@ table → `podcast:item:guid`.
 Wrong: scan for the first colon and stop → `podcast:item:guid:https`, which is
 not a recognized kind and silently drops the entry from the `#k` discovery
 filter.
+
+A URL is the common case but not the worst one. These are real `itemGuid`
+values, taken from a published musicL playlist — the first carries **two**
+internal colons and is not a URL at all, and the second carries none and is not
+a uuid:
+
+```jsonc
+["i", "podcast:item:guid:indiesats:npub13jml82yy69370amnfl0tfsreyg5hjqwxsmnttxv7g27usl8w5h5qnvtmat:6056637b84210547266f02aa5822ca78091fe1fe57b3e6b3db4bac5a9543e773",
+      "",
+      "606dd394-6294-53cd-ba85-9ea5ca59407b"]
+
+["i", "podcast:item:guid:01hellodemo",
+      "",
+      "3a344ae0-ba8d-5865-80b5-a45528679bfd"]
+```
+
+An RSS `<guid>` is an arbitrary string chosen by the publisher, so anything that
+splits, validates as a uuid, or assumes a scheme will drop entries that are on
+real feeds today. Colon-scanning the first one yields
+`podcast:item:guid:indiesats`; a uuid check rejects both. Only positions 1 and 3
+and the recognized-kinds table decide anything.
+
+Neither reference implementation pins these two values yet — both pin the URL
+case above. They are recorded here because they came off a live playlist rather
+than out of a fixture, which is the standard this document holds its rules to.
 
 Also assert that no `k` tag is ever derived from any position other than 1 —
 specifically that an entry carrying `"music"` at position 4 produces **no**
