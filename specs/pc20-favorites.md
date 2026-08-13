@@ -20,6 +20,11 @@ to either — a third app needs only this document.
   episode. Position 2 is legacy: preserve what you find, write nothing new, and
   **hold it open with an empty string** rather than closing the gap. An item
   tag is `["i", <id>, "", <parentGuid>]`.
+- An entry may carry its `<podcast:medium>` at position 4, so a reader can sort
+  music from podcasts without resolving anything. It is **advisory and
+  sticky**: fill it when it is empty, never overwrite one you didn't write,
+  never invent one you weren't told. With a medium, an item tag is
+  `["i", <id>, "", <parentGuid>, <medium>]`.
 - It's a library ("saved to listen to"), not a public like — don't render save
   counts or feed it into recommendations.
 - Each list has many writers and no partial update, so never publish your local
@@ -148,10 +153,14 @@ external content identifiers, one `i` tag each:
     ["d", "podcast:favorites"],
     ["title", "Podcast Favorites"],
 
-    // a podcast / album — Podcasting 2.0 <podcast:guid>
+    // a podcast / album — Podcasting 2.0 <podcast:guid>. The second carries a
+    // <podcast:medium> at position 4, holding 2 and 3 open; the first was
+    // written by an app that didn't know the feed's medium, which is a
+    // different thing from knowing it is a podcast.
     ["i", "podcast:guid:917393e3-1b1e-5cef-ace4-edaa54e1f810"],
-    ["i", "podcast:guid:d3f8b1a2-4c5e-5a6b-9c8d-7e6f5a4b3c2d"],
+    ["i", "podcast:guid:d3f8b1a2-4c5e-5a6b-9c8d-7e6f5a4b3c2d", "", "", "music"],
 
+    // One per distinct IDENTIFIER kind. Never ["k", "music"] — see position 4.
     ["k", "podcast:guid"]
   ],
   "content": ""
@@ -166,11 +175,12 @@ external content identifiers, one `i` tag each:
     ["title", "Podcast Favorite Items"],
 
     // an episode / track — the RSS item's <guid>, then its parent feed's
-    // bare guid. Position 2 is held open: it is NIP-73's URL slot, and this
-    // format no longer writes it.
+    // bare guid, then that PARENT FEED's medium. Position 2 is held open: it
+    // is NIP-73's URL slot, and this format no longer writes it.
     ["i", "podcast:item:guid:https://example.com/ep/42",
           "",
-          "917393e3-1b1e-5cef-ace4-edaa54e1f810"],
+          "917393e3-1b1e-5cef-ace4-edaa54e1f810",
+          "podcast"],
 
     ["k", "podcast:item:guid"]
   ],
@@ -235,14 +245,60 @@ external content identifiers, one `i` tag each:
   nothing is lost and nothing is decided. Removing a position-2 URL destroys
   information only its writer had.
 
-- **Positions past 3 are not defined.** Preserve anything you find there
+- **Position 4** — the entry's Podcasting 2.0
+  [`<podcast:medium>`](https://podcasting2.org/podcast-namespace/tags/medium):
+  `podcast`, `music`, `video`, `film`, `audiobook`, `newsletter`, `blog`,
+  `publisher`, the `…L` list variants, and whatever the namespace adds next.
+  Optional, and **advisory** — a cache of something a reader could resolve for
+  itself.
+
+  Without it the list is undifferentiated. A music album and a talk show are
+  both `podcast:guid:<uuid>`, so every app renders the other's favorites mixed
+  into its own, and the only way to separate them is to resolve every entry:
+  `/podcasts/byguid` takes **one guid per request**, so a three-hundred-entry
+  list is three hundred requests before anything can be sorted, and the view
+  reshuffles as they land. It is also the only answer that exists for an entry
+  that no longer resolves at all — a delisted feed cannot be categorized any
+  other way, which is to say the hint matters most exactly where losing it
+  costs the most.
+
+  Four rules, and each of them is a way to destroy something:
+
+  - **Never invent one.** An entry with no position 4 is one whose medium you
+    have not been told, and that is not the same as `music`. The honest
+    renderings are "look it up" or "put it somewhere neutral". Substituting
+    your app's usual kind is the inverse of the bug this position exists to
+    fix: the list carries podcasts *and* music by design, so whichever way you
+    default you are wrong about half of it. Publish what a feed declared, not
+    what your own catalogue concluded — a local `type` column with a default is
+    a guess, and a guess published here is one no other app will correct.
+  - **Never overwrite one you didn't write.** See "Overlay, don't rebuild".
+  - **The vocabulary is not a closed set.** Preserve a value you don't
+    recognize, don't normalize its case, and don't drop it. Lowercase only when
+    you are the one originating the value.
+  - **It is not an identifier kind.** No `k` tag is ever derived from it, and a
+    `podcast:guid` entry hinted `publisher` is still a `podcast:guid` entry.
+
+  On a `podcast:item:guid` entry it means **the medium of the feed named at
+  position 3**; Podcasting 2.0 has no per-item medium. If that feed is also on
+  the list under its own `podcast:guid`, the feed entry's value wins — never
+  derive a feed's medium from one of its items. `publisher` is legal on a
+  `podcast:guid` entry, since publisher feeds declare
+  `<podcast:medium>publisher</podcast:medium>`, but prefer the
+  `podcast:publisher:guid` identifier where you have the choice: it says the
+  same thing at position 1, where it is self-describing.
+
+- **Positions past 4 are not defined.** Preserve anything you find there
   verbatim. A position you don't recognize is one a newer app understands.
 
 - **A position left empty while a later one is present is held open with an
   empty string, never shifted.** An item entry is `["i", <id>, "", <feedRef>]` —
   position 2 stays blank rather than closing up. Shifting the parent guid into
   position 2 would make every event written under the earlier revisions parse
-  as having a parent feed of `https://…`.
+  as having a parent feed of `https://…`, and a medium shifted into position 3
+  would be handed to Podcast Index as a `podcastguid`. A feed entry that has
+  only a medium is therefore `["i", <id>, "", "", <medium>]`, six bytes of
+  padding that buy the position's meaning.
 
 - `k` tags: one per **distinct** identifier kind present in that event, not one
   per favorite. Recognized kinds are `podcast:guid`, `podcast:item:guid` and
@@ -251,6 +307,8 @@ external content identifiers, one `i` tag each:
   item guids are routinely permalink URLs and `podcast:item:guid:https://…`
   would yield `podcast:item:guid:https`, which is not a recognized kind and
   silently drops the entry from the `#k` discovery filter every app relies on.
+  And *not* from position 4, which is a medium: a `["k", "music"]` tag names
+  nothing any app subscribes to and pollutes the filter for everyone who does.
 
 ### Overlay, don't rebuild
 
@@ -261,12 +319,49 @@ This is the rule that is easiest to violate without noticing, because the
 natural implementation violates it: parse each tag into `{id, feedUrl,
 feedRef}`, merge those, write them back out — and every position past the third
 is gone, on every entry, on every publish, with no error and nothing on screen
-to show for it. Both reference implementations do exactly this today.
+to show for it. Boost Me Bitch does exactly this today; StableKraft did until
+adding position 4 made the loss visible, which is the only reason anyone found
+it.
 
 It matters more now that position 2 is legacy rather than less. An app that
 rebuilds `["i", id, "", parent]` from a two-field struct deletes a feed URL
 that a *shipping* app wrote, on every publish. Store the tail you didn't
 understand and re-emit it.
+
+**A non-empty value you didn't write is not yours to change.** Fill positions
+that are empty or absent; leave the rest alone, even when you resolved a
+different value and are confident yours is better:
+
+```
+for each position p in 2, 3, 4:
+  next[p] = latest[p] if latest[p] is non-empty else mine[p]
+```
+
+The tempting rule — "prefer my own resolved value" — is what makes two apps
+holding different values rewrite the event against each other on every publish,
+forever. Neither is wrong and neither converges, and nothing about it looks
+wrong from either side: each publish is locally reasonable, and the only symptom
+is that it never stops. Stickiness terminates instead — after one publish the
+value stops moving.
+
+Position 2 gets one exception, because a URL can be *shown* to be wrong: you may
+replace a non-empty hint given positive evidence the existing one is dead — it
+404s, it permanently redirects, Podcast Index reports it gone. Not merely
+because yours differs. Position 4 has no such evidence channel, so it is
+strictly sticky, and a medium you believe is stale is corrected only as an
+explicit user action.
+
+**Never publish solely to upgrade a hint.** Fill them opportunistically, on a
+publish you were already making for a real favorite or unfavorite. A bulk
+"backfill medium onto every entry" pass is an unprompted write to a replaceable
+multi-writer event, run by two apps at once, which is the shape of every failure
+in this document.
+
+To state either of those rules the merge has to be read in two phases:
+**membership** is decided on raw identifier strings and nothing else, and hint
+reconciliation is a subordinate pass that can never add an entry, remove one, or
+change its identifier. That was always the algorithm's invariant; position 4 is
+what makes writing it down load-bearing.
 
 ### Removal
 
@@ -629,7 +724,8 @@ perfectly and whose position 2 you silently deleted was not preserved. See
 
 Preserve unrecognized top-level tags too, and preserve `k` tags naming kinds you
 don't generate — stripping those removes another app's `#k` discovery filter
-from the event.
+from the event. The same goes for a medium at position 4 you've never heard of:
+the namespace grows, and a value you don't recognize is one a newer app does.
 
 "My app can't display this" and "this is junk" are different claims, and only
 the user gets to make the second one. If an app offers a cleanup for malformed
@@ -661,6 +757,16 @@ exactly as it does on the items list — they need position 3 identically.
 That is the whole resolution path, and it is why position 3 is mandatory on the
 items list: without `podcastguid` the lookup is unreliable, and there is no
 longer a URL hint to fall back on.
+
+**Position 4 is what you have before any of that happens.** It lets you sort the
+list into music and podcasts on first paint rather than handing the user one
+undifferentiated pile that reshuffles as lookups land — and resolution is a
+request per entry, so on a large library that is the difference between an
+answer now and an answer in a few hundred round trips. Once an entry resolves,
+prefer the medium you resolved: it is current and the hint may not be. A
+disagreement is a **stale hint, not an error** — render your own value, and do
+not republish to correct the wire. The hint keeps earning its place for entries
+you haven't resolved yet and for entries that no longer resolve at all.
 
 If an entry carries a legacy position-2 URL, you may use it — fetch the feed,
 or `GET /api/1.0/podcasts/byfeedurl?url=<hint>`. Do not depend on one being
@@ -719,11 +825,21 @@ something that could never have appeared on the list cannot be missing from it.
   single largest field on an item tag — larger than everything else on the tag
   put together.
 
+  A position-4 medium costs **+8 bytes** on an item entry, and **+16** on a feed
+  entry, where positions 2 and 3 have to be held open to reach it. Measured, on
+  the same basis as the figures above: feed entries go from ~2,250 to ~1,760,
+  item entries lose roughly a tenth of their ceiling. That is the honest price
+  of the hint, and it is why the padding is called out at the hold-open rule
+  rather than buried — on a feed entry the empty strings cost nearly as much as
+  the value.
+
   Treat a rejection the same as any other failed write: **surface it and retry,
   never truncate the list to fit.** Dropping entries to squeeze under a limit is
   silent data loss wearing a workaround's clothing, and the entries you would
   drop are as likely to be another app's as your own. That covers legacy
-  position-2 hints too — shedding them is the same loss one level down.
+  position-2 hints and position-4 mediums too — shedding either is the same loss
+  one level down, and a medium is the cheapest thing on the tag to talk yourself
+  into dropping.
 
 ---
 
@@ -863,10 +979,11 @@ Wrong: scan for the first colon and stop → `podcast:item:guid:https`, which is
 not a recognized kind and silently drops the entry from the `#k` discovery
 filter.
 
-Also assert that no `k` tag is ever derived from any position other than 1. A
-legacy or newer entry may carry values at positions past 3 that this document
-does not define; none of them is an identifier kind, and a `k` tag minted from
-one pollutes the `#k` discovery filter every app relies on.
+Also assert that no `k` tag is ever derived from any position other than 1 —
+specifically that an entry carrying `"music"` at position 4 produces **no**
+`["k", "music"]`. Position 4 is a medium, not an identifier kind, and a `k` tag
+minted from it pollutes the `#k` discovery filter every app relies on. The same
+goes for values at positions this document does not define at all.
 
 Assert too that a prefixed value arriving at position 3 — which is what every
 pre-revision event carries — is normalized before it reaches Podcast Index and
@@ -890,27 +1007,30 @@ is the whole behaviour being pinned — the fixture has to arrive prefixed.
 ### 4. Tail preservation — a position you don't understand survives a republish
 
 ```jsonc
-// on the wire: a legacy feed URL at position 2, and a position your
-// parser has no field for at all
-["i", "a", "https://example.com/feed.xml", "917393e3-1b1e-5cef-ace4-edaa54e1f810", "something-new"]
+// on the wire: a legacy feed URL at position 2, a medium at 4, and a position
+// your parser has no field for at all
+["i", "a", "https://example.com/feed.xml", "917393e3-1b1e-5cef-ace4-edaa54e1f810", "music", "something-new"]
 
 // after your read → merge → write, with the entry unchanged:
-["i", "a", "https://example.com/feed.xml", "917393e3-1b1e-5cef-ace4-edaa54e1f810", "something-new"]
+["i", "a", "https://example.com/feed.xml", "917393e3-1b1e-5cef-ace4-edaa54e1f810", "music", "something-new"]
 ```
 
-Assert position 4 is still there. This is the general rule, not a rule about any
+Assert position 5 is still there. This is the general rule, not a rule about any
 one position — pin it with a value your parser has no field for, because a test
 written only against the positions you know passes the day someone adds
-another.
+another. Position 4 was that position until this revision, and a test written
+against it then would pass today while dropping position 5.
 
-Everything past position 3 belongs exclusively to somebody else: an earlier
+Everything past position 4 belongs exclusively to somebody else: an earlier
 revision of this document, or an app newer than yours. Note what that requires
 of the fixture. A round-trip assertion whose input is built from your own struct
 cannot fail — you write the positions you know, read them back, and the
 comparison is vacuously true while the code truncates everything else. **The
 fixture has to contain something your struct can't hold**, or the test pins
-nothing. Both reference implementations have such an assertion and both pass it
-while truncating.
+nothing. Both reference implementations have such an assertion; Boost Me Bitch
+still passes it while truncating, and StableKraft did until it added a fixture
+with a position past the end of its struct — the truncation had been running for
+the feature's entire life with a green test beside it.
 
 ### 5. Placement — which list an entry belongs to is derived, not chosen
 
@@ -937,6 +1057,73 @@ list the entry was read on. The failure this pins is an app that publishes its
 whole local set to both addresses, which puts every track on the feeds list and
 every show on the items list in a single publish.
 
+### 6. Idempotence — the same inputs twice produce the same event
+
+```jsonc
+latest = [["i", "a", "", "", "music"]]      // another app's hint
+local  = ["a"], baseline = ["a"]            // you resolved "podcast" for "a"
+
+// first publish: the foreign hint is kept, not replaced
+next  = [["i", "a", "", "", "music"]]
+
+// now feed that back in as `latest` and merge again:
+next' = [["i", "a", "", "", "music"]]       // identical
+```
+
+Assert `next' == next` exactly. **This is the vector worth copying first.** A
+hint that flip-flops is invisible to any single-pass assertion — each publish
+looks locally reasonable, and the bug is only that it never stops. Two apps
+running "prefer my own resolved value" pass every other vector here and rewrite
+the event against each other forever.
+
+### 7. Never blank a hint you don't have
+
+```jsonc
+latest = [["i", "a", "", "", "music"]]
+local  = ["a"]                              // you have no medium for "a"
+
+next   = [["i", "a", "", "", "music"]]      // unchanged — absent ≠ "clear it"
+```
+
+### 8. Fill an empty hint, holding the earlier positions open
+
+```jsonc
+latest = [["i", "a", "https://example.com/feed.xml"]]
+local  = ["a"]                              // you resolved medium = music
+
+next   = [["i", "a", "https://example.com/feed.xml", "", "music"]]
+```
+
+Position 3 is held open. Shifting `"music"` up into it would claim it as a
+parent feed guid, and the next reader would hand it to Podcast Index as
+`podcastguid`.
+
+### 9. An unrecognized medium survives contact with your app
+
+```jsonc
+latest = [["i", "a", "", "", "somethingL"]]
+local  = ["a"]                              // you resolved medium = music
+
+next   = [["i", "a", "", "", "somethingL"]]
+```
+
+Not overwritten with your value, not dropped, not case-normalized, and it
+produces no `k` tag. A medium you don't recognize is one a newer app does.
+
+### 10. A missing hint is unknown, not a default
+
+```jsonc
+latest = [["i", "a", "https://example.com/feed.xml"]]
+```
+
+Assert your renderer treats `a` as *medium unknown* — resolve it, or bucket it
+neutrally. Asserting the absence of a default is worth the trouble because the
+failure is silent and plausible: the list carries podcasts and music at once, so
+whichever way you default, you are wrong about half of it. Assert too that your
+*writer* never originates a medium it wasn't told, which is the same failure one
+step earlier — an app whose local type column defaults to "album" publishes that
+default as fact, and no other app will ever correct it.
+
 ---
 
 ## Reference implementations
@@ -961,17 +1148,44 @@ guid. Those three are the ones worth copying if you implement this, together
 with tail preservation (vector 4), which is what keeps another writer's data
 from being quietly destroyed.
 
-**Known gaps in both, as of this revision.** Each parses an `i` tag into a
-three-field struct — `{id, feedUrl, feedRef}` from `tag[1]`, `tag[2]`,
-`tag[3]` — and rebuilds the tag from that struct on republish, so anything past
-position 3 is dropped on every publish, for every entry. Don't copy that shape;
-see "Overlay, don't rebuild".
+**Known gaps, as of this revision.** They are no longer the same in both apps,
+so they are worth reading per app rather than as one list.
+
+**Position 4 is implemented by one app, not two.** StableKraft writes and reads
+it (`Feed.medium`, published only when the feed declared one), overlays `i` tags
+onto what it read instead of rebuilding them, and treats hints as sticky; its
+tail-preservation and idempotence vectors are the ones described above. Boost Me
+Bitch does none of that yet. So this section of the document is **ahead of the
+second implementation** — unusual here, and stated plainly rather than left for
+a reader to discover, because everything else in this file is written downstream
+of two apps that already agreed. The rules themselves are not speculative: they
+are what the first implementation needed in order to add the position without
+deleting other writers' data, and vector 6 is there because the alternative was
+tried on paper and does not converge.
+
+**Boost Me Bitch** parses an `i` tag into a three-field struct —
+`{id, feedUrl, feedRef}` from `tag[1]`, `tag[2]`, `tag[3]` — and rebuilds the
+tag from that struct on republish (`lib/nostr/favorites-merge.ts`), so anything
+past position 3 is dropped on every publish, for every entry. **Until that changes,
+a medium StableKraft writes survives only until Boost Me Bitch next republishes
+the list.** That is not a reason to withhold the hint — it is written, it is
+useful in the app that wrote it, and it comes back on the next publish there —
+but it is the reason position 4 cannot be relied on as storage, and one more
+reason the value is advisory. Don't copy that shape; see "Overlay, don't
+rebuild".
 
 Both also still write a feed URL at position 2, which earlier revisions of this
 document asked for. Nothing breaks while they continue — position 2 is reserved
 and preserved precisely so those events stay valid — but a new implementation
 should not follow them, and both should stop originating it when convenient.
-Neither has implemented the split into two addresses yet.
+Neither has implemented the split into two addresses yet, and StableKraft has
+deliberately **deferred** both that and the bare position 3: Boost Me Bitch
+reads only `d = podcast:favorites` and resolves an item's parent through
+`parseShowGuid(item.feedRef)`, which requires the prefix, so adopting either
+first would make StableKraft's favorites less visible to the app it shares the
+list with. That is the correct order — a format change that only one side can
+read is worth less than the format it replaces — and it is recorded here so the
+lag reads as a decision rather than as an app that hasn't caught up.
 
 Both also write position 3 in the **prefixed** form this revision replaces —
 `podcast:guid:<uuid>` rather than the bare uuid — which is what the merged
@@ -982,10 +1196,13 @@ revision of this document asked for. Verified in both: Boost Me Bitch defines
 rather than a clean cutover: the prefixed form is not hypothetical legacy, it
 is what every event on the wire carries today.
 
-Don't trust their round-trip assertions to catch the truncation in your own
-port, either. Both have a check named for losslessness —
+Don't trust a round-trip assertion to catch the truncation in your own port,
+either. Both apps have a check named for losslessness —
 `scripts/check-favsync.mjs` in Boost Me Bitch, `shared-favorites.test.ts` in
-StableKraft — and both compare against a fixture built from those same three
-fields, so neither *can* fail on the truncation that is actually happening.
-Test vector 4 is the fixture that breaks the tie, and the reason it insists on
-a position your struct has no room for.
+StableKraft — built against a fixture made of those same three fields, so
+neither *could* fail on the truncation that was actually happening. Both were
+green for the feature's entire life. StableKraft's now carries a fixture with a
+position its struct cannot hold, and that vector was checked against the old
+builder to confirm it fails there — a new vector that passes immediately against
+the code it was written for has proved nothing. Test vector 4 is that fixture,
+and the reason it insists on a position your struct has no room for.
