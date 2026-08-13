@@ -29,13 +29,15 @@ contract with those repos, not decoration:
   rots.
 - The "Test vectors" section is duplicated as real tests in both apps. Changing
   a vector here means changing it in three places.
-- **A rule can outrun both apps, but say so.** The position-4 medium hint landed
-  here before either app implemented it, and the spec's "Reference
-  implementations" section carries an explicit known-gap note: both truncate
-  `i` tags past position 3, and both have a losslessness assertion that passes
-  vacuously because its fixture is built from the same three fields it tests.
-  When the apps catch up, that note is what gets deleted — don't leave it
-  describing a gap that has closed.
+- **A rule can outrun one app, but say so.** The position-4 medium hint is
+  implemented by StableKraft and not by Boost Me Bitch, and the spec's
+  "Reference implementations" section says which is which rather than writing
+  "both". Boost Me Bitch still truncates `i` tags past position 3 and still has
+  a losslessness assertion that passes vacuously, because its fixture is built
+  from the same three fields it tests; StableKraft closed both when it added the
+  hint. When the second app catches up, those notes are what get deleted — don't
+  leave one describing a gap that has closed, and don't let a per-app note decay
+  back into "both".
 
 ## The implementation repos are read-only
 
