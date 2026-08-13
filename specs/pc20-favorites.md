@@ -24,17 +24,35 @@ to either — a third app needs only this document.
 
 ---
 
-## The event
+## The events
 
-One [NIP-78](https://github.com/nostr-protocol/nips/blob/master/78.md)
-application-data event per user, at a fixed, app-neutral address:
+Two [NIP-78](https://github.com/nostr-protocol/nips/blob/master/78.md)
+application-data events per user, at fixed, app-neutral addresses. Which one an
+entry belongs to is decided by its identifier, not by the app that adds it:
 
-| | |
-|---|---|
-| `kind` | `30078` (NIP-78 application data) |
-| `d` tag | `podcast:favorites` |
-| `title` tag | `Podcast Favorites` — nothing renders it; it keeps the event self-describing |
-| `content` | empty string, and **public** |
+| `d` tag | holds | identifier kinds |
+|---|---|---|
+| `podcast:favorites` | shows, albums, publishers | `podcast:guid`, `podcast:publisher:guid` |
+| `podcast:favorites:items` | episodes, tracks | `podcast:item:guid` |
+
+Both are `kind 30078` with `content` an empty string and **public**, and both
+carry a `title` tag that nothing renders — `Podcast Favorites` and `Podcast
+Favorite Items` — to keep the event self-describing.
+
+**Placement is derived, never chosen.** Match the identifier's declared prefix
+against the recognized-kinds table below and the address follows. This is the
+property that makes splitting safe: if an entry could plausibly land in either
+list, two apps would disagree, and an entry added to one list and removed from
+the other is an entry that comes back. Deriving placement removes the choice,
+so there is nothing to disagree about.
+
+**Why two events.** Item favorites accumulate an order of magnitude faster than
+feed favorites — a listener saving individual music tracks passes a thousand
+without trying, where the same person follows perhaps forty shows. Every
+publish replaces the whole event and relays cap event size, so one list means
+the tracks eventually make the publish fail and take the podcast subscriptions
+down with them. Two events mean the volume-heavy list can only break itself.
+See "Watch the size" under Publishing notes for the measured limits.
 
 ### It is a library, not a like
 
@@ -113,14 +131,29 @@ external content identifiers, one `i` tag each:
     ["title", "Podcast Favorites"],
 
     // a podcast / album — Podcasting 2.0 <podcast:guid>
-    ["i", "podcast:guid:917393e3-1b1e-5cef-ace4-edaa54e1f810", "https://example.com/feed.xml"],
+    ["i", "podcast:guid:917393e3-1b1e-5cef-ace4-edaa54e1f810"],
+    ["i", "podcast:guid:d3f8b1a2-4c5e-5a6b-9c8d-7e6f5a4b3c2d"],
 
-    // an episode / track — the RSS item's <guid>
+    ["k", "podcast:guid"]
+  ],
+  "content": ""
+}
+```
+
+```jsonc
+{
+  "kind": 30078,
+  "tags": [
+    ["d", "podcast:favorites:items"],
+    ["title", "Podcast Favorite Items"],
+
+    // an episode / track — the RSS item's <guid>, then its parent feed.
+    // Position 2 is held open: it is NIP-73's URL slot, and this format
+    // no longer writes it.
     ["i", "podcast:item:guid:https://example.com/ep/42",
-          "https://example.com/feed.xml",
+          "",
           "podcast:guid:917393e3-1b1e-5cef-ace4-edaa54e1f810"],
 
-    ["k", "podcast:guid"],
     ["k", "podcast:item:guid"]
   ],
   "content": ""
@@ -131,21 +164,61 @@ external content identifiers, one `i` tag each:
 
 - **Position 1** — the NIP-73 identifier. This is the merge key; nothing else
   identifies an entry.
-- **Position 2** — NIP-73's optional URL hint. Use the **feed's RSS URL**. It
-  lets an app resolve an entry without a Podcast Index key.
-- **Position 3** — *extension*: `podcast:guid:<feedGuid>` of an item's parent
-  feed. Podcast Index's `/episodes/byguid` wants `podcastguid`, so an item guid
-  on its own is not a reliable lookup. When position 3 is present but position 2
-  is unknown, hold position 2 open with an empty string rather than shifting.
 
-  This is additive and safe to ignore: an app that reads only positions 1–2 sees
-  an ordinary, well-formed NIP-73 tag. Writers **should** emit it.
+- **Position 2** — **reserved: preserve it, never write it.** This is NIP-73's
+  optional URL hint, and earlier revisions of this document told you to put the
+  feed's RSS URL here. They no longer do. Any app implementing this has a
+  Podcast Index key and `podcast:guid` resolves without a hint, so the URL was
+  redundant on every path that mattered — while being the largest field on the
+  tag and the one two apps were most likely to hold different values for
+  (`http` versus `https`, a Podcast Index-canonical URL versus the publisher's,
+  a proxy versus the origin).
 
-- `k` tags: one per **distinct** identifier kind present, not one per favorite.
-  Recognized kinds are `podcast:guid`, `podcast:item:guid` and
-  `podcast:publisher:guid`. Derive the kind from that table — *not* by scanning
-  for a colon, since item guids are routinely permalink URLs and
-  `podcast:item:guid:https://…` would yield `podcast:item:guid:https`.
+  Events written against those earlier revisions still carry one, and both
+  reference implementations still write one today. Carry it forward untouched;
+  see "Carry what you can't read". Do not write a new one, and do not strip an
+  existing one — deleting another writer's data is the failure this whole
+  document exists to prevent, and it does not become acceptable because the
+  field was deprecated.
+
+- **Position 3** — the `podcast:guid:<feedGuid>` of an item's parent feed.
+  **Required on the items list**: Podcast Index's `/episodes/byguid` wants
+  `podcastguid`, so an item guid on its own is not a reliable lookup, and an
+  entry without it may be unresolvable. Absent on the feeds list, where an
+  entry has no parent.
+
+- **Positions past 3 are not defined.** Preserve anything you find there
+  verbatim. A position you don't recognize is one a newer app understands.
+
+- **A position left empty while a later one is present is held open with an
+  empty string, never shifted.** An item entry is `["i", <id>, "", <feedRef>]` —
+  position 2 stays blank rather than closing up. Shifting the parent guid into
+  position 2 would make every event written under the earlier revisions parse
+  as having a parent feed of `https://…`.
+
+- `k` tags: one per **distinct** identifier kind present in that event, not one
+  per favorite. Recognized kinds are `podcast:guid`, `podcast:item:guid` and
+  `podcast:publisher:guid`. Derive the kind from that table and from **position
+  1 only** — *not* by scanning for a colon, since item guids are routinely
+  permalink URLs and `podcast:item:guid:https://…` would yield
+  `podcast:item:guid:https`, which is not a recognized kind and silently drops
+  the entry from the `#k` discovery filter every app relies on.
+
+### Overlay, don't rebuild
+
+Reconstruct an `i` tag by overlaying the positions you understand onto the tag
+you read, index by index, and never truncate to the length of your own struct.
+
+This is the rule that is easiest to violate without noticing, because the
+natural implementation violates it: parse each tag into `{id, feedUrl,
+feedRef}`, merge those, write them back out — and every position past the third
+is gone, on every entry, on every publish, with no error and nothing on screen
+to show for it. Both reference implementations do exactly this today.
+
+It matters more now that position 2 is legacy rather than less. An app that
+rebuilds `["i", id, "", parent]` from a two-field struct deletes a feed URL
+that a *shipping* app wrote, on every publish. Store the tail you didn't
+understand and re-emit it.
 
 ### Removal
 
