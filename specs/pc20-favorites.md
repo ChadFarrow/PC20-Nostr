@@ -66,6 +66,11 @@ the tracks eventually make the publish fail and take the podcast subscriptions
 down with them. Two events mean the volume-heavy list can only break itself.
 See "Watch the size" under Publishing notes for the measured limits.
 
+Bytes per entry is the lever that matters here, and it is why position 3 carries
+a bare guid and position 2 carries nothing: on a list whose whole purpose is to
+hold as many items as it can, a field that restates what a position already
+means costs the user real favorites.
+
 ### It is a library, not a like
 
 This list records **what a user has saved to listen to**, so their library follows
@@ -159,12 +164,12 @@ external content identifiers, one `i` tag each:
     ["d", "podcast:favorites:items"],
     ["title", "Podcast Favorite Items"],
 
-    // an episode / track — the RSS item's <guid>, then its parent feed.
-    // Position 2 is held open: it is NIP-73's URL slot, and this format
-    // no longer writes it.
+    // an episode / track — the RSS item's <guid>, then its parent feed's
+    // bare guid. Position 2 is held open: it is NIP-73's URL slot, and this
+    // format no longer writes it.
     ["i", "podcast:item:guid:https://example.com/ep/42",
           "",
-          "podcast:guid:917393e3-1b1e-5cef-ace4-edaa54e1f810"],
+          "917393e3-1b1e-5cef-ace4-edaa54e1f810"],
 
     ["k", "podcast:item:guid"]
   ],
@@ -193,16 +198,28 @@ external content identifiers, one `i` tag each:
   document exists to prevent, and it does not become acceptable because the
   field was deprecated.
 
-- **Position 3** — the `podcast:guid:<feedGuid>` of an item's parent feed.
-  **Required on the items list**: Podcast Index's `/episodes/byguid` wants
-  `podcastguid`, so an item guid on its own is not a reliable lookup, and an
-  entry without it may be unresolvable by anyone, forever. If you have an item
-  guid but not its parent feed's guid, resolve the parent before you write the
-  entry. If you cannot, write the entry anyway with position 3 empty rather
-  than dropping the favorite — an unresolvable entry the user can see and clean
-  up beats a save that silently never syncs — and fill position 3 on a later
-  publish once you know it. Absent on the feeds list, where an entry has no
-  parent.
+- **Position 3** — the parent feed's guid, as a **bare uuid** with no
+  `podcast:guid:` prefix. **Required on the items list**: Podcast Index's
+  `/episodes/byguid` wants `podcastguid`, so an item guid on its own is not a
+  reliable lookup, and an entry without it may be unresolvable by anyone,
+  forever. If you have an item guid but not its parent feed's guid, resolve the
+  parent before you write the entry. If you cannot, write the entry anyway with
+  position 3 empty rather than dropping the favorite — an unresolvable entry
+  the user can see and clean up beats a save that silently never syncs — and
+  fill position 3 on a later publish once you know it. Absent on the feeds
+  list, where an entry has no parent.
+
+  The prefix is dropped because it is 13 bytes of nothing: this position is
+  defined as a feed guid, so naming the kind again buys no information. Unlike
+  position 1, which is a NIP-73 identifier and keeps its prefix, position 3 is
+  this document's own extension and its format is ours to set.
+
+  **Readers must accept both forms.** Events written before the split put item
+  entries on `podcast:favorites` with a prefixed `podcast:guid:<uuid>` at
+  position 3, and those events are still on the wire. Strip a leading
+  `podcast:guid:` if you find one; write only the bare form. Treating a
+  prefixed value as an opaque string and handing it to Podcast Index as
+  `podcastguid` returns nothing, and the entry silently fails to resolve.
 
 - **Positions past 3 are not defined.** Preserve anything you find there
   verbatim. A position you don't recognize is one a newer app understands.
@@ -617,9 +634,10 @@ something that could never have appeared on the list cannot be missing from it.
 
   You publish to all of them, so the smallest binds. At 128 KB, allowing ~500
   bytes of envelope, that is roughly **2,250 feed entries** at 58 bytes each, or
-  **970–1,220 item entries** at 107–134 bytes, the range depending on how long
+  **1,080–1,389 item entries** at 94–121 bytes, the range depending on how long
   the publisher's item guids are. Permalink guids are common and they are the
-  single largest field on an item tag.
+  single largest field on an item tag — larger than everything else on the tag
+  put together.
 
   Treat a rejection the same as any other failed write: **surface it and retry,
   never truncate the list to fit.** Dropping entries to squeeze under a limit is
@@ -734,7 +752,7 @@ tells them apart.
 ```jsonc
 ["i", "podcast:item:guid:https://example.com/ep/42",
       "",
-      "podcast:guid:917393e3-1b1e-5cef-ace4-edaa54e1f810"]
+      "917393e3-1b1e-5cef-ace4-edaa54e1f810"]
 ```
 
 Correct: match the identifier's declared prefix against the recognized-kinds
@@ -749,15 +767,19 @@ legacy or newer entry may carry values at positions past 3 that this document
 does not define; none of them is an identifier kind, and a `k` tag minted from
 one pollutes the `#k` discovery filter every app relies on.
 
+Assert too that a prefixed `podcast:guid:917393e3-…` arriving at position 3 —
+which is what every pre-split event carries — is normalized to the bare uuid
+before it reaches Podcast Index, and re-emitted bare.
+
 ### 4. Tail preservation — a position you don't understand survives a republish
 
 ```jsonc
 // on the wire: a legacy feed URL at position 2, and a position your
 // parser has no field for at all
-["i", "a", "https://example.com/feed.xml", "podcast:guid:917393e3-1b1e-5cef-ace4-edaa54e1f810", "something-new"]
+["i", "a", "https://example.com/feed.xml", "917393e3-1b1e-5cef-ace4-edaa54e1f810", "something-new"]
 
 // after your read → merge → write, with the entry unchanged:
-["i", "a", "https://example.com/feed.xml", "podcast:guid:917393e3-1b1e-5cef-ace4-edaa54e1f810", "something-new"]
+["i", "a", "https://example.com/feed.xml", "917393e3-1b1e-5cef-ace4-edaa54e1f810", "something-new"]
 ```
 
 Assert position 4 is still there. This is the general rule, not a rule about any
@@ -779,7 +801,8 @@ while truncating.
 ```jsonc
 "podcast:guid:917393e3-1b1e-5cef-ace4-edaa54e1f810"
                                      → d = podcast:favorites
-"podcast:publisher:guid:8f2c1d4e-…"  → d = podcast:favorites
+"podcast:publisher:guid:8f2c1d4e-3a7b-5c9d-b2e4-6f1a8d5c3b7e"
+                                     → d = podcast:favorites
 "podcast:item:guid:https://example.com/ep/42"
                                      → d = podcast:favorites:items
 "podcast:season:guid:whatever"       → d = podcast:favorites  (unrecognized
