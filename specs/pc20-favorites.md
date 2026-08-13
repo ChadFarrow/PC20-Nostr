@@ -214,12 +214,22 @@ external content identifiers, one `i` tag each:
   position 1, which is a NIP-73 identifier and keeps its prefix, position 3 is
   this document's own extension and its format is ours to set.
 
-  **Readers must accept both forms.** Events written before the split put item
-  entries on `podcast:favorites` with a prefixed `podcast:guid:<uuid>` at
-  position 3, and those events are still on the wire. Strip a leading
-  `podcast:guid:` if you find one; write only the bare form. Treating a
-  prefixed value as an opaque string and handing it to Podcast Index as
-  `podcastguid` returns nothing, and the entry silently fails to resolve.
+  **Readers must accept both forms.** Every event on the wire today carries the
+  prefixed `podcast:guid:<uuid>` at position 3, because that is what the
+  previous revision of this document asked for. Expect it on **either** list —
+  on `podcast:favorites`, where writers that predate the two-address split put
+  their item entries, and on `podcast:favorites:items` from any writer that
+  adopted the split before this revision. Strip a leading `podcast:guid:` if
+  you find one; write only the bare form. Treating a prefixed value as an
+  opaque string and handing it to Podcast Index as `podcastguid` returns
+  nothing, and the entry silently fails to resolve.
+
+  This is not a licence to rewrite other writers' data, and it does not
+  contradict position 2, where stripping a value you didn't write is
+  forbidden. Normalizing `podcast:guid:<uuid>` to `<uuid>` at position 3 is a
+  lossless re-encoding of the same guid in a position whose meaning is fixed —
+  nothing is lost and nothing is decided. Removing a position-2 URL destroys
+  information only its writer had.
 
 - **Positions past 3 are not defined.** Preserve anything you find there
   verbatim. A position you don't recognize is one a newer app understands.
@@ -767,9 +777,24 @@ legacy or newer entry may carry values at positions past 3 that this document
 does not define; none of them is an identifier kind, and a `k` tag minted from
 one pollutes the `#k` discovery filter every app relies on.
 
-Assert too that a prefixed `podcast:guid:917393e3-…` arriving at position 3 —
-which is what every pre-split event carries — is normalized to the bare uuid
-before it reaches Podcast Index, and re-emitted bare.
+Assert too that a prefixed value arriving at position 3 — which is what every
+pre-revision event carries — is normalized before it reaches Podcast Index and
+re-emitted bare:
+
+```jsonc
+// in
+["i", "podcast:item:guid:https://example.com/ep/42",
+      "",
+      "podcast:guid:917393e3-1b1e-5cef-ace4-edaa54e1f810"]
+
+// out
+["i", "podcast:item:guid:https://example.com/ep/42",
+      "",
+      "917393e3-1b1e-5cef-ace4-edaa54e1f810"]
+```
+
+A test whose input is already bare passes without exercising the strip, which
+is the whole behaviour being pinned — the fixture has to arrive prefixed.
 
 ### 4. Tail preservation — a position you don't understand survives a republish
 
@@ -849,6 +874,15 @@ document asked for. Nothing breaks while they continue — position 2 is reserve
 and preserved precisely so those events stay valid — but a new implementation
 should not follow them, and both should stop originating it when convenient.
 Neither has implemented the split into two addresses yet.
+
+Both also write position 3 in the **prefixed** form this revision replaces —
+`podcast:guid:<uuid>` rather than the bare uuid — which is what the merged
+revision of this document asked for. Verified in both: Boost Me Bitch defines
+`SHOW_PREFIX = 'podcast:guid:'` and calls `parseShowGuid(item.feedRef)`
+(`lib/nostr/favorites-merge.ts`), and StableKraft does the same in
+`lib/nostr/shared-favorites.ts`. That is why position 3 has a both-forms rule
+rather than a clean cutover: the prefixed form is not hypothetical legacy, it
+is what every event on the wire carries today.
 
 Don't trust their round-trip assertions to catch the truncation in your own
 port, either. Both have a check named for losslessness —
