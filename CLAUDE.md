@@ -5,24 +5,29 @@ Guidance for Claude Code (claude.ai/code) working in this repository.
 ## What this repo is
 
 A **specification repo — prose only, no code**. There is nothing to build,
-lint, or test. `pc20-favorites-single-list.md` is the entire deliverable: an
+lint, or test. `pc20-favorites.md` is the entire deliverable: an
 app-neutral format for syncing a user's podcast and music favorites between
 Podcasting 2.0 apps over Nostr, as a single replaceable event at kind 10333.
 The audience is an implementer of a *third* app who has only this document.
 
-## The spec is ahead of every implementation
+## The spec is ahead of every implementation but one
 
 Read this before treating any line in the document as established.
 
-The spec was **authored, not extracted**. No shipping app publishes kind
-10333 — not `~/Vibe/boostmebitch`, not `~/Vibe/stablekraft-app`. Every rule
-in it is a design decision someone made, not a behavior observed in
-production.
+The spec was **authored, not extracted**. Every rule in it began as a design
+decision someone made rather than a behavior observed in production, and most
+still are.
 
-The practical consequence: do not write "both apps do X", and do not cite
-implementation behavior as support for a claim. There is no such support
-yet. When a rule needs justification, justify it by naming the failure it
-prevents.
+The exception, as of 2026-08-13: `~/Vibe/stablekraft-app` publishes and reads
+kind 10333 in production. That is **one writer, one user, one day old**, so it
+is a source of measurements — event sizes, group counts, a bug it actually
+hit — and not evidence that a rule is settled. `~/Vibe/boostmebitch` still
+publishes nothing.
+
+The practical consequence is unchanged: do not write "both apps do X". Where
+a number or a failure comes from that implementation, say so plainly and keep
+the rule justified by the failure it prevents, not by the fact that someone
+shipped it.
 
 ## The implementation repos are read-only
 
