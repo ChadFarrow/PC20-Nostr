@@ -37,6 +37,23 @@ contract with those repos, not decoration:
   When the apps catch up, that note is what gets deleted — don't leave it
   describing a gap that has closed.
 
+## The implementation repos are read-only
+
+`~/Vibe/boostmebitch` and `~/Vibe/stablekraft-app` are sources to read, never
+targets to change: no edits, no commits, no branches, no PRs, no "while I'm in
+here" fixes. Read them as much as a claim requires — that is the only way one
+gets verified — but what comes back lands here, as spec text or as a known-gap
+note, never as a patch over there.
+
+The reason is the circularity this document already warns about one level down.
+The spec's authority is that it describes what two apps independently do; a rule
+checked against code written to satisfy that rule is checked against nothing.
+That is test vector 4's vacuous fixture, one level up — and it fails the same
+way: silently, looking like confirmation.
+
+The truncation gap in both apps is the live case. It is documented, not fixed,
+and closing it is not this repo's work.
+
 ## Invariants a change must not quietly break
 
 These are the load-bearing parts. Edits elsewhere are ordinary prose work; edits
@@ -78,3 +95,6 @@ weakened version loses user data silently:
   proof the read happened"). The body is long-form: what was believed, what was
   measured, what changed, and any measurements with real numbers. See `4b40e65`
   for the house style.
+- **Review what you're committing.** `git status` and `git show --stat` before
+  and after. There is no `.gitignore` here, so an editor swap file or a
+  `.DS_Store` goes in with the prose and stays in the history.
