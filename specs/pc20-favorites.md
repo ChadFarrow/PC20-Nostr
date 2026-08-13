@@ -11,6 +11,11 @@ to either — a third app needs only this document.
 
 - One event per user: `kind 30078`, `d = podcast:favorites`, content empty and
   public, one `i` tag per favorite (NIP-73 identifiers).
+- An entry may carry an advisory `<podcast:medium>` at **tag position 4**, so a
+  music app can tell an album from a talk show without a lookup. It is a cache
+  of what you'd otherwise resolve, not the truth: never overwrite another
+  writer's non-empty hint, never truncate positions you don't understand, and
+  never read a missing hint as `podcast`.
 - It's a library ("saved to listen to"), not a public like — don't render save
   counts or feed it into recommendations.
 - The list has many writers and no partial update, so never publish your local
@@ -113,12 +118,20 @@ external content identifiers, one `i` tag each:
     ["title", "Podcast Favorites"],
 
     // a podcast / album — Podcasting 2.0 <podcast:guid>
-    ["i", "podcast:guid:917393e3-1b1e-5cef-ace4-edaa54e1f810", "https://example.com/feed.xml"],
+    // position 3 empty: a feed has no parent. Position 4 says it's music.
+    ["i", "podcast:guid:917393e3-1b1e-5cef-ace4-edaa54e1f810",
+          "https://example.com/feed.xml",
+          "",
+          "music"],
 
     // an episode / track — the RSS item's <guid>
     ["i", "podcast:item:guid:https://example.com/ep/42",
           "https://example.com/feed.xml",
-          "podcast:guid:917393e3-1b1e-5cef-ace4-edaa54e1f810"],
+          "podcast:guid:917393e3-1b1e-5cef-ace4-edaa54e1f810",
+          "podcast"],
+
+    // hints are optional and independent — an entry may carry none at all
+    ["i", "podcast:guid:d3f8b1a2-4c5e-5a6b-9c8d-7e6f5a4b3c2d"],
 
     ["k", "podcast:guid"],
     ["k", "podcast:item:guid"]
@@ -135,17 +148,52 @@ external content identifiers, one `i` tag each:
   lets an app resolve an entry without a Podcast Index key.
 - **Position 3** — *extension*: `podcast:guid:<feedGuid>` of an item's parent
   feed. Podcast Index's `/episodes/byguid` wants `podcastguid`, so an item guid
-  on its own is not a reliable lookup. When position 3 is present but position 2
-  is unknown, hold position 2 open with an empty string rather than shifting.
+  on its own is not a reliable lookup. Writers **should** emit it.
 
-  This is additive and safe to ignore: an app that reads only positions 1–2 sees
-  an ordinary, well-formed NIP-73 tag. Writers **should** emit it.
+- **Position 4** — *extension*: the entry's Podcasting 2.0
+  [`<podcast:medium>`](https://podcasting2.org/podcast-namespace/tags/medium) —
+  `podcast`, `music`, `video`, `film`, `audiobook`, `newsletter`, `blog`,
+  `publisher`, the `…L` list variants, and whatever the namespace adds next.
+  Without it the list is undifferentiated: a music album and a talk show are
+  both `podcast:guid:<uuid>`, so every app renders the other's favorites mixed
+  into its own.
+
+  It is **advisory** — a cache of what a reader could resolve for itself, and it
+  can go stale when a feed retags. Details in
+  "[Reconciling hints](#reconciling-hints)"; the essentials:
+
+  - The vocabulary is **not a closed set**. Preserve a value you don't
+    recognize; a value you've never heard of is one a newer app has.
+  - Lowercase when you originate a value. Never rewrite someone else's case —
+    normalization is a write, and every write is churn.
+  - On a `podcast:item:guid` entry it means **the medium of the feed named in
+    position 3**; Podcasting 2.0 has no per-item medium. If that feed is also on
+    the list under its own `podcast:guid`, the feed entry's hint wins — never
+    derive a feed's hint from one of its items.
+  - `publisher` is legal on a `podcast:guid` entry, since publisher feeds carry
+    `<podcast:medium>publisher</podcast:medium>`. Prefer the
+    `podcast:publisher:guid` identifier where you have the choice; it is
+    self-describing at position 1.
+
+- **Any position left unknown while a later one is present is held open with an
+  empty string, never shifted.** An entry with a parent feed but no URL hint is
+  `["i", <id>, "", <feedRef>]`, not `["i", <id>, <feedRef>]`.
+
+- Extensions are additive and safe to **ignore**: an app reading only positions
+  1–2 sees an ordinary, well-formed NIP-73 tag. They are *not* safe to **drop**.
+  Ignoring a position when you read is fine; ignoring it when you rebuild the
+  tag deletes another app's data. See "Reconciling hints".
 
 - `k` tags: one per **distinct** identifier kind present, not one per favorite.
   Recognized kinds are `podcast:guid`, `podcast:item:guid` and
-  `podcast:publisher:guid`. Derive the kind from that table — *not* by scanning
-  for a colon, since item guids are routinely permalink URLs and
-  `podcast:item:guid:https://…` would yield `podcast:item:guid:https`.
+  `podcast:publisher:guid`. Derive the kind from that table and from **position
+  1 only** — *not* by scanning for a colon, since item guids are routinely
+  permalink URLs and `podcast:item:guid:https://…` would yield
+  `podcast:item:guid:https`; and *not* from position 4, which is a medium, not
+  an identifier kind. A `["k", "music"]` tag is meaningless and pollutes the
+  `#k` discovery filter every app relies on. Position 4 also never changes an
+  entry's kind: a `podcast:guid` entry hinted `publisher` is still a
+  `podcast:guid` entry.
 
 ### Removal
 
@@ -366,18 +414,91 @@ and looks exactly like one that succeeded — so report both through **one** fla
 And a retry makes concurrent reads reachable for the first time, so make the
 read single-flight; a double-tap must not run two read-merge-publish cycles.
 
+### Reconciling hints
+
+Everything above decides **membership** — which identifiers are on the list —
+and it does that on raw strings alone. The hints at positions 2–4 are a
+*second, subordinate pass* that runs only over entries membership already kept.
+That pass may never add an entry, remove one, or change its identifier. Keeping
+the two separate is what lets a hint be mutable without putting a favorite at
+risk.
+
+**Overlay, don't rebuild.** Reconstruct an `i` tag by overlaying the positions
+you understand onto the tag you read, index by index, and never truncate to the
+length of your own struct. This is the rule that is easiest to violate without
+noticing, because the natural implementation violates it: parse each tag into
+`{id, feedUrl, feedRef}`, merge those, write them back out — and every position
+past the third is gone, on every entry, on every publish, with no error and
+nothing on screen to show for it. Both reference implementations do exactly
+this today. Store the tail you didn't understand and re-emit it.
+
+**A non-empty hint you didn't write is not yours to change.** Fill positions
+that are empty or absent; leave the rest alone, even when you resolved a
+different value and are confident yours is better:
+
+```
+for each position p in 2, 3, 4:
+  next[p] = latest[p] if latest[p] is non-empty else mine[p]
+```
+
+The tempting rule — "prefer my own resolved value" — is what makes two apps
+holding different values rewrite the event against each other on every publish,
+forever. Neither is wrong and neither converges. Stickiness terminates: after
+one publish the value stops moving.
+
+This applies to positions 2 and 3 as much as to 4, and it is a change from what
+the reference implementations do — both take `mine.feedUrl ?? latest.feedUrl`,
+i.e. mine wins. Two apps holding different feed URLs for one `podcast:guid` is
+*more* likely than two holding different mediums: `http` versus `https`, a
+Podcast Index-canonical URL versus the publisher's, a proxy versus the origin.
+
+Position 2 gets one exception, because a URL can be shown to be wrong: you may
+replace a non-empty hint given **positive evidence** the existing one is dead —
+it 404s, it permanently redirects, Podcast Index reports it gone. Not merely
+because yours differs. Position 4 has no such evidence channel, so it is
+strictly sticky.
+
+**Never publish solely to upgrade a hint.** Fill hints opportunistically, on a
+publish you were already making for a real favorite or unfavorite. A bulk
+"backfill medium onto every entry" pass is an unprompted write to a replaceable
+multi-writer event, run by two apps at once — the shape of every failure in this
+document.
+
+**An unrecognized value is not an empty one.** Don't overwrite it, don't drop
+it, don't normalize its case. This is the same rule as for unknown `i` tags and
+unrecognized `k` values, one level down, and it fails the same way: "I don't
+recognize this, so it's junk" is a judgement only the user gets to make.
+
+**Absent means unknown — not a default.** An entry with no position 4 is an
+entry whose medium you have not been told, and the honest renderings are "look
+it up" or "put it somewhere neutral". Substituting a default is the inverse of
+the bug this section exists to prevent: the shared list carries podcasts *and*
+music by design, so an app that assumes one gets it wrong for the other half of
+the list and shows the user the same undifferentiated pile they started with.
+
+Correcting a hint you believe is wrong is fine as an **explicit user action** —
+the same standard as cleaning up malformed entries below. It is automatic
+correction that churns.
+
 ### Carry what you can't read
 
-The merge operates on **raw identifier strings**. Never interpret an entry
-before merging, and never drop one for being unrecognized:
+The merge decides **membership** on raw identifier strings. Never interpret an
+entry to decide whether it survives, and never drop one for being unrecognized:
 
 - A music app has no UI for `podcast:item:guid:` entries a podcast app added.
 - A podcast app has no UI for `podcast:publisher:guid:`.
 - Neither knows what a third app will add next.
 
-Preserve unknown `i` tags verbatim, hints and all. Preserve unrecognized
-top-level tags too, and preserve `k` tags naming kinds you don't generate —
-stripping those removes another app's `#k` discovery filter from the event.
+Preserve unknown `i` tags verbatim, hints and all — and read "verbatim"
+**positionally**, on *every* `i` tag rather than only the ones whose identifier
+you couldn't parse. A tag is preserved when every position survives, including
+positions past the end of whatever struct you parsed it into. An entry whose
+identifier you understood perfectly and whose position 4 you silently deleted
+was not preserved. See "Reconciling hints".
+
+Preserve unrecognized top-level tags too, and preserve `k` tags naming kinds you
+don't generate — stripping those removes another app's `#k` discovery filter
+from the event.
 
 "My app can't display this" and "this is junk" are different claims, and only
 the user gets to make the second one. If an app offers a cleanup for malformed
@@ -406,6 +527,17 @@ sequential request, and if it fails with a 5xx, skip the rest rather than
 opening one socket per favorite against an endpoint that is already down. Cache
 results; a returning user hydrates on every page load.
 
+**Position 4 is what you have before any of that happens.** It lets you sort the
+list into music and podcasts on first paint, rather than leaving the user with
+one undifferentiated pile that reshuffles as lookups land. Once an entry
+resolves, prefer the medium you resolved — it is current and the hint may not
+be. A disagreement is a stale hint, not an error: render your own value, and
+don't republish to correct the wire (see "Reconciling hints"). The hint keeps
+earning its place for entries you haven't resolved yet and for entries that no
+longer resolve at all — a dead or delisted feed can't be categorized any other
+way, which is to say the hint matters most exactly where losing it costs the
+most.
+
 ### What can't be represented
 
 An entry needs a globally-unique identifier. A favorite keyed only on an
@@ -433,7 +565,11 @@ something that could never have appeared on the list cannot be missing from it.
   and relays enforce their own max event size — a large enough library can get
   a publish rejected outright. Treat that the same as any other failed write
   (see above): don't silently drop entries, surface it and retry rather than
-  truncating the list to fit.
+  truncating the list to fit. **That covers hints as well as entries.** Hints
+  are most of the bytes — a feed URL at position 2 runs 40–80 characters against
+  a medium's 5–10 — so shedding them is the obvious way to squeeze under a
+  limit, and it is the same silent loss one level down: they belong to whichever
+  writer put them there.
 
 ---
 
@@ -482,8 +618,10 @@ history waiting at the old address.
 ## Test vectors
 
 Concrete fixtures for the cases most worth pinning in a test suite. Identifiers
-below are shorthand (`"a"`, `"b"`) for full `i` tags; substitute real NIP-73
-identifiers when adapting these.
+below are shorthand (`"a"`, `"b"`) for real NIP-73 identifiers — substitute
+those when adapting these. The merge vectors (1–2) show sets of identifiers,
+since membership is all they turn on; the hint vectors (3–9) show whole `i`
+tags, since positions are the point.
 
 ### 1. The clobber case — a foreign entry must survive your republish
 
@@ -530,7 +668,8 @@ tells them apart.
 ```jsonc
 ["i", "podcast:item:guid:https://example.com/ep/42",
       "https://example.com/feed.xml",
-      "podcast:guid:917393e3-1b1e-5cef-ace4-edaa54e1f810"]
+      "podcast:guid:917393e3-1b1e-5cef-ace4-edaa54e1f810",
+      "podcast"]
 ```
 
 Correct: match the identifier's declared prefix against the recognized-kinds
@@ -539,6 +678,93 @@ table → `podcast:item:guid`.
 Wrong: scan for the first colon and stop → `podcast:item:guid:https`, which is
 not a recognized kind and silently drops the entry from the `#k` discovery
 filter.
+
+Also assert the event carries **no** `["k", "music"]`. Position 4 is a medium,
+not an identifier kind.
+
+### 4. Tail preservation — a position you don't understand survives a republish
+
+```jsonc
+// on the wire, from an app newer than yours
+["i", "a", "https://example.com/feed.xml", "", "music", "something-new"]
+
+// after your read → merge → write, with the entry unchanged:
+["i", "a", "https://example.com/feed.xml", "", "music", "something-new"]
+```
+
+Assert position 5 is still there. This is the general rule, not a medium rule —
+pin it with a value your parser has no field for, because a test written only
+against position 4 passes the day someone adds position 6.
+
+Note what this vector requires of the fixture. A round-trip assertion whose
+input is built from your own struct cannot fail: you write three positions, read
+three positions back, and the comparison is vacuously true while the code
+truncates everything else. **The fixture has to contain something your struct
+can't hold**, or the test pins nothing. Both reference implementations have such
+an assertion and both pass it while truncating.
+
+### 5. Idempotence — the same inputs twice produce the same event
+
+```jsonc
+latest = [["i", "a", "", "", "music"]]      // another app's hint
+local  = ["a"], baseline = ["a"]            // you resolved "podcast" for "a"
+
+// first publish: the foreign hint is kept, not replaced
+next  = [["i", "a", "", "", "music"]]
+
+// now feed that back in as `latest` and merge again:
+next' = [["i", "a", "", "", "music"]]       // identical
+```
+
+Assert `next' == next` exactly. **This is the vector worth copying first.** A
+hint that flip-flops is invisible to any single-pass assertion — each publish
+looks locally reasonable, and the bug is only that it never stops. Two apps
+running "prefer my own resolved value" pass every other test here and rewrite
+the event against each other forever.
+
+### 6. Never blank a hint you don't have
+
+```jsonc
+latest = [["i", "a", "", "", "music"]]
+local  = ["a"]                              // you have no medium for "a"
+
+next   = [["i", "a", "", "", "music"]]      // unchanged — absent ≠ "clear it"
+```
+
+### 7. Fill an empty hint, holding earlier positions open
+
+```jsonc
+latest = [["i", "a", "https://example.com/feed.xml"]]
+local  = ["a"]                              // you resolved medium = music
+
+next   = [["i", "a", "https://example.com/feed.xml", "", "music"]]
+```
+
+Position 3 is held open with an empty string. Shifting `"music"` into position 3
+would claim it as a parent feed guid.
+
+### 8. An unrecognized medium survives contact with your app
+
+```jsonc
+latest = [["i", "a", "", "", "somethingL"]]
+local  = ["a"]                              // you resolved medium = music
+
+next   = [["i", "a", "", "", "somethingL"]]
+```
+
+Not overwritten with your value, not dropped, not case-normalized, and it
+produces no `k` tag. A medium you don't recognize is one a newer app does.
+
+### 9. A missing hint is unknown, not a default
+
+```jsonc
+latest = [["i", "a", "https://example.com/feed.xml"]]
+```
+
+Assert your renderer treats `a` as *medium unknown* — resolve it or bucket it
+neutrally. Asserting the absence of a default is worth the trouble because the
+failure is silent and plausible: the shared list carries podcasts and music at
+once, so whichever way you default, you are wrong about half of it.
 
 ---
 
@@ -561,4 +787,21 @@ filter.
 
 Both pin the same vectors as the Test vectors section above, plus the
 clobber case, the two empty-local cases, and the URL-shaped item guid — those
-four are the ones worth copying if you implement this.
+four are the ones worth copying if you implement this, together with tail
+preservation and idempotence (vectors 4 and 5), which are what keep the hints
+from being quietly destroyed.
+
+**Known gap in both, as of the position-4 hint being added here.** Each parses
+an `i` tag into a three-field struct — `{id, feedUrl, feedRef}`, filled from
+`tag[1]`, `tag[2]`, `tag[3]` — and rebuilds the tag from that struct on
+republish, so position 4 and anything after it is dropped on every publish, for
+every entry. Don't copy that shape. It predates this document's position-4
+extension but not the rule it breaks: "Carry what you can't read" has always
+asked for `i` tags to be preserved hints and all.
+
+Don't trust their round-trip assertions to catch it in your own port, either.
+Both have a check named for losslessness — `scripts/check-favsync.mjs` in Boost
+Me Bitch, `shared-favorites.test.ts` in StableKraft — and both compare against a
+fixture built from those same three fields, so neither *can* fail on the
+truncation that is actually happening. Test vector 4 is the fixture that breaks
+the tie, and the reason it insists on a position your struct has no room for.
