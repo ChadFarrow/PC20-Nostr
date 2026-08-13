@@ -7,8 +7,8 @@ happens to be using.
 
 ## Specs
 
-- [**Cross-app podcast favorites**](specs/pc20-favorites.md) — one shared
-  NIP-78 list of favorites any podcast app can read and write, so favoriting a
+- [**Cross-app podcast favorites**](specs/pc20-favorites.md) — two shared
+  NIP-78 lists of favorites any podcast app can read and write, so favoriting a
   show in one app makes it favorited in every other app the same person signs
   into. Implemented by [Boost Me Bitch](https://github.com/ChadFarrow/boostmebitch)
   and [StableKraft](https://github.com/ChadFarrow/stablekraft-app).

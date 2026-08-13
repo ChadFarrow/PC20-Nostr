@@ -1,19 +1,25 @@
 # Cross-app podcast favorites on Nostr
 
-A user's favorites should follow them between podcast apps. This describes one
-shared list on Nostr that any app can read and write, so favoriting a show in
-one app makes it favorited in every other app the same person signs into.
+A user's favorites should follow them between podcast apps. This describes two
+shared lists on Nostr that any app can read and write — one for shows and
+albums, one for episodes and tracks — so favoriting something in one app makes
+it favorited in every other app the same person signs into.
 
 Implemented by **Boost Me Bitch** and **StableKraft**. Nothing here is specific
 to either — a third app needs only this document.
 
 ## TL;DR
 
-- One event per user: `kind 30078`, `d = podcast:favorites`, content empty and
-  public, one `i` tag per favorite (NIP-73 identifiers).
+- Two events per user, both `kind 30078` with content empty and public, one `i`
+  tag per favorite (NIP-73 identifiers): `d = podcast:favorites` for shows,
+  albums and publishers, `d = podcast:favorites:items` for episodes and tracks.
+  Which list an entry belongs to is derived from its identifier, not chosen.
+- An `i` tag carries the identifier at position 1 and, for items, the parent
+  feed's `podcast:guid` at position 3 — Podcast Index needs it to resolve an
+  episode. Position 2 is legacy: preserve what you find, write nothing new.
 - It's a library ("saved to listen to"), not a public like — don't render save
   counts or feed it into recommendations.
-- The list has many writers and no partial update, so never publish your local
+- Each list has many writers and no partial update, so never publish your local
   set and never publish the raw union of local and remote. Publish a delta
   computed against a per-device baseline of *your own* past contribution — see
   "The merge" below, and read it twice.
@@ -454,9 +460,16 @@ before merging, and never drop one for being unrecognized:
 - A podcast app has no UI for `podcast:publisher:guid:`.
 - Neither knows what a third app will add next.
 
-Preserve unknown `i` tags verbatim, hints and all. Preserve unrecognized
-top-level tags too, and preserve `k` tags naming kinds you don't generate —
-stripping those removes another app's `#k` discovery filter from the event.
+Preserve unknown `i` tags verbatim — and read "verbatim" **positionally**, on
+*every* `i` tag rather than only the ones whose identifier you couldn't parse. A
+tag is preserved when every position survives, including positions past the end
+of whatever struct you parsed it into. An entry whose identifier you understood
+perfectly and whose position 2 you silently deleted was not preserved. See
+"Overlay, don't rebuild".
+
+Preserve unrecognized top-level tags too, and preserve `k` tags naming kinds you
+don't generate — stripping those removes another app's `#k` discovery filter
+from the event.
 
 "My app can't display this" and "this is junk" are different claims, and only
 the user gets to make the second one. If an app offers a cleanup for malformed
@@ -701,3 +714,23 @@ Both pin the clobber case, the two empty-local cases, and the URL-shaped item
 guid. Those three are the ones worth copying if you implement this, together
 with tail preservation (vector 4), which is what keeps another writer's data
 from being quietly destroyed.
+
+**Known gaps in both, as of this revision.** Each parses an `i` tag into a
+three-field struct — `{id, feedUrl, feedRef}` from `tag[1]`, `tag[2]`,
+`tag[3]` — and rebuilds the tag from that struct on republish, so anything past
+position 3 is dropped on every publish, for every entry. Don't copy that shape;
+see "Overlay, don't rebuild".
+
+Both also still write a feed URL at position 2, which earlier revisions of this
+document asked for. Nothing breaks while they continue — position 2 is reserved
+and preserved precisely so those events stay valid — but a new implementation
+should not follow them, and both should stop originating it when convenient.
+Neither has implemented the split into two addresses yet.
+
+Don't trust their round-trip assertions to catch the truncation in your own
+port, either. Both have a check named for losslessness —
+`scripts/check-favsync.mjs` in Boost Me Bitch, `shared-favorites.test.ts` in
+StableKraft — and both compare against a fixture built from those same three
+fields, so neither *can* fail on the truncation that is actually happening.
+Test vector 4 is the fixture that breaks the tie, and the reason it insists on
+a position your struct has no room for.
