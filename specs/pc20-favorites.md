@@ -15,7 +15,8 @@ to either — a third app needs only this document.
   albums and publishers, `d = podcast:favorites:items` for episodes and tracks.
   Which list an entry belongs to is derived from its identifier, not chosen.
 - An `i` tag carries the identifier at position 1 and, for items, the parent
-  feed's `podcast:guid` at position 3 — Podcast Index needs it to resolve an
+  feed's guid at position 3 as a **bare uuid**, no `podcast:guid:` prefix —
+  Podcast Index needs it to resolve an
   episode. Position 2 is legacy: preserve what you find, write nothing new, and
   **hold it open with an empty string** rather than closing the gap. An item
   tag is `["i", <id>, "", <parentGuid>]`.
@@ -206,8 +207,10 @@ external content identifiers, one `i` tag each:
   parent before you write the entry. If you cannot, write the entry anyway with
   position 3 empty rather than dropping the favorite — an unresolvable entry
   the user can see and clean up beats a save that silently never syncs — and
-  fill position 3 on a later publish once you know it. Absent on the feeds
-  list, where an entry has no parent.
+  fill position 3 on a later publish once you know it. A `podcast:guid` entry
+  has no parent and carries nothing here — but a legacy *item* entry sitting on
+  the feeds list does, and needs it just as much, so do not strip or reject
+  position 3 merely because you found the entry on `podcast:favorites`.
 
   The prefix is dropped because it is 13 bytes of nothing: this position is
   defined as a feed guid, so naming the kind again buys no information. Unlike
@@ -217,9 +220,10 @@ external content identifiers, one `i` tag each:
   **Readers must accept both forms.** Every event on the wire today carries the
   prefixed `podcast:guid:<uuid>` at position 3, because that is what the
   previous revision of this document asked for. Expect it on **either** list —
-  on `podcast:favorites`, where writers that predate the two-address split put
-  their item entries, and on `podcast:favorites:items` from any writer that
-  adopted the split before this revision. Strip a leading `podcast:guid:` if
+  today on `podcast:favorites`, where every writer that predates the
+  two-address split puts its item entries, and in future on
+  `podcast:favorites:items` from any writer that adopts the split without
+  adopting the bare form. Strip a leading `podcast:guid:` if
   you find one; write only the bare form. Treating a prefixed value as an
   opaque string and handing it to Podcast Index as `podcastguid` returns
   nothing, and the entry silently fails to resolve.
@@ -331,6 +335,37 @@ for each list L:
   baseline_L = your stored baseline for L
   publish(L, local_L, baseline_L)
 ```
+
+**Deriving two baselines from the one you have.** Every app upgrading from the
+single-list revision holds exactly one baseline, and everything in it was
+published to `podcast:favorites`, whatever its identifier kind. So:
+
+```
+baseline_feeds = your entire existing baseline
+baseline_items = {}                    # you have never published to this list
+```
+
+Do **not** split the old baseline by placement. A baseline is a record of what
+you published *to a given address*, not of what kind of thing it was — and
+splitting it makes `baseline_items` name entries the items list has never held,
+so your first publish there reads them as removals and deletes entries you were
+trying to move.
+
+**An entry moves add-first, never remove-first.** Relocating your own legacy
+item entry from the feeds list to the items list is an add plus a remove across
+two independent events, and the rule above says those two publishes must not
+depend on each other. That is safe in one order only:
+
+1. Publish it to `podcast:favorites:items` and confirm the publish landed.
+2. Only on a later cycle, once you have read it back from the items list, drop
+   it from `local_feeds` so it becomes a removal there.
+
+Keep it in `local_feeds` until then, so it is never in `removes_feeds` while
+the add is still unconfirmed. Remove-first loses the entry outright: the feeds
+publish succeeds, the items publish is blocked by a degraded read or a size
+rejection exactly as instructed, and the entry now exists on neither list. If
+your local store is a cache, the user's favorite is gone from every app they
+own, with no error anywhere.
 
 Running the merge for one list against your *whole* local set publishes
 everything to both lists. `adds = local − baseline` sweeps in every track while
@@ -464,6 +499,21 @@ answered = of those, the ones that sent a REAL eose inside your window
 trustworthy = event_in_hand or (reached > 0 and answered == reached)
 ```
 
+**All of this is per list.** `read()` is `read(L)`, and `event_in_hand` means an
+event *at that `d`*. You may batch both lists into one subscription — it is the
+obvious efficient thing to do — but you must then evaluate trust separately for
+each `d`, because an event arriving at one address is no evidence whatever about
+the other.
+
+Getting this wrong turns the guard into the disaster it exists to prevent. With
+one combined subscription and one `trustworthy` flag, the feeds event arrives,
+`event_in_hand` is true, the read is declared good — and the items event never
+came, so `latest_items` is empty. The next publish computes `next_items` from an
+empty list and replaces the user's entire track library with whatever this one
+device happens to hold. Likewise "the event with the highest `created_at` among
+everything that answered" is per `d`: across two addresses it is meaningless,
+and picks one list's event as the other's.
+
 Two details in there:
 
 - **Push the library's synthetic-EOSE timeout past your own deadline** so it can
@@ -534,6 +584,18 @@ Three rules, and the third is the one that costs data if you get it wrong:
   `podcast:favorites`**, and surface them as the item favorites they are. An
   app that reads only `podcast:favorites:items` for tracks shows a new user an
   empty library while their entire track history sits one address away.
+
+  **Surfacing one does not make it yours to publish.** A legacy item entry you
+  found on the feeds list and hold in no baseline must never enter `adds_items`
+  — display it, resolve it, let the user play it, but do not copy it to the
+  items list. Copying breaks unfavoriting permanently: you publish it to the
+  items list, the user unfavorites it, you remove it from the items list, it is
+  still on the feeds list because rule three correctly forbids you removing it
+  there, and your next hydration surfaces it and puts it back. The favorite
+  returns on every page load, forever, on every device — which is exactly the
+  failure "publish the union of local and remote" is rejected for at the top of
+  this section. Only the app that wrote an entry relocates it, under rule three
+  and the add-first ordering above.
 - **Writers must never originate an item entry there.** New item favorites go
   to `podcast:favorites:items`, always.
 - **An entry is yours to relocate only if it is in your own baseline for the
@@ -587,6 +649,14 @@ Given a `podcast:item:guid:<guid>`:
 1. Look it up locally by item guid.
 2. Podcast Index:
    `GET /api/1.0/episodes/byguid?guid=<guid>&podcastguid=<feedGuid from position 3>`.
+
+**Strip the prefix before you send it.** Position 3 is a bare uuid in this
+revision, but every event written before it carries `podcast:guid:<uuid>` there,
+and that is still most of what you will read. Handing the prefixed form to
+Podcast Index as `podcastguid` matches nothing, so every item favorite resolves
+empty and you render the user's whole library as unresolved while republishing
+it faithfully. This applies to legacy item entries found on `podcast:favorites`
+exactly as it does on the items list — they need position 3 identically.
 
 That is the whole resolution path, and it is why position 3 is mandatory on the
 items list: without `podcastguid` the lookup is unreliable, and there is no
@@ -734,6 +804,27 @@ next      = (latest - removes) ∪ adds  = ["a", "b"]
 baseline' = next ∩ local               = ["a"]
 
 // Assert: next contains "b". A naive publish(local) would have dropped it.
+// Assert also: baseline' == ["a"], not ["a", "b"]. Storing `next` as your
+// baseline makes "b" one of YOUR removals on the following publish.
+```
+
+This vector does not distinguish `∪ adds` from `∪ local` — with
+`local == baseline` both produce the same answer. Pin that separately, because
+it is the first asymmetry this document flags and the one that silently
+resurrects deleted favorites:
+
+```jsonc
+baseline = ["a", "b"]         // you published both
+local    = ["a", "b"]         // you have changed nothing
+latest   = ["a"]              // another app unfavorited "b"
+
+adds    = local - baseline           = []
+removes = baseline - local           = []
+next    = (latest - removes) ∪ adds  = ["a"]        // correct
+//        (latest - removes) ∪ local = ["a", "b"]   // WRONG
+
+// Assert: next does NOT contain "b". With ∪ local it comes back, on every
+// device, on every publish, and the user can never unfavorite it again.
 ```
 
 ### 2. The two empty-local cases — first run vs. a real clear-all
@@ -833,6 +924,13 @@ while truncating.
 "podcast:season:guid:whatever"       → d = podcast:favorites  (unrecognized
                                         kinds default to the feeds list)
 ```
+
+**Run this assertion over `publish()`, not over `placement()`.** A unit test on
+the placement function passes while the publish path ignores placement
+entirely — which is the failure being pinned. Feed a combined local set through
+a full publish cycle and assert `next_feeds` contains no `podcast:item:guid`
+and `next_items` contains no `podcast:guid`. A test that only checks the
+mapping table is the same vacuous fixture vectors 3 and 4 warn about.
 
 Assert placement is computed from the identifier alone and never from which
 list the entry was read on. The failure this pins is an app that publishes its
