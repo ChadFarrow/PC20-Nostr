@@ -19,7 +19,8 @@ to either — a third app needs only this document.
   "The merge" below, and read it twice.
 - Never publish over a read that might have failed silently. A degraded read
   and an empty list look identical to a user unless you say which one
-  happened.
+  happened — and your relay library's aggregate EOSE is **not** by itself
+  proof the read succeeded. Count reached-vs-answered relays yourself.
 
 ---
 
@@ -281,7 +282,58 @@ comparing across the set.
 Verify what comes back, too. Check the event's signature and that its pubkey
 matches the user before treating it as `latest` — a relay serving a forged or
 tampered event is a variant of the same problem you're already guarding
-against, just with malicious rather than absent data.
+against, just with malicious rather than absent data. Reject at **intake**,
+not on the winner: a foreign event carrying a newer `created_at` otherwise
+takes the `latest` slot on its timestamp, and discarding it afterwards throws
+away the genuine event it displaced — turning a good read into an empty one,
+which is the very state this section exists to keep separate.
+
+### An aggregate EOSE is not automatically an answer
+
+The advice above — "only an aggregate EOSE counts" — is necessary and it is not
+sufficient, because the API that reports the aggregate folds two non-answers
+into it and reports both as an answered query. Both of these were measured in a
+shipping implementation that had followed this document:
+
+- **A synthesized EOSE.** Client libraries fake one on a timer when a relay
+  never sends it: nostr-tools calls `receivedEose()` after `baseEoseTimeout`,
+  4400 ms. If your query window is *longer* than that timer, a relay that
+  accepted the socket and then said nothing is indistinguishable from one that
+  answered "I have none" — the recommended API hands you a timeout wearing an
+  EOSE costume. Measured at 4424 ms against a 5 s window.
+- **A failed connection counted as an answer.** A relay that never connected can
+  still count toward the aggregate, so with nothing reachable the aggregate
+  fires immediately and vacuously — measured at **19 ms with no network at
+  all**. "Every *reachable* relay confirmed none" is trivially true when the
+  reachable set is empty, which makes being offline read as a cleared library.
+
+So count it yourself rather than trusting one callback:
+
+```
+reached  = relays that accepted a connection
+answered = of those, the ones that sent a REAL eose inside your window
+
+trustworthy = event_in_hand or (reached > 0 and answered == reached)
+```
+
+Two details in there:
+
+- **Push the library's synthetic-EOSE timeout past your own deadline** so it can
+  never fire inside the window and pose as an answer. Keep that margin *small*:
+  the timer usually outlives the subscription (closing a subscription need not
+  clear it), so a large value leaves it pending long after the read returned.
+- **Exclude relays that never connected from the denominator** rather than
+  counting them as answers. Requiring every *listed* relay to answer means one
+  permanently dead entry in a default list leaves every read degraded forever —
+  and dead entries in default lists are common and long-lived, precisely because
+  nothing surfaces them. A relay that *hangs*, by contrast, is a genuine
+  unknown and should degrade the read.
+
+Testing this needs a scripted local relay. A correct relay will not hang, serve
+another user's event, or serve a tampered one on request — so the failure modes
+that matter here cannot be reproduced against the real network, and an
+implementation that has only ever been tested against live relays has not
+tested this at all.
 
 ### And say so
 
@@ -497,8 +549,15 @@ filter.
   `lib/nostr/favorites-hydrator.ts` (hydration + migration),
   `components/favorites-sync-notice.tsx` (the degraded-read notice). The merge
   is pinned by `npm run check:favsync`.
-- **StableKraft** — `lib/nostr/shared-favorites.ts`, tested by
-  `npx tsx --test lib/nostr/shared-favorites.test.ts`.
+- **StableKraft** — `lib/nostr/shared-favorites.ts` (wire format + merge + the
+  relay read), tested by `npx tsx --test lib/nostr/shared-favorites.test.ts`.
+  The read's trust decision is pinned separately by
+  `lib/nostr/shared-favorites.relay.test.ts`, which scripts local relays that
+  hang, refuse to connect, serve another user's event, or serve a tampered one
+  — that harness is what turned up both failures described in "An aggregate
+  EOSE is not automatically an answer". `lib/nostr/shared-favorites.relay-probe.ts`
+  is the complementary read-only check against the real default relays, since
+  fake relays cannot tell you that a relay you actually ship has gone dark.
 
 Both pin the same vectors as the Test vectors section above, plus the
 clobber case, the two empty-local cases, and the URL-shaped item guid — those
