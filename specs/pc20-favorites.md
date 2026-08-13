@@ -40,7 +40,7 @@ carry a `title` tag that nothing renders — `Podcast Favorites` and `Podcast
 Favorite Items` — to keep the event self-describing.
 
 **Placement is derived, never chosen.** Match the identifier's declared prefix
-against the recognized-kinds table below and the address follows. This is the
+against the recognized-kinds table above and the address follows. This is the
 property that makes splitting safe: if an entry could plausibly land in either
 list, two apps would disagree, and an entry added to one list and removed from
 the other is an entry that comes back. Deriving placement removes the choice,
@@ -275,6 +275,12 @@ Two details in there are easy to get wrong and both cost data:
   foreign identifier into one of your removals on the *next* publish — you delete
   another app's entries one toggle later. Store only what you contributed.
 
+**Run this per list, independently.** Two addresses means two baselines, two
+reads, and two publishes; the algorithm is identical for each and they share
+nothing. Keep their failures independent too — a degraded read on the items
+list must not block a publish to the feeds list. Coupling them hands the
+volume-heavy list's size pressure to the list the split exists to protect.
+
 Which gives exactly the three properties the feature needs:
 
 1. An entry another app added while you were offline is in `latest` but not in
@@ -464,20 +470,30 @@ Given a `podcast:guid:<uuid>`:
 
 1. Look it up locally, if you have a catalogue.
 2. Podcast Index: `GET /api/1.0/podcasts/byguid?guid=<uuid>`.
-3. Fall back to the position-2 URL hint — fetch the feed, or
-   `GET /api/1.0/podcasts/byfeedurl?url=<hint>`.
 
 Given a `podcast:item:guid:<guid>`:
 
 1. Look it up locally by item guid.
 2. Podcast Index:
    `GET /api/1.0/episodes/byguid?guid=<guid>&podcastguid=<feedGuid from position 3>`.
-3. Fall back to the position-2 feed URL and search its items.
+
+That is the whole resolution path, and it is why position 3 is mandatory on the
+items list: without `podcastguid` the lookup is unreliable, and there is no
+longer a URL hint to fall back on.
+
+If an entry carries a legacy position-2 URL, you may use it — fetch the feed,
+or `GET /api/1.0/podcasts/byfeedurl?url=<hint>`. Do not depend on one being
+there, and do not write one.
 
 Resolution is a fan-out over the whole list, so **probe first, then batch**: one
 sequential request, and if it fails with a 5xx, skip the rest rather than
 opening one socket per favorite against an endpoint that is already down. Cache
 results; a returning user hydrates on every page load.
+
+**An entry Podcast Index doesn't know is not an entry you may drop.** A feed
+that was never indexed, or has since been delisted, still belongs to the user.
+Keep it on the list, keep republishing it, and render it as unresolved — see
+"Carry what you can't read".
 
 ### What can't be represented
 
@@ -502,11 +518,30 @@ something that could never have appeared on the list cannot be missing from it.
 - **Relays.** The user's NIP-65 write relays unioned with your defaults. Always
   include the defaults: a dead or AUTH-gated relay in a user's list otherwise
   produces "published to 0 relays".
-- **Watch the size.** The tag list grows without bound as favorites accumulate,
-  and relays enforce their own max event size — a large enough library can get
-  a publish rejected outright. Treat that the same as any other failed write
-  (see above): don't silently drop entries, surface it and retry rather than
-  truncating the list to fit.
+- **Watch the size.** The tag list grows without bound as favorites accumulate
+  and relays cap event size, so a large enough library gets a publish rejected
+  outright. Measured against the default relay set on 2026-08-12, from each
+  relay's NIP-11 `limitation.max_message_length`:
+
+  | relay | bytes |
+  |---|---|
+  | **nos.lol** | **131,072** |
+  | theforest.nostr1.com | 262,200 |
+  | relay.snort.social | 524,288 |
+  | relay.primal.net | 1,000,000 |
+  | relay.damus.io | 1,000,000 |
+
+  You publish to all of them, so the smallest binds. At 128 KB, allowing ~500
+  bytes of envelope, that is roughly **2,250 feed entries** at 58 bytes each, or
+  **970–1,220 item entries** at 107–134 bytes, the range depending on how long
+  the publisher's item guids are. Permalink guids are common and they are the
+  single largest field on an item tag.
+
+  Treat a rejection the same as any other failed write: **surface it and retry,
+  never truncate the list to fit.** Dropping entries to squeeze under a limit is
+  silent data loss wearing a workaround's clothing, and the entries you would
+  drop are as likely to be another app's as your own. That covers legacy
+  position-2 hints too — shedding them is the same loss one level down.
 
 ---
 
@@ -602,7 +637,7 @@ tells them apart.
 
 ```jsonc
 ["i", "podcast:item:guid:https://example.com/ep/42",
-      "https://example.com/feed.xml",
+      "",
       "podcast:guid:917393e3-1b1e-5cef-ace4-edaa54e1f810"]
 ```
 
@@ -612,6 +647,36 @@ table → `podcast:item:guid`.
 Wrong: scan for the first colon and stop → `podcast:item:guid:https`, which is
 not a recognized kind and silently drops the entry from the `#k` discovery
 filter.
+
+Also assert that no `k` tag is ever derived from a position other than 1. A
+legacy entry carrying a medium at position 4 must not produce `["k", "music"]`:
+that is a medium, not an identifier kind, and a bogus `k` tag pollutes the `#k`
+discovery filter every app relies on.
+
+### 4. Tail preservation — a position you don't understand survives a republish
+
+```jsonc
+// on the wire: a legacy feed URL at position 2, and a position your
+// parser has no field for at all
+["i", "a", "https://example.com/feed.xml", "podcast:guid:917393e3-…", "something-new"]
+
+// after your read → merge → write, with the entry unchanged:
+["i", "a", "https://example.com/feed.xml", "podcast:guid:917393e3-…", "something-new"]
+```
+
+Assert position 4 is still there. This is the general rule, not a rule about any
+one position — pin it with a value your parser has no field for, because a test
+written only against the positions you know passes the day someone adds
+another.
+
+Everything past position 3 belongs exclusively to somebody else: an earlier
+revision of this document, or an app newer than yours. Note what that requires
+of the fixture. A round-trip assertion whose input is built from your own struct
+cannot fail — you write the positions you know, read them back, and the
+comparison is vacuously true while the code truncates everything else. **The
+fixture has to contain something your struct can't hold**, or the test pins
+nothing. Both reference implementations have such an assertion and both pass it
+while truncating.
 
 ---
 
@@ -632,6 +697,7 @@ filter.
   is the complementary read-only check against the real default relays, since
   fake relays cannot tell you that a relay you actually ship has gone dark.
 
-Both pin the same vectors as the Test vectors section above, plus the
-clobber case, the two empty-local cases, and the URL-shaped item guid — those
-four are the ones worth copying if you implement this.
+Both pin the clobber case, the two empty-local cases, and the URL-shaped item
+guid. Those three are the ones worth copying if you implement this, together
+with tail preservation (vector 4), which is what keeps another writer's data
+from being quietly destroyed.
