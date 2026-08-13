@@ -16,7 +16,9 @@ to either — a third app needs only this document.
   Which list an entry belongs to is derived from its identifier, not chosen.
 - An `i` tag carries the identifier at position 1 and, for items, the parent
   feed's `podcast:guid` at position 3 — Podcast Index needs it to resolve an
-  episode. Position 2 is legacy: preserve what you find, write nothing new.
+  episode. Position 2 is legacy: preserve what you find, write nothing new, and
+  **hold it open with an empty string** rather than closing the gap. An item
+  tag is `["i", <id>, "", <parentGuid>]`.
 - It's a library ("saved to listen to"), not a public like — don't render save
   counts or feed it into recommendations.
 - Each list has many writers and no partial update, so never publish your local
@@ -50,7 +52,11 @@ against the recognized-kinds table above and the address follows. This is the
 property that makes splitting safe: if an entry could plausibly land in either
 list, two apps would disagree, and an entry added to one list and removed from
 the other is an entry that comes back. Deriving placement removes the choice,
-so there is nothing to disagree about.
+so there is nothing to disagree about. An identifier kind not in that table
+has no derivation, so put it on `podcast:favorites` and treat that as the
+default home. A new kind must be added to the table here before anyone writes
+it, or two apps will place it differently and the entry will bounce between
+the lists forever.
 
 **Why two events.** Item favorites accumulate an order of magnitude faster than
 feed favorites — a listener saving individual music tracks passes a thousand
@@ -190,8 +196,13 @@ external content identifiers, one `i` tag each:
 - **Position 3** — the `podcast:guid:<feedGuid>` of an item's parent feed.
   **Required on the items list**: Podcast Index's `/episodes/byguid` wants
   `podcastguid`, so an item guid on its own is not a reliable lookup, and an
-  entry without it may be unresolvable. Absent on the feeds list, where an
-  entry has no parent.
+  entry without it may be unresolvable by anyone, forever. If you have an item
+  guid but not its parent feed's guid, resolve the parent before you write the
+  entry. If you cannot, write the entry anyway with position 3 empty rather
+  than dropping the favorite — an unresolvable entry the user can see and clean
+  up beats a save that silently never syncs — and fill position 3 on a later
+  publish once you know it. Absent on the feeds list, where an entry has no
+  parent.
 
 - **Positions past 3 are not defined.** Preserve anything you find there
   verbatim. A position you don't recognize is one a newer app understands.
@@ -204,11 +215,11 @@ external content identifiers, one `i` tag each:
 
 - `k` tags: one per **distinct** identifier kind present in that event, not one
   per favorite. Recognized kinds are `podcast:guid`, `podcast:item:guid` and
-  `podcast:publisher:guid`. Derive the kind from that table and from **position
-  1 only** — *not* by scanning for a colon, since item guids are routinely
-  permalink URLs and `podcast:item:guid:https://…` would yield
-  `podcast:item:guid:https`, which is not a recognized kind and silently drops
-  the entry from the `#k` discovery filter every app relies on.
+  `podcast:publisher:guid`. Derive the kind from the recognized-kinds list
+  above and from **position 1 only** — *not* by scanning for a colon, since
+  item guids are routinely permalink URLs and `podcast:item:guid:https://…`
+  would yield `podcast:item:guid:https`, which is not a recognized kind and
+  silently drops the entry from the `#k` discovery filter every app relies on.
 
 ### Overlay, don't rebuild
 
@@ -229,7 +240,7 @@ understand and re-emit it.
 ### Removal
 
 An entry is unfavorited by being **absent from the next revision**. Kind 30078
-is addressable/replaceable, so the newest event at this `d` wins outright.
+is addressable/replaceable, so the newest event at its `d` wins outright.
 
 Do **not** publish NIP-09 kind-5 deletions for favorites. They are unnecessary
 here, and a kind-5 targeting this event's address doesn't remove entries
@@ -241,7 +252,7 @@ that's the entire shared list, every app's entries at once, not just yours.
 
 ## The merge — read this part twice
 
-The list is **one replaceable event with many writers**. There is no partial
+Each list is **one replaceable event with many writers**. There is no partial
 update: every publish replaces the whole thing. So a naive writer destroys other
 apps' data, and there is no error, no undo, and no sign of it on the device that
 did it.
@@ -281,11 +292,32 @@ Two details in there are easy to get wrong and both cost data:
   foreign identifier into one of your removals on the *next* publish — you delete
   another app's entries one toggle later. Store only what you contributed.
 
-**Run this per list, independently.** Two addresses means two baselines, two
-reads, and two publishes; the algorithm is identical for each and they share
-nothing. Keep their failures independent too — a degraded read on the items
-list must not block a publish to the feeds list. Coupling them hands the
-volume-heavy list's size pressure to the list the split exists to protect.
+**Run this per list, independently — and partition `local` as well.** Two
+addresses means two baselines, two reads and two publishes. It also means two
+*local* sets, and this is the part that is easy to miss. Derive each entry's
+placement from its identifier, exactly as a writer does, and run the merge for
+list `L` over only the entries that derive to `L`:
+
+```
+for each list L:
+  local_L    = { e in local : placement(e) == L }
+  baseline_L = your stored baseline for L
+  publish(L, local_L, baseline_L)
+```
+
+Running the merge for one list against your *whole* local set publishes
+everything to both lists. `adds = local − baseline` sweeps in every track while
+you are publishing the feeds list, and every show while you are publishing the
+items list. Both lists end up holding everything, the size pressure the split
+exists to isolate is back on the feeds list, and you have manufactured the exact
+added-to-one-list-removed-from-the-other churn that deriving placement was meant
+to prevent. Both reference implementations hold a single combined favorites
+store today, so this is the shape a port will start from.
+
+Keep the two lists' failures independent too — a degraded read on the items list
+must not block a publish to the feeds list, and a publish rejected for size on
+one list must not abort the other. Coupling them hands the volume-heavy list's
+size pressure straight to the list the split exists to protect.
 
 Which gives exactly the three properties the feature needs:
 
@@ -331,11 +363,15 @@ concurrency control around sharing it.
 
 **The same asymmetry governs reading.** If your app has its own store to
 reconcile against the list — a database, not just a cache — delete a local
-favorite only when it is in your baseline and absent from the list. Never
-"everything I hold that isn't on the list": on the first run the list is empty
-because nothing has published to it yet, and that rule reads an empty list as
-"the user cleared everything" and wipes their library. An absent baseline means
-you have never agreed to anything, so you may not delete at all.
+favorite only when it is in your baseline and absent from
+**the list that entry derives to**. Reconciling your whole store against one
+list finds every entry belonging to the other list "absent" and deletes it —
+with a single combined store, reconciling against the feeds list wipes the
+user's entire track library. Never "everything I hold that isn't on the list":
+on the first run the list is empty because nothing has published to it yet,
+and that rule reads an empty list as "the user cleared everything" and wipes
+their library. An absent baseline means you have never agreed to anything, so
+you may not delete at all.
 
 Two cheap guards are worth having if your local store is the only copy of a
 favorite. **Cap how much one reconcile may delete** — a mass removal is far more
@@ -447,9 +483,44 @@ the three states a favorites view otherwise collapses into one:
 
 Two details worth copying. The write path is silent in the same way one screen
 removed — a favorite toggled while the relays are unreachable skips its publish
-and looks exactly like one that succeeded — so report both through **one** flag.
-And a retry makes concurrent reads reachable for the first time, so make the
-read single-flight; a double-tap must not run two read-merge-publish cycles.
+and looks exactly like one that succeeded — so report read failure and write
+failure for a given list through **one flag per list**. One flag across both
+lists is worse than none: a successful feeds read clears the notice a failed
+items read set, and the user gets a clean, confident empty state for their nine
+hundred tracks, which is precisely the state this section exists to prevent. If
+a single surface shows both lists, it must be able to say that part of what
+you are looking at could not be loaded. And a retry makes concurrent reads
+reachable for the first time, so make the read single-flight; a double-tap must
+not run two read-merge-publish cycles.
+
+### Reading events written before the split
+
+Every event on the wire today was written by the single-list revision of this
+document, which put episodes and tracks on `podcast:favorites` alongside shows.
+Both reference implementations still do. That is not a malformed event and its
+entries are not junk — they are the user's favorites, written correctly against
+the spec as it stood.
+
+Three rules, and the third is the one that costs data if you get it wrong:
+
+- **Readers must accept `podcast:item:guid` entries found on
+  `podcast:favorites`**, and surface them as the item favorites they are. An
+  app that reads only `podcast:favorites:items` for tracks shows a new user an
+  empty library while their entire track history sits one address away.
+- **Writers must never originate an item entry there.** New item favorites go
+  to `podcast:favorites:items`, always.
+- **An entry is yours to relocate only if it is in your own baseline for the
+  list it currently sits on.** Relocation is a removal plus an add, and removal
+  is governed by the merge: `removes = baseline − local`. A foreign entry is
+  not in your baseline, so moving it means deleting another app's data, and the
+  app that wrote it will republish it on its next toggle. That is the
+  add-and-remove-forever loop described under "Migrating an existing list",
+  running between two apps instead of within one.
+
+The practical consequence is that `podcast:favorites` will hold a shrinking tail
+of item entries for as long as any single-list writer is still active, and that
+is fine. Read both lists, merge what you find, and let the tail drain as each
+app's own entries migrate under rule three.
 
 ### Carry what you can't read
 
@@ -531,10 +602,10 @@ something that could never have appeared on the list cannot be missing from it.
 - **Relays.** The user's NIP-65 write relays unioned with your defaults. Always
   include the defaults: a dead or AUTH-gated relay in a user's list otherwise
   produces "published to 0 relays".
-- **Watch the size.** The tag list grows without bound as favorites accumulate
-  and relays cap event size, so a large enough library gets a publish rejected
-  outright. Measured against the default relay set on 2026-08-12, from each
-  relay's NIP-11 `limitation.max_message_length`:
+- **Watch the size.** Each event's tag list grows without bound as favorites
+  accumulate and relays cap event size, so a large enough library gets a
+  publish rejected outright. Measured against the default relay set on
+  2026-08-12, from each relay's NIP-11 `limitation.max_message_length`:
 
   | relay | bytes |
   |---|---|
@@ -563,16 +634,22 @@ something that could never have appeared on the list cannot be missing from it.
 An app that already had its own favorites list can adopt this one without losing
 anything:
 
-1. Read both the old address and `podcast:favorites`.
-2. **Only if both reads are trustworthy**, merge the old entries in with an
+1. Read the old address and **both** shared lists.
+2. Split the old entries by derived placement, exactly as a writer does: an
+   entry goes to the list its identifier kind belongs to, never to whichever
+   list you happened to read first.
+3. **Per list, and only if that list's read and the old address's read were
+   both trustworthy**, merge that list's share of the old entries in with an
    *empty baseline* — a migration only ever adds, and passing the old ids as a
-   baseline would read anything already on the shared list as a removal.
-3. Publish the shared list. Leave the old event in place; it costs nothing and
-   is the rollback path.
-4. **Record the baseline from your local set, not from the old list.** This is
+   baseline would read anything already on the shared list as a removal. A
+   degraded read of one shared list blocks only its own half; migrate the other
+   and retry the blocked one later.
+4. Publish each list you migrated. Leave the old event in place; it costs
+   nothing and is the rollback path.
+5. **Record the baseline from your local set, not from the old list.** This is
    the step that looks like a detail and isn't.
 
-Step 4 is worth spelling out, because "the entries I just moved across" is the
+Step 5 is worth spelling out, because "the entries I just moved across" is the
 obvious definition of your contribution and it undoes the migration one line
 later. The baseline is not a record of authorship — it is a promise that `local`
 will keep asserting every id in it, since the next merge computes
@@ -597,6 +674,12 @@ kept.
 Run it on every hydration rather than once. It is a no-op after the first time,
 and a user signing in on a second device months later still has their pre-sync
 history waiting at the old address.
+
+Splitting before you publish is not optional. An old list holds shows and
+tracks together — that is what it was for — so migrating it wholesale into
+`podcast:favorites` strands every track on the feeds list, where no app looking
+for items will ever read it, and where it counts against the size budget of the
+one list the split exists to keep small.
 
 ---
 
@@ -661,20 +744,20 @@ Wrong: scan for the first colon and stop → `podcast:item:guid:https`, which is
 not a recognized kind and silently drops the entry from the `#k` discovery
 filter.
 
-Also assert that no `k` tag is ever derived from a position other than 1. A
-legacy entry carrying a medium at position 4 must not produce `["k", "music"]`:
-that is a medium, not an identifier kind, and a bogus `k` tag pollutes the `#k`
-discovery filter every app relies on.
+Also assert that no `k` tag is ever derived from any position other than 1. A
+legacy or newer entry may carry values at positions past 3 that this document
+does not define; none of them is an identifier kind, and a `k` tag minted from
+one pollutes the `#k` discovery filter every app relies on.
 
 ### 4. Tail preservation — a position you don't understand survives a republish
 
 ```jsonc
 // on the wire: a legacy feed URL at position 2, and a position your
 // parser has no field for at all
-["i", "a", "https://example.com/feed.xml", "podcast:guid:917393e3-…", "something-new"]
+["i", "a", "https://example.com/feed.xml", "podcast:guid:917393e3-1b1e-5cef-ace4-edaa54e1f810", "something-new"]
 
 // after your read → merge → write, with the entry unchanged:
-["i", "a", "https://example.com/feed.xml", "podcast:guid:917393e3-…", "something-new"]
+["i", "a", "https://example.com/feed.xml", "podcast:guid:917393e3-1b1e-5cef-ace4-edaa54e1f810", "something-new"]
 ```
 
 Assert position 4 is still there. This is the general rule, not a rule about any
@@ -690,6 +773,23 @@ comparison is vacuously true while the code truncates everything else. **The
 fixture has to contain something your struct can't hold**, or the test pins
 nothing. Both reference implementations have such an assertion and both pass it
 while truncating.
+
+### 5. Placement — which list an entry belongs to is derived, not chosen
+
+```jsonc
+"podcast:guid:917393e3-1b1e-5cef-ace4-edaa54e1f810"
+                                     → d = podcast:favorites
+"podcast:publisher:guid:8f2c1d4e-…"  → d = podcast:favorites
+"podcast:item:guid:https://example.com/ep/42"
+                                     → d = podcast:favorites:items
+"podcast:season:guid:whatever"       → d = podcast:favorites  (unrecognized
+                                        kinds default to the feeds list)
+```
+
+Assert placement is computed from the identifier alone and never from which
+list the entry was read on. The failure this pins is an app that publishes its
+whole local set to both addresses, which puts every track on the feeds list and
+every show on the items list in a single publish.
 
 ---
 
