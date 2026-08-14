@@ -13,7 +13,7 @@ the rendered post.
 
 # Cross-app Podcast Favorites on Nostr
 
-Favorite a show or a track in one Podcasting 2.0 app, and it's favorited in every other app you sign into. One flat list, one event, no merge algorithm.
+Favorite a show or a track in one Podcasting 2.0 app, and it's favorited in every other app you sign into. One flat list, one event, and any app may write it.
 
 ## How it works
 
@@ -48,6 +48,12 @@ Entries are [NIP-73](https://github.com/nostr-protocol/nips/blob/master/73.md) i
 
 An item's parent feed and its medium are both carried by *position*, not by anything on the entry itself. A client that parses entries into structs and rebuilds the tag array — sorting, deduplicating, reordering — silently reattaches every item to the wrong feed, and nothing else in the format recovers the association. Preserve the order you read, and append rather than rebuild.
 
+## Any app may write it, so every publish is a merge
+
+There is no primary writer, no ownership and no out-of-band coordination — a user signed into three apps across two devices has five writers, all equal, none aware of the others. The event is replaceable, so a writer that publishes what it holds without reading first does not merely lose a race: it deletes every entry the other writers added, silently, on someone else's device, with no undo. **A blind publish is data loss, not a conflict.**
+
+So read the current event before every publish, and never publish on a read you don't trust. Keep a **baseline** — the set of identifiers you last agreed with the relay on, private to the device and never on the wire. Nothing on an entry records which app added it, so "on the list, absent locally" is otherwise ambiguous between another app's addition and your own removal, and both naive answers destroy something: prefer the list and unfavoriting silently stops working, prefer local state and you delete the other apps' entries. Carry anything you can't parse through untouched. Publish only when the merged bytes differ from the bytes you read.
+
 ## Three sharp edges
 
 - **A feed group is not always a favorite.** Opening a group is the only way to say which feed an item came from, so a group appears whether or not the user favorited the feed. On the first real list published in this format, 196 groups carried only 82 favorited feeds — the other 114 existed solely so a favorited track could name its parent. Treat an *itemless* group as a real favorite and a group with items as unknowable; inventing a favorite is worse than missing one.
@@ -56,7 +62,7 @@ An item's parent feed and its medium are both carried by *position*, not by anyt
 
 ## What it doesn't do
 
-No merge algorithm — two apps writing concurrently clobber each other, which is what the single-writer assumption exists to satisfy. No split between shows and items, so the whole list is one event: a real one runs 36 KB for 196 feeds and 227 items, against a ~128 KB relay cap, and item favorites accumulate an order of magnitude faster than feed favorites.
+No provenance, and so no last-write-wins — nothing on an entry records which app added it or when, which is why each writer keeps its own baseline instead of working the answer out from the event. No concurrency control: the merge rules make each publish correct with respect to what it read, not serialized, so two apps that read the same version and publish within a second of each other still lose one set of changes. No split between shows and items, so the whole list is one event: a real one runs 36 KB for 196 feeds and 227 items, against a ~128 KB relay cap, and item favorites accumulate an order of magnitude faster than feed favorites.
 
 Kind `10333` is **self-assigned, not NIP-allocated** — unclaimed in the kind registry as of this writing, but confirm there's still no collision before depending on it. Relay filters are kind-scoped, so a later NIP landing on 10333 would put two unrelated event types into every query.
 
