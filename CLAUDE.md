@@ -17,9 +17,11 @@ A **reference repo with two halves**, neither of which is an application.
    `comparisons/` (why each shipped copy won), `analysis/` (the scripts
    behind every number). See `catalog/README.md`.
 
-The catalog exists because the sites are a handful of codebases forked
-repeatedly: 26 files are byte-identical across 3+ repos and 65 more sit at
-the same path in 3+ repos and have diverged.
+The catalog's purpose is to hand one working feature to someone who wants it.
+It is **not** a de-duplication project: the five sites share no git history,
+and the only real overlap — DoerfelVerse and Project StableKraft — is 6
+copy-pasted infrastructure files plus 34 more that have drifted to 13.6%
+common.
 
 ### Rules that apply to the catalog only
 
@@ -28,13 +30,14 @@ the same path in 3+ repos and have diverged.
   on a site. They do not care which fork is canonical. They need the files,
   the dependencies, the renames, and what breaks if they skip a step. Save
   the comparison for `comparisons/`.
-- **Ship code only from a production site** — `ITDV-Lightning`,
-  `boostmebitch`, `stablekraft-app`, `MSP-2.0`, `candr.space`.
-  `TRM-Lightning`, `NMNU` and `lnaddress-music` are **test deployments**:
-  compare them freely, label them `*(test site)*`, never ship their code and
-  never call them canonical. Third-party forks are out of scope entirely.
-  This rule exists because three files were extracted from a test site
-  before it was written down.
+- **Ship code only from a live site.** The allowlist is `ALLOWED` in
+  `catalog/check-recipes.sh`: `ITDV-Lightning`, `boostmebitch`,
+  `stablekraft-app`, `MSP-2.0`, `candr.space`. Anything else — unreleased
+  prototypes, template clones, third-party forks — is out of scope as a
+  source and should not be named in these pages either. A recipe promises the
+  feature already works somewhere; code that never served traffic cannot make
+  that promise. The rule is written down because code from an unreleased
+  prototype reached the catalog before it was.
 - **Extracted files are byte-identical to their source.** No provenance
   header, no reformatting, no rewritten import. Provenance lives in
   `catalog/PROVENANCE.tsv`, so adopting a file into a site is a copy and
@@ -93,28 +96,28 @@ rewritten back and forth in production.
 
 ## The implementation repos are read-only
 
-Every repo under `~/Vibe` other than this one — `boostmebitch`,
-`stablekraft-app`, the Lightning sites, the MSP pair, all of them — is a
-source to read, never a target to change: no edits, no commits, no branches,
+Every repo under `~/Vibe` other than this one — `ITDV-Lightning`,
+`boostmebitch`, `stablekraft-app`, `MSP-2.0`, `candr.space` and the rest — is
+a source to read, never a target to change: no edits, no commits, no branches,
 no PRs, no "while I'm in here" fixes. Read them as much as a claim requires —
 that is how one gets verified — but what comes back lands here, as spec text,
 a catalog entry or a known-gap note, never as a patch over there.
 
-**Never `git pull` in one.** A pull rewrites the working tree.
-`musicL-playlist-updater` has thousands of uncommitted files sitting in it,
-and a pull there destroys work that exists nowhere else.
+**Never `git pull` in one.** A pull rewrites the working tree, and at least
+one repo under `~/Vibe` is carrying thousands of uncommitted files that exist
+nowhere else.
 
 ## Read `origin/HEAD`, never the local checkout
 
 The clones under `~/Vibe` are not current. When the catalog was built, **9 of
-15 were behind their remote** — `TRM-Lightning` by 19 commits, both kind-10333
-implementations by 2 and 3 — and `MSP-2.0` and `Helipad-to-Nostr-BoostBot`
-were sitting on feature branches rather than their default branch.
+15 were behind their remote** — one by 19 commits, both kind-10333
+implementations by 2 and 3 — and two were sitting on feature branches rather
+than their default branch.
 
 So a claim verified by reading `~/Vibe/<repo>/lib/thing.ts` is a claim about
 whatever happened to be checked out, and it will be wrong about half the time.
 This is not hypothetical: the first draft of
-`catalog/nostr/favorites-10333.md` reported four bugs in stablekraft's merge
+`catalog/comparisons/favorites-10333.md` reported four bugs in stablekraft's merge
 that had already been fixed upstream.
 
 ```bash

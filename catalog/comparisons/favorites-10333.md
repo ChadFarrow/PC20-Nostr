@@ -13,7 +13,6 @@ Two implementations exist. Nothing else in any repo writes kind 10333.
 |---|---|---|---|
 | `boostmebitch` | `lib/nostr/favorites-list.ts` | **canonical**, 722 lines | `1f26ba0` |
 | `stablekraft-app` | `lib/nostr/favorites-single-list.ts` | diverged, 662 lines | `db2eb22f` |
-| `StableKraft-Nostr-Fix` | — | predates 10333, still on kinds 30001/30002 | `—` |
 
 Supporting modules — boostmebitch: `favorites.ts`, `favorites-sync.ts`,
 `favorites-hydrator.ts`, `read-trust.ts`. stablekraft-app:

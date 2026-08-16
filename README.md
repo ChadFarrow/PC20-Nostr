@@ -32,7 +32,7 @@ document.
 
 It is authored, not extracted — every rule began as a design decision, and its
 implementations are young. Read it as a proposal with live failure modes
-behind it, not settled practice.
+behind it, not as settled practice.
 
 Kind 10333 is **self-assigned, not NIP-allocated**. Relay filters are
 kind-scoped, so a later NIP landing on the same number would put two unrelated
@@ -46,26 +46,18 @@ collision before depending on it.
 The spec says what the wire format is. The catalog says which code implements
 it correctly today, and where each app falls short.
 [`comparisons/favorites-10333.md`](catalog/comparisons/favorites-10333.md) is
-the join, and
+the join between them, and
 [`comparisons/trustworthy-read.md`](catalog/comparisons/trustworthy-read.md)
 defines the "trust" that the spec's [Merging](pc20-favorites.md#merging) rules
 depend on.
 
-## Why a catalog exists at all
-
-The sites are not independent codebases — they are a few codebases forked
-repeatedly, and the copies no longer agree. **26 files are byte-identical
-across three or more repos; 65 more sit at the same path and have diverged.**
-Of the diverged surface, 72.3% is nonetheless already common.
-
-Full numbers and the scripts that produce them: [`catalog/`](catalog/) and
-[`catalog/analysis/`](catalog/analysis/).
-
 ## Working in here
 
-The implementation repos under `~/Vibe` are **sources to read, never targets
-to change**. Read them through `origin/HEAD`, not the local checkout — 9 of 15
-clones were behind their remote when this was built. Never `git pull` in one.
+The site repos under `~/Vibe` are **sources to read, never targets to
+change**. Read them through `origin/HEAD`, not the local checkout — 9 of 15
+clones were behind their remote when this was built, and two were not even on
+their default branch. Never `git pull` in one; a pull rewrites the working
+tree, and at least one is carrying thousands of uncommitted files.
 
 ```bash
 git -C ~/Vibe/<repo> fetch origin --quiet

@@ -53,8 +53,9 @@ unchanged offers your users an app called DoerfelVerse.
 `../check-recipes.sh` enforces all of it, and `--network` also confirms every
 "seen on" link still answers:
 
-1. Code comes only from a production site — never a test deployment or a
-   third-party fork.
+1. Code comes only from one of the five live sites. A recipe promises the
+   feature already works somewhere, and code that has never served real
+   traffic cannot make that promise.
 2. Every file a recipe lists exists, and every file on disk is listed.
 3. No `@/…` import goes unshipped. An unshipped import is the difference
    between "just add it" and an import error in your repo.

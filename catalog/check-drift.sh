@@ -5,10 +5,10 @@
 # PROVENANCE.tsv records the exact commit each file was read at, so drift is
 # mechanically checkable rather than a thing you remember to look at.
 #
-# This never touches an implementation repo's working tree. `git fetch` writes
-# only to .git/refs, and every read goes through `git show <ref>:<path>`. Do not
-# make this script pull — musicL-playlist-updater has thousands of uncommitted
-# files, and a pull in one of these repos is how you lose someone's work.
+# This never touches a site repo's working tree. `git fetch` writes only to
+# .git/refs, and every read goes through `git show <ref>:<path>`. Do not make
+# this script pull — at least one repo under ~/Vibe carries thousands of
+# uncommitted files, and a pull is how you lose someone's work.
 #
 # Usage:  ./check-drift.sh [path-to-repos]     (default: ~/Vibe)
 # Exit:   0 = every file current, 1 = at least one drifted or missing

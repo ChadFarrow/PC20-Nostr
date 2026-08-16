@@ -10,10 +10,10 @@ VIBE = os.path.expanduser("~/Vibe")
 
 REPOS = {
     "ITDV-Lightning": "origin/main",
-    "NMNU": "origin/main",
-    "TRM-Lightning": "origin/main",
-    "lnaddress-music": "origin/main",
+    "boostmebitch": "origin/main",
     "stablekraft-app": "origin/main",
+    "MSP-2.0": "origin/master",
+    "candr.space": "origin/main",
 }
 
 # seeds: the payment/nostr/feed surface a shared library would plausibly cover

@@ -128,8 +128,26 @@ for d in "$HERE"/recipes/*/; do
   esac
 done
 
+echo "== 7. no page names a repo that is not a live site"
+# Documentation drifts back toward whatever is easiest to cite, and naming a
+# repo here implies a reader could go look at it running somewhere. These are
+# the ones that have already had to be removed once: unreleased template
+# clones, stale forks, third-party projects, and repos that are tools rather
+# than sites. Add to this list rather than silently reintroducing one.
+DENIED="TRM-Lightning NMNU lnaddress-music libre-listener-wallet-monorepo
+        StableKraft-Nostr-Fix MSP-2.0-Desktop-App RSS-music-site-template
+        HPM-Lightning ITDV-Site HGH-checker Auto-musicL-Maker
+        musicL-playlist-updater Helipad-to-Nostr-BoostBot podroll-atlas
+        music-atlas v4v-toolkit v4v-core-rs"
+for name in $DENIED; do
+  hits=$(grep -rlE "\b${name//./\\.}\b" --include='*.md' --include='*.tsv' \
+          --include='*.json' "$HERE" 2>/dev/null)
+  [ -n "$hits" ] && note "docs mention '$name', which is not a live site:
+$(echo "$hits" | sed 's|^|        |')"
+done
+
 if [ "$NET" = "1" ]; then
-  echo "== 7. every live_at still answers"
+  echo "== 8. every live_at still answers"
   for d in "$HERE"/recipes/*/; do
     [ -f "$d/feature.json" ] || continue
     url=$(python3 -c "import json,sys;print(json.load(open(sys.argv[1])).get('live_at',''))" "$d/feature.json")

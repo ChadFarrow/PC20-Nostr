@@ -8,32 +8,24 @@ feed GUID.
 Also the split arithmetic: given a `<podcast:value>` block's recipients and
 their shares, how many sats each one gets.
 
-**Nothing is shipped for this feature.** That is the finding, not an omission.
+**Nothing ships for this feature.** That is the finding, not an oversight.
 
 ## Why nothing ships
 
-The best implementation is `libre-listener-wallet-monorepo`'s
-`packages/shared/src/v4v-utils.ts` — but that is a third-party fork, not one
-of these sites, so it is out of scope for redistribution here.
+One live site implements it: DoerfelVerse, in
+`ITDV-Lightning/utils/payment-utils.ts` (231 lines, read at `4bc69b2`). Two
+things make it unshippable — TLV construction is module-private, and the app
+is hardcoded into the records it builds.
 
-Every remaining implementation lives inside a `utils/payment-utils.ts` that
-keeps `createBoostTLVRecords` **module-private**, so there is nothing to
-extract without rewriting — and rewriting is exactly what this catalog does
-not do. The one production copy, `ITDV-Lightning`'s, additionally hardcodes
-the app into the records it builds.
-
-| Repo | Path | Status |
-|---|---|---|
-| `ITDV-Lightning` | `utils/payment-utils.ts` (231L) | production, but branded — see below |
-| `TRM-Lightning` *(test site)* | `utils/payment-utils.ts` (333L) | de-branded, but a test site |
-| `lnaddress-music` *(test site)* | `lib/tlv-utils.ts` + `lib/constants.ts` | best field shape, but a test site |
-| `libre-listener-wallet-monorepo` | `packages/shared/src/v4v-utils.ts` | third-party fork, out of scope |
-| `helipad` | `src/boost.rs` | the decoder side, in Rust |
+`createBoostTLVRecords` is **private** inside `payment-utils.ts`, so there is
+nothing to extract without rewriting it — and rewriting is exactly what this
+catalog does not do. Everything here is byte-identical to something running in
+production; the moment a file gets reshaped for extraction it stops being the
+thing that was tested by real traffic.
 
 ## Do not copy ITDV's payment-utils
 
-It is the only production implementation, and it has DoerfelVerse compiled
-into it:
+It has DoerfelVerse compiled into the records it builds:
 
 - `app_name: metadata.appName || 'ITDV App'` at line 45, and `'ITDV App'`
   again at lines 63, 84 and 114
@@ -42,42 +34,33 @@ into it:
 
 That last line picks a Podcast Index feed ID by string-comparing against one
 album's URL, with a different hardcoded ID as the fallback for **every other
-feed in existence**. Copied into another site, it silently attributes every
+feed in existence**. Copied into another app, it silently attributes every
 boost to one of two DoerfelVerse feeds.
 
-## What the out-of-scope implementations do better
+## What any replacement has to get right
 
-Recorded because these are the properties any future implementation needs.
+Recorded because these are the properties that make split arithmetic safe, and
+the shipped code does not have them.
 
-`libre-listener`'s version **refuses malformed split input instead of
-mis-paying**, and names both failures it prevents:
+**Reject malformed input rather than mis-paying.** A total share of zero makes
+`Math.floor(amount * share / 0)` produce `NaN` for every recipient. A negative
+share makes the last recipient's `amount - allocated` **over-pay** — with
+shares `[-1, 2]`, destination B receives twice the boost. Both values arrive in
+a `<podcast:value>` block, which is to say from someone else's feed, which is
+to say you do not control them.
 
-- a total share of zero makes `Math.floor(amount * share / 0)` produce `NaN`
-  for every recipient
-- a negative share makes the last recipient's `amount - allocated`
-  **over-pay** — with shares `[-1, 2]`, destination B receives twice the boost
+**Send the remainder to the last recipient.** Every recipient but the last
+gets `floor(amount * share / total)`; integer division otherwise loses sats on
+most three-way splits.
 
-Both inputs come from a `<podcast:value>` block, which is to say from someone
-else's feed, which is to say you do not control them.
-
-It also sends the **remainder to the last recipient** — every recipient but
-the last gets `floor(amount * share / total)` — because integer division
-otherwise loses sats on most three-way splits. And it uses one `boost_uuid`
-across the splits with a separate `uuid` per payment, which is what lets a
-receiver reassemble the parts of one boost, and what `helipad` keys on.
-
-`lnaddress-music` is the only one that names the TLV types as constants
-(`PODCAST_BOOST 7629169`, `TIP_NOTE 7629171`, `SPHINX_COMPAT 133773310`) and
-separates TLV construction from payment code. It also re-implements the split
-arithmetic three times inside its own `utils/payment-utils.ts`.
+**One `boost_uuid` across the splits, a separate `uuid` per payment.** That is
+what lets a receiver reassemble the parts of one boost into a single
+boostagram rather than showing several unrelated payments.
 
 ## Known gaps
 
-- **No split/TLV code ships at all.** The safest arithmetic is out of scope,
-  and the only production copy is branded and private.
-- Any future extraction needs the zero-total guard, the negative-share guard
-  and remainder-to-last. Absent those, malformed feed data becomes
-  mis-directed money.
-- There is **no TypeScript boostagram parser anywhere** in these repos. The
-  decoder half exists only in `helipad`'s `src/boost.rs`, in Rust, so no site
-  can read an inbound boostagram it did not send.
+- **No split/TLV code ships at all**, so no recipe can offer boosting.
+- The only production implementation is branded and private.
+- **No site can read an inbound boostagram it did not send.** Every
+  implementation here is an encoder; nothing on the decoding side exists in
+  any of these codebases.
