@@ -7,6 +7,7 @@ import {
   type Event,
   type EventTemplate
 } from 'nostr-tools';
+import { safeLocalStorage } from '@/lib/safe-storage';
 
 export interface NWCConnection {
   relay: string;
@@ -40,53 +41,9 @@ export class NWCService {
   private lastConnectionAttempt: number = 0;
   private isCashuWallet: boolean = false;
   private connectionCache: Map<string, { connection: NWCConnection, timestamp: number }> = new Map();
-  private keepaliveInterval: NodeJS.Timeout | null = null;
-  private subscriptions: Map<string, any> = new Map();
 
   constructor() {
     this.pool = new SimplePool();
-  }
-
-  /**
-   * Start WebSocket keepalive to maintain persistent relay connections
-   */
-  private startKeepalive() {
-    // Clear existing keepalive
-    if (this.keepaliveInterval) {
-      clearInterval(this.keepaliveInterval);
-    }
-
-    // Send a lightweight ping every 30 seconds to keep connection alive
-    this.keepaliveInterval = setInterval(() => {
-      if (this.connection && this.relays.length > 0) {
-        console.log('🏓 Sending keepalive ping to maintain relay connection');
-        // Subscribe to a dummy filter to keep connection active
-        // This doesn't actually fetch anything, just keeps the WebSocket alive
-        const sub = this.pool.subscribeMany(
-          this.relays,
-          { kinds: [1], limit: 0, since: Math.floor(Date.now() / 1000) },
-          {
-            onevent() {}, // No-op
-            oneose() {
-              sub.close();
-            }
-          }
-        );
-      }
-    }, 30000); // Every 30 seconds
-
-    console.log('✅ WebSocket keepalive started');
-  }
-
-  /**
-   * Stop WebSocket keepalive
-   */
-  private stopKeepalive() {
-    if (this.keepaliveInterval) {
-      clearInterval(this.keepaliveInterval);
-      this.keepaliveInterval = null;
-      console.log('🛑 WebSocket keepalive stopped');
-    }
   }
 
   /**
@@ -220,18 +177,14 @@ export class NWCService {
       }
       
       console.log('✅ Connected to NWC wallet:', info);
-
-      // Start WebSocket keepalive to maintain connection
-      this.startKeepalive();
-
+      
       // Store the connection string for future use
-      if (typeof window !== 'undefined' && window.localStorage) {
-        window.localStorage.setItem('nwc_connection_string', connectionString);
+      if (typeof window !== 'undefined') {
+        safeLocalStorage.setItem('nwc_connection_string', connectionString);
       }
     } catch (error) {
       this.connection = null;
       this.relays = [];
-      this.stopKeepalive();
       console.error('❌ Connection failed:', error);
       throw error;
     }
@@ -241,7 +194,6 @@ export class NWCService {
    * Disconnect from wallet
    */
   disconnect(): void {
-    this.stopKeepalive();
     this.connection = null;
     this.relays = [];
     this.isCashuWallet = false;
@@ -322,12 +274,14 @@ export class NWCService {
       
       const sub = this.pool.subscribeMany(
         this.relays,
-        {
-          kinds: [23195], // NWC response kind
-          authors: [this.connection!.walletPubkey],
-          '#e': [requestEvent.id],
-          since: requestEvent.created_at - 60 // Look back 60 seconds in case of timing issues
-        },
+        [
+          {
+            kinds: [23195], // NWC response kind
+            authors: [this.connection!.walletPubkey],
+            '#e': [requestEvent.id],
+            since: requestEvent.created_at - 60 // Look back 60 seconds in case of timing issues
+          }
+        ],
         {
           onevent: (event) => {
             if (!responseReceived) {

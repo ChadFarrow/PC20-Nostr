@@ -1,150 +1,115 @@
-# Feature catalog
+# Catalog
 
-Canonical implementations of the features that appear in more than one of
-ChadFarrow's sites, with the code beside the prose.
+Working features from ChadFarrow's Podcasting 2.0 sites, packaged so someone
+else can add them to their own app.
 
-This exists because the sites are not independent codebases. They are a
-handful of codebases forked repeatedly, and the copies no longer agree. When
-you ask "how do we resolve a Lightning address?", there are four answers in
-four repos and three of them are missing something. This directory records
-which one is right and what the others are missing.
-
-Read [Overlap](#overlap) for the map, then the feature doc for whatever
-you're about to touch.
-
-## How to use a catalog entry
-
-Each feature is a pair: a `.md` explaining it, and the extracted source file
-beside it. The `.md` is what you read. The `.ts` is byte-identical to the
-repo it came from — no header was added, no import was rewritten — so
-adopting it into a site is a copy, and checking it for drift is a `diff`.
-
-`PROVENANCE.tsv` records the repo, ref, commit and path every file was taken
-from. `./check-drift.sh` reads that manifest and tells you whether any
-extracted file has been edited here or moved upstream.
+**If you saw something on one of these sites and want it, go to
+[`recipes/`](recipes/).** Everything else here explains where that code came
+from and what it is missing.
 
 ```
-./check-drift.sh          # all catalog files current
+recipes/      ← start here. One directory per feature, with install steps
+modules/      shared source that recipes build on
+comparisons/  where a feature is implemented more than once, which one won
+analysis/     the scripts behind every number in these pages
 ```
 
-## Extracted code must compile on its own
+## The sites
 
-A file only lands here if it typechecks under `strict` with nothing but its
-**external** packages available. That is the whole admission test: a file
-that needs an app-internal import is not a shared piece yet, it is a piece of
-one app, and copying it into a second app drags the app along with it.
+Every line of code here comes from one of these, and every URL was checked
+over HTTP rather than taken from a README:
 
-Files that fail the test are still documented — the doc cites them in place
-and says what couples them. `MSP-2.0/src/utils/xmlParser.ts` is the clearest
-case: it is the best feed parser in any of these repos and the only one with
-real tests, and it imports five sibling modules, so it is cited and not
-extracted.
-
-Current state: all 8 extracted files typecheck clean under `strict: true`
-with only `bech32`, `nostr-tools` and `@types/node` installed.
-
-## Overlap
-
-### The sites are six codebases, not thirty-five
-
-Established from shared git objects, not from names:
-
-| Pair | Shared commits | What it means |
+| Site | URL | Repo |
 |---|---|---|
-| `stablekraft-app` ↔ `StableKraft-Nostr-Fix` | 2971 | The same repo. Both begin at `9a9375d3` (2025-07-21) and split at `76ed7512` (2026-04-14). The Fix is a stale snapshot; don't mine it. |
-| `MSP-2.0` ↔ `MSP-2.0-Desktop-App` | 500 of 501 | Desktop is downstream **and ahead**. Check Desktop before treating MSP-2.0 as canonical. |
-| `ITDV-Lightning` ↔ `lnaddress-music` | 193 | A true fork. Identical first commit, "Initial commit - ITDV Lightning" (2025-09-06). |
-| `TRM-Lightning`, `NMNU` | 0 | **Not** forks of each other — siblings. TRM's first commit is literally "Initial commit: RSS Music Site Template". |
-| `podroll-atlas` ↔ `music-atlas` | squashed | `music-atlas` is the fork; `index.html` differs by 47 lines. |
+| DoerfelVerse | <https://itdv.podtards.com> | `ITDV-Lightning` |
+| Boost Me Bitch | <https://boostmebitch.com> | `boostmebitch` |
+| Project StableKraft | <https://stablekraft.app> | `stablekraft-app` |
+| MSP 2.0 | <https://musicsideproject.com> | `MSP-2.0` |
+| Chad and Reeds Podcast | <https://candr.space> | `candr.space` |
 
-On GitHub, `HPM-Lightning`, `ITDV-Site` and `RSS-music-site-template` all
-carry the same package version `1.2a587df`, and `ITDV-Lightning`'s
-package.json is *named* `hpm-lightning`.
+Related, GitHub-only:
+[`boostbox`](https://github.com/ChadFarrow/boostbox), a self-hosted
+Podcasting 2.0 boost-metadata service, and
+[`lnurl-test-feed`](https://github.com/ChadFarrow/lnurl-test-feed).
 
-### How far the copies have drifted
+**Only live sites are sources.** Code that has never served real traffic does
+not go in a recipe, because the whole promise of a recipe is that the thing
+already works somewhere. `check-recipes.sh` enforces this against an explicit
+allowlist — it was written after code from an unreleased prototype reached the
+catalog by mistake.
 
-Hashing every non-vendored `.ts`/`.tsx` of 2 KB or more:
+## What these sites do and don't share
 
-- **26 files are byte-identical across 3 or more repos.** `lib/logger.ts`,
-  `lib/monitoring.ts`, `lib/error-utils.ts` and `components/ErrorBoundary.tsx`
-  are the same bytes in all six of ITDV-Lightning, NMNU, StableKraft-Nostr-Fix,
-  TRM-Lightning, lnaddress-music and stablekraft-app.
-- **65 files sit at the same path in 3 or more repos and have diverged.**
+They are five independent codebases: **no two of them share any git history
+at all.**
 
-The diverged ones are the expensive half. Six repos carry six different
-versions of `contexts/AudioContext.tsx` (4884 / 3701 / 417 lines),
-`components/AlbumCard.tsx`, `components/NowPlayingScreen.tsx`,
-`lib/url-utils.ts`, `app/api/proxy-image/route.ts` (466 / 421 / 97 lines) and
-`app/api/publishers/route.ts`. `hooks/useNWC.ts` is four repos and four
-versions; `lib/feed-parser.ts` is six repos and four versions.
+The overlap that does exist is between DoerfelVerse and Project StableKraft,
+and it is smaller than it looks. Across files of 2 KB or more:
 
-### Canonical picks
+| | |
+|---|---|
+| Byte-identical across 3+ sites | **0 files** |
+| Byte-identical across 2 sites | 6 — all DoerfelVerse ↔ StableKraft |
+| Same path in 2+ sites | 43, of which **37 have diverged** |
 
-Verified at `origin/HEAD`, not against a local checkout — see
-[Never read the local checkout](#never-read-the-local-checkout).
+All six identical files are plumbing — `lib/logger.ts`, `lib/error-utils.ts`,
+`lib/api-utils.ts`, `components/ErrorBoundary.tsx` and two admin routes —
+copied between projects rather than shared.
 
-| Feature | Canonical | Doc |
-|---|---|---|
-| WebLN client | identical in 4 repos | [webln-client.md](lightning/webln-client.md) |
-| NWC client | `lnaddress-music` | [nwc-client.md](lightning/nwc-client.md) |
-| LNURL-pay | `lnaddress-music` | [lnurl-pay.md](lightning/lnurl-pay.md) |
-| Boostagram TLV | `libre-listener-wallet-monorepo` | [boostagram-tlv.md](lightning/boostagram-tlv.md) |
-| Zap receipts | identical in 4 repos | [zap-receipts.md](lightning/zap-receipts.md) |
-| Trustworthy relay read | `boostmebitch` | [trustworthy-read.md](nostr/trustworthy-read.md) |
-| Kind 10333 favorites | `boostmebitch` | [favorites-10333.md](nostr/favorites-10333.md) |
-| Podcast Index auth | `MSP-2.0` | [podcast-index-auth.md](rss-pc20/podcast-index-auth.md) |
-| RSS feed parsing | `MSP-2.0-Desktop-App` (cited, not extracted) | [feed-parsing.md](rss-pc20/feed-parsing.md) |
+And the 34 shared-but-diverged files have drifted a long way: only **13.6% of
+that surface is still common**. `contexts/AudioContext.tsx` is 2.1% the same
+at 610 versus 3,166 lines. A few utilities barely moved —
+`lib/hooks/useImageLoader.ts` is 99.3% identical, `lib/feed-parser.ts` 95.6% —
+but the features themselves are separate implementations now.
 
-### Not covered yet
+So this is not a de-duplication project, and consolidating these sites is not
+what it is for. It is a way to hand one working feature to someone who wants
+it. Reproduce any of the above with [`analysis/`](analysis/).
 
-The app shell and player are the most duplicated code in the whole set and
-none of it is here. `AudioContext.tsx` at 4884 lines is not extractable
-without being broken up first, and breaking it up is a change to an
-implementation repo, which this repo does not make.
-
-RSS feed *parsing* is documented but not extracted, for the same reason —
-every parser in every repo imports its own app's siblings.
-
-## Never read the local checkout
-
-Every canonical pick in this directory was read through `origin/HEAD`. That
-is not fussiness. When this catalog was built, **9 of 15 clones under
-`~/Vibe` were behind their remote** — including both kind-10333
-implementations. `TRM-Lightning` was 19 commits behind. `MSP-2.0` and
-`Helipad-to-Nostr-BoostBot` were not even on their default branch.
-
-So a canonical pick made by reading `~/Vibe/<repo>/lib/thing.ts` is a pick
-made from whatever happened to be checked out, and it will be wrong roughly
-half the time.
+## What the checkers enforce
 
 ```bash
-git -C ~/Vibe/<repo> fetch origin --quiet
+./check-drift.sh              # has any extracted file drifted from its source?
+./check-recipes.sh            # are the recipes safe to hand a stranger?
+./check-recipes.sh --network  # ...and does every "seen on" link still answer?
+```
+
+**Extracted code is byte-identical to its source.** No added header, no
+reformatting, no rewritten import. Provenance lives in `PROVENANCE.tsv`, so
+adopting a file is a copy and checking it is a `diff`. The moment a file is
+reshaped for extraction it stops being the thing real traffic tested.
+
+**A file only ships if it compiles alone**, under `strict`, with nothing but
+its external packages. A file needing an app-internal import is not portable
+yet — either ship what it imports too, or document it in place, as
+[`comparisons/feed-parsing.md`](comparisons/feed-parsing.md) does for the RSS
+parsers.
+
+**A recipe ships its whole import closure.** `analysis/feature.py` computes
+it; a missing file is the difference between "just add it" and an import
+error in someone else's repo.
+
+**Read `origin/HEAD`, never the local checkout.** When this was built, 9 of 15
+local clones were behind their remote and two were not on their default
+branch. A pick made from a working tree is a pick from whatever happened to be
+checked out.
+
+```bash
+git -C ~/Vibe/<repo> fetch origin --quiet    # touches .git/refs only
 git -C ~/Vibe/<repo> show origin/HEAD:<path>
-git -C ~/Vibe/<repo> rev-parse --short origin/HEAD
 ```
 
-`fetch` writes only to `.git/refs` and never touches the working tree, which
-keeps this inside the rule that implementation repos are read-only.
+Never `git pull` in one of those repos — a pull rewrites the working tree, and
+at least one of them is carrying thousands of uncommitted files.
 
-**Do not `git pull` in one of these repos to "get current".** A pull rewrites
-the working tree. `musicL-playlist-updater` has thousands of uncommitted
-files sitting in it; a pull there destroys work that exists nowhere else.
+## Not covered
 
-## A row without a commit SHA is unverified
+The player and app shell are not here. `contexts/AudioContext.tsx` is 3,166
+lines in StableKraft and the now-playing bar closes at 20 files and 7,438
+lines; a recipe claiming those are installable would waste more of your time
+than no recipe.
 
-Say so, in the row. A stale example is worse than no example, because it will
-be trusted and it will be wrong. The SHA is what makes the claim checkable a
-month from now:
-
-```bash
-git -C ~/Vibe/<repo> diff <sha> origin/HEAD -- <path>
-```
-
-Empty output means the doc still describes the code.
-
-## Name the app
-
-Do not write "the sites do X". With six forks in play that sentence is wrong
-more often than it is right — the whole reason this directory exists is that
-they *don't* do the same thing. Name the app, say what that app does, and
-say what the difference costs.
+RSS parsing is compared but not shipped — every parser imports its own app's
+siblings. No split/TLV code ships either: the only implementation keeps its
+TLV construction private and hardcodes an app name and two feed IDs. See
+[`comparisons/boostagram-tlv.md`](comparisons/boostagram-tlv.md).

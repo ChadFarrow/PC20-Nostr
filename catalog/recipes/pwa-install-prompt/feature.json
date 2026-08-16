@@ -1,0 +1,43 @@
+{
+  "name": "pwa-install-prompt",
+  "tier": "drop-in",
+  "summary": "An install-as-app banner handling Android's beforeinstallprompt and iOS Safari's Add-to-Home-Screen instructions separately, with session-scoped dismissal.",
+  "live_at": "https://itdv.podtards.com",
+  "live_title": "DoerfelVerse - Music & Podcast Hub",
+  "source": {
+    "repo": "ITDV-Lightning",
+    "ref": "origin/main",
+    "sha": "4bc69b2",
+    "paths": ["components/PWAInstallPrompt.tsx", "lib/safe-storage.ts"]
+  },
+  "files": [
+    { "from": "files/PWAInstallPrompt.tsx", "to": "components/PWAInstallPrompt.tsx" },
+    { "from": "files/safe-storage.ts", "to": "lib/safe-storage.ts" }
+  ],
+  "dependencies": {},
+  "peer": {
+    "react": ">=18",
+    "next": ">=14 (App Router)",
+    "tailwindcss": "assumed for styling; functional without it"
+  },
+  "env": [],
+  "rename": [
+    {
+      "file": "files/PWAInstallPrompt.tsx",
+      "line": 106,
+      "current": "Install DoerfelVerse",
+      "why": "iOS branch heading. Rename to your app."
+    },
+    {
+      "file": "files/PWAInstallPrompt.tsx",
+      "line": 145,
+      "current": "Install DoerfelVerse",
+      "why": "Android branch heading. Separate markup, so renaming only one leaves the other wrong on the platform you did not test."
+    }
+  ],
+  "caveats": [
+    "Requires a web app manifest with icons and a registered service worker. Without them beforeinstallprompt never fires and the banner silently never appears.",
+    "Dismissal is sessionStorage-scoped and returns on a new tab. Move the key to safeLocalStorage to persist it.",
+    "Render it once, in the root layout."
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "name": "pc20-feed-validator",
+  "tier": "drop-in",
+  "summary": "A page that checks a podcast RSS feed against twenty Podcasting 2.0 namespace tags and reports what is present, missing or malformed.",
+  "live_at": "https://itdv.podtards.com/feed-validator",
+  "live_title": "DoerfelVerse - Music & Podcast Hub",
+  "source": {
+    "repo": "ITDV-Lightning",
+    "ref": "origin/main",
+    "sha": "4bc69b2",
+    "paths": ["app/feed-validator/page.tsx"]
+  },
+  "files": [
+    { "from": "files/page.tsx", "to": "app/feed-validator/page.tsx" }
+  ],
+  "dependencies": {},
+  "peer": {
+    "react": ">=18",
+    "next": ">=14 (App Router)"
+  },
+  "env": [],
+  "rename": [],
+  "caveats": [
+    "Client-side fetch, so feeds without permissive CORS headers fail with a network error. Route through a guarded server proxy if you need those; see the image-proxy recipe's proxy-guard.ts.",
+    "Validates tag presence and shape, not correctness. A well-formed but wrong podcast:guid passes."
+  ]
+}

@@ -11,18 +11,33 @@ A **reference repo with two halves**, neither of which is an application.
    Nostr, as a single replaceable event at kind 10333. The audience is an
    implementer of a *third* app who has only this document. This half is
    **prose only**; there is nothing to build, lint or test in it.
-2. **The catalog.** `catalog/` — canonical implementations of features that
-   appear in more than one of ChadFarrow's sites, each a `.md` explaining
-   the feature next to the extracted source file. See
-   `catalog/README.md`.
+2. **The catalog.** `catalog/` — working features from ChadFarrow's
+   Podcasting 2.0 sites, packaged so someone else can add them to their own
+   app. Four parts: `recipes/` (the front door), `modules/` (shared source),
+   `comparisons/` (why each shipped copy won), `analysis/` (the scripts
+   behind every number). See `catalog/README.md`.
 
-The catalog exists because the sites are a handful of codebases forked
-repeatedly: 26 files are byte-identical across 3+ repos and 65 more sit at
-the same path in 3+ repos and have diverged. It records which copy is
-canonical and what each other one is missing.
+The catalog's purpose is to hand one working feature to someone who wants it.
+It is **not** a de-duplication project: the five sites share no git history,
+and the only real overlap — DoerfelVerse and Project StableKraft — is 6
+copy-pasted infrastructure files plus 34 more that have drifted to 13.6%
+common.
 
 ### Rules that apply to the catalog only
 
+- **Write recipes for a stranger's coding agent, not for Chad.** The reader
+  is working in a codebase nobody here has seen, adding one feature they saw
+  on a site. They do not care which fork is canonical. They need the files,
+  the dependencies, the renames, and what breaks if they skip a step. Save
+  the comparison for `comparisons/`.
+- **Ship code only from a live site.** The allowlist is `ALLOWED` in
+  `catalog/check-recipes.sh`: `ITDV-Lightning`, `boostmebitch`,
+  `stablekraft-app`, `MSP-2.0`, `candr.space`. Anything else — unreleased
+  prototypes, template clones, third-party forks — is out of scope as a
+  source and should not be named in these pages either. A recipe promises the
+  feature already works somewhere; code that never served traffic cannot make
+  that promise. The rule is written down because code from an unreleased
+  prototype reached the catalog before it was.
 - **Extracted files are byte-identical to their source.** No provenance
   header, no reformatting, no rewritten import. Provenance lives in
   `catalog/PROVENANCE.tsv`, so adopting a file into a site is a copy and
@@ -30,10 +45,24 @@ canonical and what each other one is missing.
   breaks both.
 - **A file only lands here if it typechecks under `strict` with nothing but
   its external packages.** A file needing an app-internal import is not a
-  shared piece yet — document it in place and say what couples it, as
-  `catalog/rss-pc20/feed-parsing.md` does.
-- **Run `catalog/check-drift.sh` before trusting an entry**, and after
-  adding one.
+  shared piece yet — either ship what it imports too, or document it in
+  place and say what couples it, as `catalog/comparisons/feed-parsing.md`
+  does.
+- **A recipe ships the whole import closure.** Run
+  `catalog/analysis/feature.py` and compare against `files/`. A missing file
+  is the difference between "just add it" and an import error in someone
+  else's repo.
+- **Never ship a secret in a `NEXT_PUBLIC_` variable.** Those are bundled
+  into public JavaScript. Three of the sites read
+  `NEXT_PUBLIC_SITE_NOSTR_NSEC`, which puts a Nostr private key in the
+  browser bundle; `ITDV-Lightning` ships only the npub and signs server-side.
+  Recipes take that variant.
+- **Verify a URL before citing it.** `re.podtards.com` appears in
+  `ITDV-Lightning/.env.example` and does not resolve; `msp.podtards.com` is
+  MSP 2.0's address from before `musicsideproject.com`. A dead "see it
+  working here" link discredits everything else on the page.
+- **Run both checkers** before trusting or adding an entry:
+  `catalog/check-drift.sh` and `catalog/check-recipes.sh --network`.
 
 ## The spec is ahead of its implementations, and there are now two
 
@@ -67,28 +96,28 @@ rewritten back and forth in production.
 
 ## The implementation repos are read-only
 
-Every repo under `~/Vibe` other than this one — `boostmebitch`,
-`stablekraft-app`, the Lightning sites, the MSP pair, all of them — is a
-source to read, never a target to change: no edits, no commits, no branches,
+Every repo under `~/Vibe` other than this one — `ITDV-Lightning`,
+`boostmebitch`, `stablekraft-app`, `MSP-2.0`, `candr.space` and the rest — is
+a source to read, never a target to change: no edits, no commits, no branches,
 no PRs, no "while I'm in here" fixes. Read them as much as a claim requires —
 that is how one gets verified — but what comes back lands here, as spec text,
 a catalog entry or a known-gap note, never as a patch over there.
 
-**Never `git pull` in one.** A pull rewrites the working tree.
-`musicL-playlist-updater` has thousands of uncommitted files sitting in it,
-and a pull there destroys work that exists nowhere else.
+**Never `git pull` in one.** A pull rewrites the working tree, and at least
+one repo under `~/Vibe` is carrying thousands of uncommitted files that exist
+nowhere else.
 
 ## Read `origin/HEAD`, never the local checkout
 
 The clones under `~/Vibe` are not current. When the catalog was built, **9 of
-15 were behind their remote** — `TRM-Lightning` by 19 commits, both kind-10333
-implementations by 2 and 3 — and `MSP-2.0` and `Helipad-to-Nostr-BoostBot`
-were sitting on feature branches rather than their default branch.
+15 were behind their remote** — one by 19 commits, both kind-10333
+implementations by 2 and 3 — and two were sitting on feature branches rather
+than their default branch.
 
 So a claim verified by reading `~/Vibe/<repo>/lib/thing.ts` is a claim about
 whatever happened to be checked out, and it will be wrong about half the time.
 This is not hypothetical: the first draft of
-`catalog/nostr/favorites-10333.md` reported four bugs in stablekraft's merge
+`catalog/comparisons/favorites-10333.md` reported four bugs in stablekraft's merge
 that had already been fixed upstream.
 
 ```bash

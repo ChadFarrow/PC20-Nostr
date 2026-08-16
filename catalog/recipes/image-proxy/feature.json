@@ -1,0 +1,40 @@
+{
+  "name": "image-proxy",
+  "tier": "drop-in",
+  "summary": "A Next.js route that proxies remote podcast artwork from your own origin, with an SSRF guard that rejects private-network and non-HTTPS targets.",
+  "live_at": "https://itdv.podtards.com",
+  "live_title": "DoerfelVerse - Music & Podcast Hub",
+  "source": {
+    "repo": "ITDV-Lightning",
+    "ref": "origin/main",
+    "sha": "4bc69b2",
+    "paths": ["app/api/proxy-image/route.ts", "lib/proxy-guard.ts"]
+  },
+  "files": [
+    { "from": "files/route.ts", "to": "app/api/proxy-image/route.ts" },
+    { "from": "files/proxy-guard.ts", "to": "lib/proxy-guard.ts" }
+  ],
+  "dependencies": {},
+  "peer": {
+    "next": ">=14 (App Router)"
+  },
+  "env": [],
+  "rename": [
+    {
+      "file": "files/route.ts",
+      "line": 33,
+      "current": "Mozilla/5.0 (compatible; PodtardsImageProxy/1.0)",
+      "why": "Identifies your traffic to every image host as Podtards."
+    },
+    {
+      "file": "files/route.ts",
+      "line": 147,
+      "current": "re.podtards.com",
+      "why": "X-Image-Proxy response header naming a host that no longer resolves. Replace with your host or delete the header."
+    }
+  ],
+  "caveats": [
+    "Do not relax the HTTPS-only check in proxy-guard.ts to support HTTP artwork; it blocks a class of redirect-to-internal-host attack.",
+    "No caching layer. Put a CDN or Cache-Control in front before serving real traffic."
+  ]
+}
