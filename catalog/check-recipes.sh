@@ -151,13 +151,33 @@ for name in $DENIED; do
 $(echo "$hits" | sed 's|^|        |')"
 done
 
+echo "== 8. every live_at is a plain http(s) URL"
+# Checked even without --network, because the value is about to be handed to
+# curl. curl parses options at ANY argument position, so a live_at beginning
+# with "-" is read as a flag rather than a URL. `-Kfile` makes curl read an
+# attacker-supplied config whose `output =` directives write arbitrary files —
+# a recipe added by a pull request could overwrite a maintainer's dotfiles the
+# moment they ran this script. Reject the value here, and pass it safely below.
+for d in "$HERE"/recipes/*/; do
+  [ -f "$d/feature.json" ] || continue
+  url=$(python3 -c "import json,sys;print(json.load(open(sys.argv[1])).get('live_at',''))" "$d/feature.json")
+  [ -n "$url" ] || continue
+  case "$url" in
+    http://*|https://*) ;;
+    *) note "$(basename "$d") has a live_at that is not an http(s) URL: $url" ;;
+  esac
+done
+
 if [ "$NET" = "1" ]; then
-  echo "== 8. every live_at still answers"
+  echo "== 9. every live_at still answers"
   for d in "$HERE"/recipes/*/; do
     [ -f "$d/feature.json" ] || continue
     url=$(python3 -c "import json,sys;print(json.load(open(sys.argv[1])).get('live_at',''))" "$d/feature.json")
     [ -n "$url" ] || continue
-    code=$(curl -s -o /dev/null -w '%{http_code}' -m 12 -L "$url")
+    case "$url" in http://*|https://*) ;; *) continue ;; esac
+    # --proto pins the schemes curl will follow (including across redirects);
+    # -- ends option parsing so the URL can never be read as a flag.
+    code=$(curl -s -o /dev/null -w '%{http_code}' -m 12 -L --proto '=http,https' -- "$url")
     [ "$code" = "200" ] || note "$(basename "$d") live_at $url returned $code"
   done
 fi

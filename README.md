@@ -14,7 +14,6 @@ dependencies, where each file goes, and which constants you must rename.
 | Recipe | Files | Install | Seen on |
 |---|---|---|---|
 | [Podcasting 2.0 feed validator](catalog/recipes/pc20-feed-validator/) | 1 | nothing | [itdv.podtards.com/feed-validator](https://itdv.podtards.com/feed-validator) |
-| [Image proxy with SSRF guard](catalog/recipes/image-proxy/) | 2 | nothing | [itdv.podtards.com](https://itdv.podtards.com) |
 | [PWA install prompt](catalog/recipes/pwa-install-prompt/) | 2 | nothing | [itdv.podtards.com](https://itdv.podtards.com) |
 
 The sites: [DoerfelVerse](https://itdv.podtards.com),

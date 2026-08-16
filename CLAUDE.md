@@ -70,6 +70,15 @@ common.
   for `NSEC` alone would have missed it. Check the whole
   `NEXT_PUBLIC_*` surface for anything key-shaped, which is what
   `catalog/check-recipes.sh` does for recipes.
+- **A recipe's security claims must be verified before it ships.** The image
+  proxy was published with a README stating its guard "rejects non-HTTPS
+  targets, private IPv4 and IPv6, localhost and `.internal`". A later review
+  found three bypasses — redirects were followed unchecked, `::ffff:` hosts
+  defeated the IPv6 test because Node normalises them to hex before the regex
+  sees them, and hostnames were never resolved at all. The recipe was
+  withdrawn. If a recipe's value proposition is safety, prove the claim
+  against the code before writing it down; a stranger's agent copies `files/`
+  and may never read the paragraph next to them.
 - **Verify a URL before citing it.** `re.podtards.com` appears in
   `ITDV-Lightning/.env.example` and does not resolve; `msp.podtards.com` is
   MSP 2.0's address from before `musicsideproject.com`. A dead "see it

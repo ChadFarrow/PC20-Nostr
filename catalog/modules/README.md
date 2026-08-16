@@ -11,6 +11,14 @@ whole working feature, start at [`../recipes/`](../recipes/).
 Each module's trade-offs — which copy won, and what the shipped copy is
 missing — are in [`../comparisons/`](../comparisons/).
 
+> **Read this before using the Lightning modules.** A security review of this
+> repo found three issues in them, one of which lets a hostile Lightning
+> address charge an arbitrary amount: the returned invoice is never decoded,
+> and the wallet pays what the invoice says. `verifyZapReceipt` also verifies
+> nothing, and wallet secret material reaches the console. Exploit paths and a
+> paste-ready fix:
+> [`../comparisons/lightning-payment-safety.md`](../comparisons/lightning-payment-safety.md).
+
 ## What's here
 
 | Module | Lines | External imports | From |

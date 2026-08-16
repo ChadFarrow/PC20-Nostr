@@ -45,10 +45,15 @@ Most podcast hosts do send permissive CORS headers, which is why this works
 at all as a client-only page. When one doesn't, route the fetch through a
 server-side proxy. Do **not** write that proxy as a bare `fetch(req.query.url)`
 — that is a server-side request forgery hole, and someone will point it at
-your cloud metadata endpoint. The [image proxy
-recipe](../image-proxy/) ships `proxy-guard.ts`, which is the
-guard you want: HTTPS-only, and it rejects private IPv4 and IPv6 ranges,
-`localhost`, and `.internal` hostnames.
+your cloud metadata endpoint.
+
+Getting that guard right is harder than it looks: resolve the hostname and
+reject the resolved address, pin the connection to the address you checked,
+refuse to follow redirects without re-validating them, and parse IPv6
+numerically rather than by string prefix.
+[`../../comparisons/image-proxy-ssrf.md`](../../comparisons/image-proxy-ssrf.md)
+documents three bypasses found in a guard that looked correct, which is worth
+reading before writing your own.
 
 **It validates presence and shape, not truth.** A `podcast:guid` that is
 well-formed but wrong still passes, and so does a `podcast:value` block

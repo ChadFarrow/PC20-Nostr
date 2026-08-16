@@ -102,6 +102,20 @@ git -C ~/Vibe/<repo> show origin/HEAD:<path>
 Never `git pull` in one of those repos — a pull rewrites the working tree, and
 at least one of them is carrying thousands of uncommitted files.
 
+## Security review
+
+A review of everything this repo ships found three SSRF bypasses in the image
+proxy — which was **withdrawn** as a result — and three issues in the Lightning
+modules, one of which can cost real money. Both are written up:
+
+- [`comparisons/image-proxy-ssrf.md`](comparisons/image-proxy-ssrf.md)
+- [`comparisons/lightning-payment-safety.md`](comparisons/lightning-payment-safety.md)
+
+Clean: no secrets in this repo's history, no advisories on the dependency
+versions the docs recommend, and `read-trust.ts`, `favorites-list.ts`,
+`podcast-index-auth.ts`, the feed validator and the PWA prompt all came back
+with nothing.
+
 ## Not covered
 
 The player and app shell are not here. `contexts/AudioContext.tsx` is 3,166
