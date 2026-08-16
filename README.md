@@ -22,6 +22,27 @@ The sites: [DoerfelVerse](https://itdv.podtards.com),
 [MSP 2.0](https://musicsideproject.com),
 [Chad and Reeds Podcast](https://candr.space).
 
+Beside the recipes, [`catalog/`](catalog/) also holds
+[`modules/`](catalog/modules/) (shared source the recipes build on),
+[`comparisons/`](catalog/comparisons/) (where a feature exists more than once,
+which copy won) and [`analysis/`](catalog/analysis/) (the scripts behind every
+number in these pages).
+
+### Read this before copying anything
+
+A security review of everything here found three SSRF bypasses in an image
+proxy recipe, which was **withdrawn** as a result — the guard did not do what
+its README claimed. The Lightning modules are still published but carry a
+warning: one issue lets a hostile Lightning address charge an arbitrary
+amount, because the returned invoice is never decoded before it is paid.
+
+- [`comparisons/image-proxy-ssrf.md`](catalog/comparisons/image-proxy-ssrf.md)
+- [`comparisons/lightning-payment-safety.md`](catalog/comparisons/lightning-payment-safety.md)
+  — includes a paste-ready fix
+
+The two recipes above were reviewed and are clean. Run
+`./catalog/check-recipes.sh --network` to re-check what ships.
+
 ## [pc20-favorites.md](pc20-favorites.md) — the spec
 
 An app-neutral format for syncing a user's podcast and music favorites between
