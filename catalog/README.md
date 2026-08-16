@@ -109,7 +109,12 @@ lines in StableKraft and the now-playing bar closes at 20 files and 7,438
 lines; a recipe claiming those are installable would waste more of your time
 than no recipe.
 
-RSS parsing is compared but not shipped — every parser imports its own app's
-siblings. No split/TLV code ships either: the only implementation keeps its
+Signing as the site's own Nostr identity is compared but not shipped —
+both routes import their own app's services. The comparison is worth reading
+before you build one:
+[`comparisons/site-identity-signing.md`](comparisons/site-identity-signing.md).
+
+RSS parsing is compared but not shipped for the same reason — every parser
+imports its own app's siblings. No split/TLV code ships either: the only implementation keeps its
 TLV construction private and hardcodes an app name and two feed IDs. See
 [`comparisons/boostagram-tlv.md`](comparisons/boostagram-tlv.md).

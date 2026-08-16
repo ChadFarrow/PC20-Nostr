@@ -79,8 +79,13 @@ for d in "$HERE"/recipes/*/; do
 done
 
 echo "== 4. no recipe teaches a secret leak"
-if grep -rniE "NEXT_PUBLIC_[A-Z_]*(NSEC|SECRET|PRIVATE|_KEY)" "$HERE/recipes" 2>/dev/null; then
-  note "a recipe references a secret in a NEXT_PUBLIC_ variable (these are bundled and served publicly)"
+# Next.js inlines every NEXT_PUBLIC_* value into the browser bundle, so one
+# holding a key is served to everyone. Deliberately broader than NSEC: a live
+# site reads NEXT_PUBLIC_BOOSTBOX_API_KEY from a client component, and a
+# narrower pattern would have missed it.
+if grep -rniE "(NEXT_PUBLIC|VITE|REACT_APP)_[A-Z0-9_]*(NSEC|SECRET|PRIVATE|PRIVKEY|SEED|MNEMONIC|PASSWORD|TOKEN|API_?KEY)" \
+     "$HERE/recipes" 2>/dev/null; then
+  note "a recipe references a secret in a client-exposed variable (these are bundled and served publicly)"
 fi
 
 echo "== 5. every app-specific constant is documented in 'rename'"
