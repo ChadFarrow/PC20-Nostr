@@ -12,11 +12,11 @@ This page says which one to read and which to stop copying.
 
 | Repo | Path | Lines | State | Read at |
 |---|---|---|---|---|
-| `MSP-2.0-Desktop-App` | `src/utils/xmlParser.ts` | 935 | **canonical** | `f67c9b7` |
+| `MSP-2.0-Desktop-App` | `src/utils/xmlParser.ts` | 935 | **best to read** (not shipped) | `f67c9b7` |
 | `MSP-2.0` | `src/utils/xmlParser.ts` | 934 | one line behind Desktop | `c294548` |
 | `stablekraft-app` | `lib/rss-parser/index.ts` | 805 | diverged (split into 3 files) | `db2eb22f` |
 | `stablekraft-app` | `lib/rss-parser-db.ts` | 1594 | **a second, unrelated parser** | `db2eb22f` |
-| `NMNU` | `lib/rss-parser.ts` | 1423 | diverged (monolith ancestor) | `2b9a78f` |
+| `NMNU` *(test site)* | `lib/rss-parser.ts` | 1423 | diverged (monolith ancestor) | `2b9a78f` |
 | `ITDV-Lightning` | `lib/rss-parser.ts` | 1952 | diverged | `4bc69b2` |
 
 `lib/feed-parser.ts` is a *fourth* thing, present at 471–474 lines in

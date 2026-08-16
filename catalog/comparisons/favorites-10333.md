@@ -36,9 +36,9 @@ This is the concrete reason for the
 Two independently-maintained implementations of one spec generate stale
 cross-references faster than anyone updates them.
 
-## The canonical implementation
+## What ships
 
-[`favorites-list.ts`](favorites-list.ts) — zero imports, same discipline as
+[`favorites-list.ts`](../modules/nostr/favorites-list.ts) — zero imports, same discipline as
 `read-trust.ts`.
 
 ### Where the two now agree

@@ -11,18 +11,18 @@ to make about which copy is right.
 
 | Repo | Path | State | Read at |
 |---|---|---|---|
-| `ITDV-Lightning` | `lib/webln-service.ts` | **canonical** (arbitrary — all four identical) | `4bc69b2` |
-| `NMNU` | `lib/webln-service.ts` | identical copy, md5 `9737d315` | `2b9a78f` |
-| `TRM-Lightning` | `lib/webln-service.ts` | identical copy, md5 `9737d315` | `0a0fff8` |
-| `lnaddress-music` | `lib/webln-service.ts` | identical copy, md5 `9737d315` | `c16f68b` |
+| `ITDV-Lightning` | `lib/webln-service.ts` | **shipped** (arbitrary — all four identical) | `4bc69b2` |
+| `NMNU` *(test site)* | `lib/webln-service.ts` | identical copy, md5 `9737d315` | `2b9a78f` |
+| `TRM-Lightning` *(test site)* | `lib/webln-service.ts` | identical copy, md5 `9737d315` | `0a0fff8` |
+| `lnaddress-music` *(test site)* | `lib/webln-service.ts` | identical copy, md5 `9737d315` | `c16f68b` |
 | `stablekraft-app` | — | **absent** | `db2eb22f` |
 
 All four are md5 `9737d315a9d7fd3aaf555e07c1834ab8`, 177 lines, verified at
 `origin/HEAD` rather than in a local checkout.
 
-## The canonical implementation
+## What ships
 
-[`webln-service.ts`](webln-service.ts) — zero imports. It typechecks under
+[`webln-service.ts`](../modules/lightning/webln-service.ts) — zero imports. It typechecks under
 `strict` with nothing installed at all, which makes it the cheapest thing in
 here to adopt.
 

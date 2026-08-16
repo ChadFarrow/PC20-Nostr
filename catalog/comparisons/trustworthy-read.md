@@ -19,9 +19,9 @@ don't trust — needs a definition of "trust", and this is it.
 Two implementations, same reasoning, different code. Both cite the same two
 measured failures.
 
-## The canonical implementation
+## What ships
 
-[`read-trust.ts`](read-trust.ts) — **zero imports**, and deliberately so. A
+[`read-trust.ts`](../modules/nostr/read-trust.ts) — **zero imports**, and deliberately so. A
 plain-Node check script in that repo loads the module directly to pin the
 shipping rule, and any import at all — even a type-only one — would break
 that. A reimplemented copy in the check script would stay green while the

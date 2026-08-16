@@ -11,18 +11,30 @@ A **reference repo with two halves**, neither of which is an application.
    Nostr, as a single replaceable event at kind 10333. The audience is an
    implementer of a *third* app who has only this document. This half is
    **prose only**; there is nothing to build, lint or test in it.
-2. **The catalog.** `catalog/` — canonical implementations of features that
-   appear in more than one of ChadFarrow's sites, each a `.md` explaining
-   the feature next to the extracted source file. See
-   `catalog/README.md`.
+2. **The catalog.** `catalog/` — working features from ChadFarrow's
+   Podcasting 2.0 sites, packaged so someone else can add them to their own
+   app. Four parts: `recipes/` (the front door), `modules/` (shared source),
+   `comparisons/` (why each shipped copy won), `analysis/` (the scripts
+   behind every number). See `catalog/README.md`.
 
 The catalog exists because the sites are a handful of codebases forked
 repeatedly: 26 files are byte-identical across 3+ repos and 65 more sit at
-the same path in 3+ repos and have diverged. It records which copy is
-canonical and what each other one is missing.
+the same path in 3+ repos and have diverged.
 
 ### Rules that apply to the catalog only
 
+- **Write recipes for a stranger's coding agent, not for Chad.** The reader
+  is working in a codebase nobody here has seen, adding one feature they saw
+  on a site. They do not care which fork is canonical. They need the files,
+  the dependencies, the renames, and what breaks if they skip a step. Save
+  the comparison for `comparisons/`.
+- **Ship code only from a production site** — `ITDV-Lightning`,
+  `boostmebitch`, `stablekraft-app`, `MSP-2.0`, `candr.space`.
+  `TRM-Lightning`, `NMNU` and `lnaddress-music` are **test deployments**:
+  compare them freely, label them `*(test site)*`, never ship their code and
+  never call them canonical. Third-party forks are out of scope entirely.
+  This rule exists because three files were extracted from a test site
+  before it was written down.
 - **Extracted files are byte-identical to their source.** No provenance
   header, no reformatting, no rewritten import. Provenance lives in
   `catalog/PROVENANCE.tsv`, so adopting a file into a site is a copy and
@@ -30,10 +42,24 @@ canonical and what each other one is missing.
   breaks both.
 - **A file only lands here if it typechecks under `strict` with nothing but
   its external packages.** A file needing an app-internal import is not a
-  shared piece yet — document it in place and say what couples it, as
-  `catalog/rss-pc20/feed-parsing.md` does.
-- **Run `catalog/check-drift.sh` before trusting an entry**, and after
-  adding one.
+  shared piece yet — either ship what it imports too, or document it in
+  place and say what couples it, as `catalog/comparisons/feed-parsing.md`
+  does.
+- **A recipe ships the whole import closure.** Run
+  `catalog/analysis/feature.py` and compare against `files/`. A missing file
+  is the difference between "just add it" and an import error in someone
+  else's repo.
+- **Never ship a secret in a `NEXT_PUBLIC_` variable.** Those are bundled
+  into public JavaScript. Three of the sites read
+  `NEXT_PUBLIC_SITE_NOSTR_NSEC`, which puts a Nostr private key in the
+  browser bundle; `ITDV-Lightning` ships only the npub and signs server-side.
+  Recipes take that variant.
+- **Verify a URL before citing it.** `re.podtards.com` appears in
+  `ITDV-Lightning/.env.example` and does not resolve; `msp.podtards.com` is
+  MSP 2.0's address from before `musicsideproject.com`. A dead "see it
+  working here" link discredits everything else on the page.
+- **Run both checkers** before trusting or adding an entry:
+  `catalog/check-drift.sh` and `catalog/check-recipes.sh --network`.
 
 ## The spec is ahead of its implementations, and there are now two
 

@@ -12,14 +12,14 @@ these repos.
 | `MSP-2.0` | `api/_utils/podcastIndex.ts` | **canonical** | `c294548` |
 | `MSP-2.0-Desktop-App` | `api/_utils/podcastIndex.ts` | identical copy | `f67c9b7` |
 | `stablekraft-app` | `lib/podcast-index-api.ts` and 13 others | diverged, see below | `db2eb22f` |
-| `lnaddress-music` | `lib/podcast-index.ts` + 5 more | diverged | `c16f68b` |
+| `lnaddress-music` *(test site)* | `lib/podcast-index.ts` + 5 more | diverged | `c16f68b` |
 | `ITDV-Lightning` | `lib/podcast-index.ts` + 1 more | diverged | `4bc69b2` |
 | `HGH-checker` | `script.js` (browser WebCrypto) | diverged | `0cce561` |
-| `NMNU`, `TRM-Lightning` | — | absent | — |
+| `NMNU`, `TRM-Lightning` *(test sites)* | — | absent | — |
 
-## The canonical implementation
+## What ships
 
-[`podcast-index-auth.ts`](podcast-index-auth.ts) — 22 lines, one exported
+[`podcast-index-auth.ts`](../modules/rss-pc20/podcast-index-auth.ts) — 22 lines, one exported
 function, one import (`node:crypto`).
 
 It wins on being the smallest correct version with no app coupling. There is

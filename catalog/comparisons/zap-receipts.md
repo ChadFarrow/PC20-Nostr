@@ -10,17 +10,17 @@ Like the WebLN client, four repos ship the same bytes.
 
 | Repo | Path | State | Read at |
 |---|---|---|---|
-| `ITDV-Lightning` | `lib/zap-receipt-service.ts` | **canonical** (arbitrary — all four identical) | `4bc69b2` |
-| `NMNU` | `lib/zap-receipt-service.ts` | identical copy, md5 `6e0d7662` | `2b9a78f` |
-| `TRM-Lightning` | `lib/zap-receipt-service.ts` | identical copy, md5 `6e0d7662` | `0a0fff8` |
-| `lnaddress-music` | `lib/zap-receipt-service.ts` | identical copy, md5 `6e0d7662` | `c16f68b` |
+| `ITDV-Lightning` | `lib/zap-receipt-service.ts` | **shipped** (arbitrary — all four identical) | `4bc69b2` |
+| `NMNU` *(test site)* | `lib/zap-receipt-service.ts` | identical copy, md5 `6e0d7662` | `2b9a78f` |
+| `TRM-Lightning` *(test site)* | `lib/zap-receipt-service.ts` | identical copy, md5 `6e0d7662` | `0a0fff8` |
+| `lnaddress-music` *(test site)* | `lib/zap-receipt-service.ts` | identical copy, md5 `6e0d7662` | `c16f68b` |
 
 All four are md5 `6e0d7662bf7119a13e4933210f3c2dc8`, 407 lines, verified at
 `origin/HEAD`.
 
-## The canonical implementation
+## What ships
 
-[`zap-receipt-service.ts`](zap-receipt-service.ts) — one external import,
+[`zap-receipt-service.ts`](../modules/lightning/zap-receipt-service.ts) — one external import,
 `nostr-tools`.
 
 ## How each site diverges
