@@ -116,6 +116,19 @@ versions the docs recommend, and `read-trust.ts`, `favorites-list.ts`,
 `podcast-index-auth.ts`, the feed validator and the PWA prompt all came back
 with nothing.
 
+## What the sites could update
+
+The five sites share no git history, so a fix in one never reaches the others
+by itself. Two pages track what is owed:
+
+- [`comparisons/cross-site-updates.md`](comparisons/cross-site-updates.md) —
+  fixes one site has and another does not, most consequential first. The
+  headline: DoerfelVerse closed an arbitrary file read that Project
+  StableKraft still has, in the same route.
+- [`comparisons/dependency-drift.md`](comparisons/dependency-drift.md) —
+  version spread and advisories, including a caret range on DoerfelVerse that
+  permits eight `nostr-tools` releases, all of which break its build.
+
 ## Not covered
 
 The player and app shell are not here. `contexts/AudioContext.tsx` is 3,166
