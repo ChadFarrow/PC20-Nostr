@@ -7,7 +7,5 @@ modules/nostr/read-trust.ts	boostmebitch	origin/main	1f26ba0	lib/nostr/read-trus
 modules/nostr/favorites-list.ts	boostmebitch	origin/main	1f26ba0	lib/nostr/favorites-list.ts
 modules/rss-pc20/podcast-index-auth.ts	MSP-2.0	origin/master	c294548	api/_utils/podcastIndex.ts
 recipes/pc20-feed-validator/files/page.tsx	ITDV-Lightning	origin/main	4bc69b2	app/feed-validator/page.tsx
-recipes/image-proxy/files/route.ts	ITDV-Lightning	origin/main	4bc69b2	app/api/proxy-image/route.ts
 recipes/pwa-install-prompt/files/PWAInstallPrompt.tsx	ITDV-Lightning	origin/main	4bc69b2	components/PWAInstallPrompt.tsx
-recipes/image-proxy/files/proxy-guard.ts	ITDV-Lightning	origin/main	4bc69b2	lib/proxy-guard.ts
 recipes/pwa-install-prompt/files/safe-storage.ts	ITDV-Lightning	origin/main	4bc69b2	lib/safe-storage.ts

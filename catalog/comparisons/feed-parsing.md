@@ -73,9 +73,10 @@ Fetching an arbitrary user-supplied feed URL server-side is an SSRF sink.
 `MSP-2.0` guards it: `api/_utils/urlSafety.ts` (`assertPublicHttpUrl`) and
 `api/_utils/safeFetch.ts`, referenced from 14 files, with tests.
 
-`ITDV-Lightning` guards its image proxy the same way with `lib/proxy-guard.ts`
-— that one **is** shipped, in the
-[image-proxy recipe](../recipes/image-proxy/).
+`ITDV-Lightning` has its own `lib/proxy-guard.ts` for the image proxy, but do
+not reach for it — a review found three SSRF bypasses in it, and the recipe
+that shipped it was withdrawn. See
+[image-proxy-ssrf.md](image-proxy-ssrf.md).
 
 Not extracted here because `safeFetch.ts` imports `urlSafety.js`, which
 re-exports from `rateLimiter.js`.

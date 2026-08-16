@@ -13,8 +13,17 @@ production — not a tidied-up illustration of it.
 | Recipe | Tier | Files | Install | Seen on |
 |---|---|---|---|---|
 | [pc20-feed-validator](pc20-feed-validator/) | drop-in | 1 | nothing | [itdv.podtards.com/feed-validator](https://itdv.podtards.com/feed-validator) |
-| [image-proxy](image-proxy/) | drop-in | 2 | nothing | [itdv.podtards.com](https://itdv.podtards.com) |
 | [pwa-install-prompt](pwa-install-prompt/) | drop-in | 2 | nothing | [itdv.podtards.com](https://itdv.podtards.com) |
+
+## One recipe has been withdrawn
+
+There was an **image proxy** here. A security review of this repo found three
+bypasses in the SSRF guard the recipe was built around — the guard did not do
+what its README said it did. It was removed rather than annotated, because its
+entire value was the safety it did not provide.
+
+What was wrong, and what a correct guard needs:
+[`../comparisons/image-proxy-ssrf.md`](../comparisons/image-proxy-ssrf.md).
 
 ## Tiers, so you know what you're agreeing to
 
@@ -44,9 +53,8 @@ everything needed to install without parsing prose:
 | `source` | repo, ref and commit the code was taken from |
 
 **Do not skip `rename`.** These files come from real sites, so they carry
-real app names. Copying `image-proxy` without renaming makes every image host
-you contact see the traffic as Podtards; copying `pwa-install-prompt`
-unchanged offers your users an app called DoerfelVerse.
+real app names. Copying `pwa-install-prompt` unchanged offers your users an
+app called DoerfelVerse.
 
 ## What these recipes are held to
 
