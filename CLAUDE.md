@@ -4,11 +4,36 @@ Guidance for Claude Code (claude.ai/code) working in this repository.
 
 ## What this repo is
 
-A **specification repo — prose only, no code**. There is nothing to build,
-lint, or test. `pc20-favorites.md` is the entire deliverable: an
-app-neutral format for syncing a user's podcast and music favorites between
-Podcasting 2.0 apps over Nostr, as a single replaceable event at kind 10333.
-The audience is an implementer of a *third* app who has only this document.
+A **reference repo with two halves**, neither of which is an application.
+
+1. **The spec.** `pc20-favorites.md` — an app-neutral format for syncing a
+   user's podcast and music favorites between Podcasting 2.0 apps over
+   Nostr, as a single replaceable event at kind 10333. The audience is an
+   implementer of a *third* app who has only this document. This half is
+   **prose only**; there is nothing to build, lint or test in it.
+2. **The catalog.** `catalog/` — canonical implementations of features that
+   appear in more than one of ChadFarrow's sites, each a `.md` explaining
+   the feature next to the extracted source file. See
+   `catalog/README.md`.
+
+The catalog exists because the sites are a handful of codebases forked
+repeatedly: 26 files are byte-identical across 3+ repos and 65 more sit at
+the same path in 3+ repos and have diverged. It records which copy is
+canonical and what each other one is missing.
+
+### Rules that apply to the catalog only
+
+- **Extracted files are byte-identical to their source.** No provenance
+  header, no reformatting, no rewritten import. Provenance lives in
+  `catalog/PROVENANCE.tsv`, so adopting a file into a site is a copy and
+  checking it for drift is a `diff`. Editing an extracted file in place
+  breaks both.
+- **A file only lands here if it typechecks under `strict` with nothing but
+  its external packages.** A file needing an app-internal import is not a
+  shared piece yet — document it in place and say what couples it, as
+  `catalog/rss-pc20/feed-parsing.md` does.
+- **Run `catalog/check-drift.sh` before trusting an entry**, and after
+  adding one.
 
 ## The spec is ahead of its implementations, and there are now two
 
@@ -34,13 +59,55 @@ a republish, the other drops them. Name the app, say what it does, and keep
 the rule justified by the failure it prevents rather than by the fact that
 someone shipped it.
 
+`catalog/nostr/favorites-10333.md` tracks where the two currently agree and
+differ, read at a recorded commit. Update it rather than restating a
+divergence here, and re-read both apps before trusting it — as of
+2026-08-16 they still disagree on item order, which means the event is being
+rewritten back and forth in production.
+
 ## The implementation repos are read-only
 
-`~/Vibe/boostmebitch` and `~/Vibe/stablekraft-app` are sources to read,
-never targets to change: no edits, no commits, no branches, no PRs, no
-"while I'm in here" fixes. Read them as much as a claim requires — that is
-how one gets verified — but what comes back lands here, as spec text or as a
-known-gap note, never as a patch over there.
+Every repo under `~/Vibe` other than this one — `boostmebitch`,
+`stablekraft-app`, the Lightning sites, the MSP pair, all of them — is a
+source to read, never a target to change: no edits, no commits, no branches,
+no PRs, no "while I'm in here" fixes. Read them as much as a claim requires —
+that is how one gets verified — but what comes back lands here, as spec text,
+a catalog entry or a known-gap note, never as a patch over there.
+
+**Never `git pull` in one.** A pull rewrites the working tree.
+`musicL-playlist-updater` has thousands of uncommitted files sitting in it,
+and a pull there destroys work that exists nowhere else.
+
+## Read `origin/HEAD`, never the local checkout
+
+The clones under `~/Vibe` are not current. When the catalog was built, **9 of
+15 were behind their remote** — `TRM-Lightning` by 19 commits, both kind-10333
+implementations by 2 and 3 — and `MSP-2.0` and `Helipad-to-Nostr-BoostBot`
+were sitting on feature branches rather than their default branch.
+
+So a claim verified by reading `~/Vibe/<repo>/lib/thing.ts` is a claim about
+whatever happened to be checked out, and it will be wrong about half the time.
+This is not hypothetical: the first draft of
+`catalog/nostr/favorites-10333.md` reported four bugs in stablekraft's merge
+that had already been fixed upstream.
+
+```bash
+git -C ~/Vibe/<repo> fetch origin --quiet          # touches .git/refs only
+git -C ~/Vibe/<repo> show origin/HEAD:<path>
+git -C ~/Vibe/<repo> rev-parse --short origin/HEAD # the SHA to record
+```
+
+`fetch` never modifies a working tree, so this stays inside the read-only
+rule.
+
+**Record the SHA in the entry.** A row without one is unverified and must say
+so — a stale example is worse than none, because it will be trusted and it
+will be wrong. With the SHA, checking is one command:
+`git -C ~/Vibe/<repo> diff <sha> origin/HEAD -- <path>`.
+
+**Do not trust one implementation's comments about another.** Both apps carry
+headers describing how the other one behaves, and both are out of date. Go
+and read the other one.
 
 ## Invariants a change must not quietly break
 
