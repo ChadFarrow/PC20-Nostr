@@ -52,11 +52,24 @@ common.
   `catalog/analysis/feature.py` and compare against `files/`. A missing file
   is the difference between "just add it" and an import error in someone
   else's repo.
-- **Never ship a secret in a `NEXT_PUBLIC_` variable.** Those are bundled
-  into public JavaScript. Three of the sites read
-  `NEXT_PUBLIC_SITE_NOSTR_NSEC`, which puts a Nostr private key in the
-  browser bundle; `ITDV-Lightning` ships only the npub and signs server-side.
-  Recipes take that variant.
+- **Never ship a secret in a `NEXT_PUBLIC_` variable.** Next.js inlines every
+  `NEXT_PUBLIC_*` value into the browser bundle at build time, so one holding
+  a key is served to everybody who loads the page.
+
+  The live sites get the Nostr identity right, and `ITDV-Lightning` shows the
+  pattern a recipe should copy: the browser gets
+  `NEXT_PUBLIC_SITE_NOSTR_NPUB`, while the nsec stays in `SITE_NOSTR_NSEC`
+  and signing happens in `app/api/nostr/publish/route.ts`. That route carries
+  a comment recording that the key *used to be* read client-side — the fix,
+  not the bug.
+
+  It is not a solved problem though. `ITDV-Lightning/lib/boostbox-service.ts`
+  reads `NEXT_PUBLIC_BOOSTBOX_API_KEY`, and is imported by
+  `components/BitcoinConnect.tsx` and `contexts/AudioContext.tsx`, both client
+  components — so that key is public wherever the variable is set. Grepping
+  for `NSEC` alone would have missed it. Check the whole
+  `NEXT_PUBLIC_*` surface for anything key-shaped, which is what
+  `catalog/check-recipes.sh` does for recipes.
 - **Verify a URL before citing it.** `re.podtards.com` appears in
   `ITDV-Lightning/.env.example` and does not resolve; `msp.podtards.com` is
   MSP 2.0's address from before `musicsideproject.com`. A dead "see it
