@@ -18,6 +18,9 @@ missing — are in [`../comparisons/`](../comparisons/).
 > nothing, and wallet secret material reaches the console. Exploit paths and a
 > paste-ready fix:
 > [`../comparisons/lightning-payment-safety.md`](../comparisons/lightning-payment-safety.md).
+>
+> Version drift and advisories across the sites these came from:
+> [`../comparisons/dependency-drift.md`](../comparisons/dependency-drift.md).
 
 ## What's here
 
@@ -33,11 +36,19 @@ missing — are in [`../comparisons/`](../comparisons/).
 
 All seven typecheck under `strict` with only those packages present.
 
-## `nostr-tools` must be pinned below 2.19
+## `nostr-tools` must be pinned to 2.16.x
 
 `nwc-service.ts` calls `subscribeMany(relays, [filter], params)` with the
-filter in an **array**. That signature is `nostr-tools` 2.16.x. From 2.19 the
-parameter is a single `Filter`, and the file stops compiling:
+filter in an **array**. That signature exists only in `nostr-tools` 2.16.x.
+From the published typings:
+
+```
+2.16.2  subscribeMany(relays: string[], filters: Filter[], params)
+2.17.0  subscribeMany(relays: string[], filter: Filter,    params)   <- breaks here
+2.24.2  subscribeMany(relays: string[], filter: Filter,    params)
+```
+
+so the file stops compiling from **2.17.0 onward**:
 
 ```
 error TS2345: Argument of type '{ kinds: number[]; ... }[]'
@@ -46,29 +57,47 @@ error TS2345: Argument of type '{ kinds: number[]; ... }[]'
 
 Verified: **0 errors on 2.16.2, 1 error on 2.24.2.**
 
-`ITDV-Lightning` declares `"nostr-tools": "^2.16.2"`. That caret range permits
-2.24.2, so a fresh `npm install` there can resolve to a version its own source
-does not compile against — it works today only because the lockfile pins
-2.16.2. Anyone copying this module without a lockfile will hit the error
-immediately and think the extraction is broken.
+> An earlier version of this page said the break was at 2.19. It is 2.17.0 —
+> the usable range is one minor wide, not three. Corrected after checking the
+> typings for each release rather than inferring from the versions in use.
 
-Either pin `nostr-tools` to `~2.16.2`, or change the call to pass a bare
-filter object. The same call appears with **both** arities across the fork
-family, tracking each repo's locked version rather than anyone's intent —
-which is why this reads as divergence and is really dependency skew.
+`ITDV-Lightning` declares `"nostr-tools": "^2.16.2"`. That caret range permits
+every release from 2.17.0 to 2.24.2, **all of which break it**, so a fresh
+`npm install` there resolves to a version its own source cannot compile
+against. It works today only because the lockfile pins 2.16.2. Anyone copying
+this module without a lockfile hits the error immediately and concludes the
+extraction is broken.
+
+Worse than a typecheck failure: in 2.24.2 `subscribeMany` forwards its second
+argument straight to `subscribe`, so an array passed there becomes a malformed
+`REQ` and the subscription silently never fires.
+
+Either pin `nostr-tools` to `2.16.2` exactly, or change the call to pass a
+bare filter object — see
+[`../comparisons/dependency-drift.md`](../comparisons/dependency-drift.md) for
+both blocking call sites in the site itself.
 
 `zap-receipt-service.ts` also imports `nostr-tools` but does not use
 `subscribeMany`, so it is unaffected.
 
 ## What is deliberately missing
 
-No split/TLV module. The safest implementation is a third-party fork and the
-only production copy hardcodes an app name and two Podcast Index feed IDs; see
+No split/TLV module. The only live-site implementation keeps its TLV
+construction private and hardcodes an app name and two Podcast Index feed IDs,
+so there is nothing to extract without rewriting it; see
 [`../comparisons/boostagram-tlv.md`](../comparisons/boostagram-tlv.md).
 
-`lnurl-service.ts` has no LUD-12 comment negotiation and `nwc-service.ts` has
-no relay keepalive. Both gaps are real, both fixes exist — in test-site repos
-whose code is not shipped. The comparisons say what each one costs.
+`lnurl-service.ts` has no LUD-12 comment negotiation: it appends `?comment=`
+with no check that the endpoint accepts comments and no length check, so an
+endpoint advertising `commentAllowed: 0` can reject the whole callback and the
+payment fails with nothing on screen explaining why.
+
+`nwc-service.ts` has no relay keepalive, so a wallet relay that drops idle
+sockets leaves the app holding a connection that looks live and is not — which
+surfaces as a payment that hangs rather than failing cleanly.
+
+Both are real limitations of the shipped code, not oversights in the
+extraction.
 
 ## Checking these
 
