@@ -386,6 +386,82 @@ deletes another app's tracks along with the group that named their parent.
   ignore safely — they already carry unknown tag positions verbatim — and it
   needs writers to stop rebuilding `i` tags from their own model before it
   can survive a round trip.
+- **The list is public, and a private half is optional to support but not
+  optional to carry.** Every entry is a tag, tags are plaintext, and `i` is a
+  single-letter tag, so relays index it: a `#i` filter answers "which pubkeys
+  favorited this feed". The list is searchable in reverse, not merely readable
+  by someone who already has the pubkey. `content` is empty and is the only
+  free slot in the event.
+
+  The shape this would take is
+  [NIP-51](https://github.com/nostr-protocol/nips/blob/master/51.md)'s split:
+  public entries stay in tags, private entries go in `content` as a JSON array
+  that mimics the tag array, stringified and encrypted with
+  [NIP-44](https://github.com/nostr-protocol/nips/blob/master/44.md) to the
+  author's own key. The [grouping rules](#grouping-rules) apply inside that
+  array unchanged, because it is a tag array: `medium` still runs, and an item
+  still attaches to the group above it. The two halves are two lists with two
+  orderings, and no entry is in both. A user's list could then be all public,
+  all private, or split per entry, and an app that never encrypts anything
+  would still conform.
+
+  **What no app may do is drop the half it does not use.** Rule 4 covers tags
+  and says nothing about `content`, so a writer following this document to the
+  letter republishes the empty string the format has specified from the start.
+  The first favorite toggled in such an app erases every private entry:
+  silently, on someone else's device, with no undo —
+  precisely the loss [Merging](#merging) exists to prevent, except that no
+  rule currently forbids it. Extend rule 4 to `content` first, ship it in both
+  apps, and add the private half only after. Optional support with a mandatory
+  carry rule is the only combination that does not destroy data, and it needs
+  a sibling to test vector 4: an opaque `content` survives a republish by a
+  writer that cannot read it.
+
+  Four further things break, and none of them is optional either:
+
+  - **Idempotence, immediately.** NIP-44 draws a fresh nonce per encryption,
+    so the same entries produce different bytes every time. The byte
+    comparison in rule 5 therefore always differs, and every load republishes
+    — two apps rewriting the event against each other forever, this time
+    self-inflicted. Compare the *decrypted* array against the decrypted array
+    you read, and compare ciphertext only where you could not decrypt it.
+  - **A signer that cannot decrypt looks exactly like an empty private half.**
+    Not every NIP-07 or NIP-46 signer implements `nip44`. Treat a decryption
+    failure as a degraded read under rule 1: carry the ciphertext, publish
+    nothing derived from it, and say so on screen. The user cannot otherwise
+    tell "hidden here by choice" from "this app has not shipped support yet",
+    and both render as a shorter list.
+  - **Size, at about 1.5×.** NIP-44 pads to a power-of-two chunk, then base64
+    encodes: 25 KB of tag JSON becomes 37 KB of `content`, and 90 KB becomes
+    128 KB. The ~128 KB relay cap named above is then reached at roughly 90 KB
+    of entries rather than 128 KB, so privacy costs about a third of the list
+    — paid in item favorites, which are what fill it.
+  - **The 64 KB boundary is an interop cliff, not a cap.** NIP-44 v2 as
+    originally published capped plaintext at 65535 bytes. The current text
+    allows 2^32-1 and switches to a 6-byte length prefix at 65536, so a
+    library built to the older text rejects a payload across that line. A
+    private list that grows past 64 KB may be unreadable in an app whose
+    `nip44` is a year old — and unreadable is indistinguishable from empty.
+    Stay under it until signers catch up.
+
+  The baseline gains a job too: record which half an entry was in. Moving an
+  entry from public to private is a removal and an addition, and a baseline
+  that remembers only the identifier reads the move as "mine, and I removed
+  it" on the next cycle and deletes it — the same failure as seeding a
+  baseline from another list.
+
+  What stays public whatever you do: the pubkey, the kind, `created_at`, and
+  the event size. An observer still learns that this person keeps podcast
+  favorites, roughly how many, and when they last changed them. Padding hides
+  the exact count, not the order of magnitude.
+
+  If waiting for both writers to ship the carry rule is not acceptable, the
+  alternative is a second self-assigned kind for the private list. A writer
+  never touches a kind it does not know, so an old app cannot clobber it. That
+  costs a second read on every load, a rule for moving an entry between the
+  two events without a crash in between duplicating or losing it, and a second
+  helping of the collision cost named in [Core
+  Architecture](#core-architecture).
 - Optional NIP-73-style relay/URL hints (third element on `i` tags) are not
   currently used; could be added later as a fallback path to the raw feed
   URL if a Podcast Index lookup fails. Dropping them costs the only answer
