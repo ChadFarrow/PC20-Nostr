@@ -143,9 +143,19 @@ echo "== 5. no recipe teaches a secret leak"
 # holding a key is served to everyone. Deliberately broader than NSEC: a live
 # site reads NEXT_PUBLIC_BOOSTBOX_API_KEY from a client component, and a
 # narrower pattern would have missed it.
-if grep -rniE "(NEXT_PUBLIC|VITE|REACT_APP)_[A-Z0-9_]*(NSEC|SECRET|PRIVATE|PRIVKEY|SEED|MNEMONIC|PASSWORD|TOKEN|API_?KEY)" \
+#
+# What counts is a READ or an ASSIGNMENT, not a mention. A recipe naming the
+# variable to tell a reader never to use it is doing its job, and flagging
+# that pushes us to delete the warning rather than the problem - the same
+# reasoning as the dead-URL check below. So this matches `env.NAME`,
+# `env["NAME"]` and `NAME=`, and leaves prose alone.
+#
+# Verified both ways: `process.env.NEXT_PUBLIC_BOOSTBOX_API_KEY`, which is the
+# real live-site leak this check was written for, is still caught.
+SECRETISH='(NEXT_PUBLIC|VITE|REACT_APP)_[A-Z0-9_]*(NSEC|SECRET|PRIVATE|PRIVKEY|SEED|MNEMONIC|PASSWORD|TOKEN|API_?KEY)'
+if grep -rnE "(env\.${SECRETISH}|env\[[\"']${SECRETISH}|^[^|]*\b${SECRETISH}=)" \
      "$HERE/recipes" 2>/dev/null; then
-  note "a recipe references a secret in a client-exposed variable (these are bundled and served publicly)"
+  note "a recipe reads or sets a secret in a client-exposed variable (these are bundled and served publicly)"
 fi
 
 echo "== 6. every app-specific constant is documented in 'rename'"
