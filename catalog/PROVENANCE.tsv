@@ -1,11 +1,15 @@
-catalog_path	repo	ref	sha	source_path
-modules/lightning/webln-service.ts	ITDV-Lightning	origin/main	4bc69b2	lib/webln-service.ts
-modules/lightning/lnurl-service.ts	ITDV-Lightning	origin/main	4bc69b2	lib/lnurl-service.ts
-modules/lightning/nwc-service.ts	ITDV-Lightning	origin/main	4bc69b2	lib/nwc-service.ts
-modules/lightning/zap-receipt-service.ts	ITDV-Lightning	origin/main	4bc69b2	lib/zap-receipt-service.ts
-modules/nostr/read-trust.ts	boostmebitch	origin/main	1f26ba0	lib/nostr/read-trust.ts
-modules/nostr/favorites-list.ts	boostmebitch	origin/main	1f26ba0	lib/nostr/favorites-list.ts
-modules/rss-pc20/podcast-index-auth.ts	MSP-2.0	origin/master	c294548	api/_utils/podcastIndex.ts
-recipes/pc20-feed-validator/files/page.tsx	ITDV-Lightning	origin/main	4bc69b2	app/feed-validator/page.tsx
-recipes/pwa-install-prompt/files/PWAInstallPrompt.tsx	ITDV-Lightning	origin/main	4bc69b2	components/PWAInstallPrompt.tsx
-recipes/pwa-install-prompt/files/safe-storage.ts	ITDV-Lightning	origin/main	4bc69b2	lib/safe-storage.ts
+catalog_path	repo	ref	sha	source_path	state
+modules/lightning/webln-service.ts	ITDV-Lightning	origin/main	4bc69b2	lib/webln-service.ts	extracted
+modules/lightning/lnurl-service.ts	ITDV-Lightning	origin/main	4bc69b2	lib/lnurl-service.ts	extracted
+modules/lightning/nwc-service.ts	ITDV-Lightning	origin/main	4bc69b2	lib/nwc-service.ts	extracted
+modules/lightning/zap-receipt-service.ts	ITDV-Lightning	origin/main	4bc69b2	lib/zap-receipt-service.ts	extracted
+modules/nostr/read-trust.ts	boostmebitch	origin/main	1f26ba0	lib/nostr/read-trust.ts	extracted
+modules/nostr/favorites-list.ts	boostmebitch	origin/main	1f26ba0	lib/nostr/favorites-list.ts	extracted
+modules/rss-pc20/podcast-index-auth.ts	MSP-2.0	origin/master	c294548	api/_utils/podcastIndex.ts	extracted
+recipes/pc20-feed-validator/files/page.tsx	ITDV-Lightning	origin/main	4bc69b2	app/feed-validator/page.tsx	extracted
+recipes/pwa-install-prompt/files/PWAInstallPrompt.tsx	ITDV-Lightning	origin/main	4bc69b2	components/PWAInstallPrompt.tsx	extracted
+recipes/pwa-install-prompt/files/safe-storage.ts	ITDV-Lightning	origin/main	4bc69b2	lib/safe-storage.ts	extracted
+recipes/lightning-wallet-payments/files/webln-service.ts	ITDV-Lightning	origin/main	4bc69b2	lib/webln-service.ts	patched
+recipes/lightning-wallet-payments/files/lnurl-service.ts	ITDV-Lightning	origin/main	4bc69b2	lib/lnurl-service.ts	patched
+recipes/lightning-wallet-payments/files/nwc-service.ts	ITDV-Lightning	origin/main	4bc69b2	lib/nwc-service.ts	patched
+recipes/lightning-wallet-payments/files/safe-storage.ts	ITDV-Lightning	origin/main	4bc69b2	lib/safe-storage.ts	extracted

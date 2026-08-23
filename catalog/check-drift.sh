@@ -5,6 +5,20 @@
 # PROVENANCE.tsv records the exact commit each file was read at, so drift is
 # mechanically checkable rather than a thing you remember to look at.
 #
+# The last column is the file's state:
+#
+#   extracted  byte-identical to the source. Any difference is LOCAL EDIT,
+#              which is fatal - editing an extracted file in place is how the
+#              catalog stops being evidence of anything.
+#   patched    a source file plus a security fix the source does not have.
+#              Differing from the source is the point, so cmp is expected to
+#              fail and is reported as PATCHED rather than as drift. SOURCE
+#              MOVED still applies: a patched file has to be rebased when
+#              upstream changes, or the fix is being carried over a stale base.
+#
+# Authored files - code no site has ever run - have no row here at all, and
+# check-recipes.sh is what makes sure they are declared instead.
+#
 # This never touches a site repo's working tree. `git fetch` writes only to
 # .git/refs, and every read goes through `git show <ref>:<path>`. Do not make
 # this script pull — at least one repo under ~/Vibe carries thousands of
@@ -22,7 +36,7 @@ MAN="$HERE/PROVENANCE.tsv"
 [ -f "$MAN" ] || { echo "no PROVENANCE.tsv beside $0"; exit 1; }
 
 drift=0
-while IFS=$'\t' read -r dest repo ref sha src; do
+while IFS=$'\t' read -r dest repo ref sha src state; do
   [ "$dest" = "catalog_path" ] && continue
   [ -n "$dest" ] || continue
   d="$ROOT/$repo"
@@ -43,7 +57,15 @@ while IFS=$'\t' read -r dest repo ref sha src; do
 
   # 1. has our copy been edited since extraction?
   if ! $GIT -C "$d" show "$sha:$src" | cmp -s - "$HERE/$dest"; then
-    echo "LOCAL EDIT    $dest             (differs from $repo@$sha)"
+    if [ "${state:-extracted}" = "patched" ]; then
+      echo "PATCHED       $dest             (differs from $repo@$sha, as declared)"
+    else
+      echo "LOCAL EDIT    $dest             (differs from $repo@$sha)"
+      drift=1
+    fi
+  elif [ "${state:-extracted}" = "patched" ]; then
+    # A patched file that matches its source has lost its fix.
+    echo "LOST PATCH    $dest             (declared patched but identical to $repo@$sha)"
     drift=1
   fi
 

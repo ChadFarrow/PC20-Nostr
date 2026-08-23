@@ -1,0 +1,75 @@
+{
+  "name": "lightning-wallet-payments",
+  "tier": "wired",
+  "summary": "Connect a browser Lightning wallet over WebLN or Nostr Wallet Connect, then pay a Lightning address, a bolt11 invoice or a keysend destination.",
+  "live_at": "https://itdv.podtards.com",
+  "live_title": "DoerfelVerse - Music & Podcast Hub",
+  "source": {
+    "repo": "ITDV-Lightning",
+    "ref": "origin/main",
+    "sha": "4bc69b2",
+    "paths": ["lib/webln-service.ts", "lib/lnurl-service.ts", "lib/nwc-service.ts", "lib/safe-storage.ts"]
+  },
+  "files": [
+    {
+      "from": "files/webln-service.ts",
+      "to": "lib/webln-service.ts",
+      "state": "patched",
+      "fixes": [
+        "lightning-payment-safety.md #4: stopped logging the raw wallet response, which carries the preimage - bearer proof of payment that L402-style paywalls and receipt verifiers accept."
+      ]
+    },
+    {
+      "from": "files/lnurl-service.ts",
+      "to": "lib/lnurl-service.ts",
+      "state": "patched",
+      "fixes": [
+        "lightning-payment-safety.md #1: the returned invoice is now decoded and its amount checked against the requested amount before it reaches a wallet. Unfixed, a hostile Lightning address out of someone else's RSS feed returns a 5,000,000-sat invoice for a 100-sat boost and it gets paid.",
+        "lightning-payment-safety.md #1: an invoice with no amount, and an expired invoice, are both refused.",
+        "lightning-payment-safety.md #2: https is enforced on the decoded LNURL and on the remote callback; private, loopback, link-local, CGNAT and multicast literals are refused, including all three spellings of an IPv4-mapped IPv6 address; the Lightning Address username is validated and percent-encoded so it cannot walk the path or rewrite the query; the domain must be a bare registrable hostname.",
+        "Not in the review, found while extracting: fetch follows redirects on its own, so every hop was a URL no guard had seen. Redirects are now followed by hand, at most three, with each hop revalidated.",
+        "Not in the review, found while extracting: a hostname is only half-checked without DNS, so server-side use now fails closed until setHostResolver() is called."
+      ]
+    },
+    {
+      "from": "files/nwc-service.ts",
+      "to": "lib/nwc-service.ts",
+      "state": "patched",
+      "fixes": [
+        "lightning-payment-safety.md #4: stopped logging the first ten hex characters of the NWC client secret - forty bits of a spending key, beside the relay URL and wallet pubkey needed to use it.",
+        "lightning-payment-safety.md #4: stopped logging the raw keysend and balance responses; presence and error code only."
+      ]
+    },
+    {
+      "from": "files/safe-storage.ts",
+      "to": "lib/safe-storage.ts",
+      "state": "extracted"
+    },
+    {
+      "from": "files/node-host-resolver.ts",
+      "to": "lib/node-host-resolver.ts",
+      "state": "authored"
+    }
+  ],
+  "dependencies": {
+    "bech32": "^2.0.0",
+    "nostr-tools": "2.16.2",
+    "light-bolt11-decoder": "^3.2.0"
+  },
+  "peer": {
+    "typescript": ">=5 (verified on 5.9.3, strict)",
+    "next": ">=14 (App Router) if you use the server path; the browser path is framework-free"
+  },
+  "env": [],
+  "rename": [],
+  "caveats": [
+    "nostr-tools must be pinned to exactly 2.16.2. nwc-service.ts calls subscribeMany(relays, [filter], params), and the second parameter became a bare Filter in 2.17.0. From there the array is forwarded into a malformed REQ, so the subscription silently never fires and every NWC payment hangs instead of failing. A caret range resolves to a version that breaks it.",
+    "Server-side use must call setHostResolver(nodeHostResolver) from lib/node-host-resolver before the first request. Without it the module throws rather than making a request it cannot check. In a browser no resolver is needed.",
+    "DNS is resolved by the guard and again by fetch, so a record that changes in between can differ - a rebinding attack. Pinning the socket to the checked address is outside what this file can do; put an egress policy in front of the process if you handle untrusted Lightning addresses at scale.",
+    "The invoice guard checks the amount, not the payee. LUD-06 description-hash binding - confirming the invoice's purpose_commit_hash equals sha256 of the LNURL metadata - is what stops a hostile server substituting a different recipient in a value split. It is not implemented here.",
+    "No LUD-12 comment negotiation. A comment is appended with no check that the endpoint accepts one and no length check, so an endpoint advertising commentAllowed: 0 can reject the whole callback and the payment fails with nothing on screen explaining why.",
+    "No NWC relay keepalive. A wallet relay that drops idle sockets leaves the app holding a connection that looks live and is not, which surfaces as a payment that hangs rather than failing cleanly.",
+    "zap-receipt-service.ts is deliberately not shipped here. Its verifyZapReceipt returns true after checking almost nothing, so anything gating supporter perks or paid content on it grants access for zero sats. It stays in catalog/modules/ with that written next to it.",
+    "This recipe's files are patched, not byte-identical. The live site still carries all four issues above, so do not diff against it and assume the difference is a mistake."
+  ]
+}
