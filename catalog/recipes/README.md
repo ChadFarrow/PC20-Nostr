@@ -3,6 +3,8 @@
 **If you saw something on one of these sites and want it in your own app,
 this is the section to point your coding agent at.**
 
+Terms not familiar? → [`../../GLOSSARY.md`](../../GLOSSARY.md).
+
 Each recipe is a directory holding the working code, a manifest describing
 what it needs, and a README explaining how to install it and what will break
 if you skip a step. The code is byte-identical to what is running in

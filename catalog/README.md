@@ -3,6 +3,9 @@
 Working features from ChadFarrow's Podcasting 2.0 sites, packaged so someone
 else can add them to their own app.
 
+New to boostagrams, keysend or kind 10333?
+→ [`../GLOSSARY.md`](../GLOSSARY.md).
+
 **If you saw something on one of these sites and want it, go to
 [`recipes/`](recipes/).** Everything else here explains where that code came
 from and what it is missing.
@@ -125,8 +128,23 @@ at least one of them is carrying thousands of uncommitted files.
 ## Security review
 
 A review of everything this repo ships found three SSRF bypasses in the image
-proxy — which was **withdrawn** as a result — and three issues in the Lightning
-modules, one of which can cost real money. Both are written up:
+proxy — which was **withdrawn** as a result — and four issues in the Lightning
+code, one of which can cost real money: the invoice a remote server returns is
+never decoded, so it can name its own price.
+
+That one exists in three places and is fixed in exactly one.
+
+| Where | State |
+|---|---|
+| The live site | all four present |
+| [`modules/lightning/`](modules/lightning/) | all four present — a module is evidence of what the site runs, so patching it would destroy the only thing it is for |
+| [`recipes/lightning-wallet-payments/`](recipes/lightning-wallet-payments/) | **fixed**, each fix named in its `feature.json` |
+
+Take the recipe if you want working code. Read the module if you want to know
+what production does. Do not diff one against the other and "fix" the
+difference.
+
+Both reviews are written up:
 
 - [`comparisons/image-proxy-ssrf.md`](comparisons/image-proxy-ssrf.md)
 - [`comparisons/lightning-payment-safety.md`](comparisons/lightning-payment-safety.md)
@@ -148,6 +166,15 @@ by itself. Two pages track what is owed:
 - [`comparisons/dependency-drift.md`](comparisons/dependency-drift.md) —
   version spread and advisories, including a caret range on DoerfelVerse that
   permits eight `nostr-tools` releases, all of which break its build.
+
+## How this relates to the spec
+
+[`../pc20-favorites.md`](../pc20-favorites.md) says what the wire format is.
+This catalog says which code implements it correctly today, and where each app
+falls short. [`comparisons/favorites-10333.md`](comparisons/favorites-10333.md)
+is the join between them, and
+[`comparisons/trustworthy-read.md`](comparisons/trustworthy-read.md) defines
+the "trust" the spec's merging rules depend on.
 
 ## Not covered
 
