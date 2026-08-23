@@ -14,6 +14,15 @@ production — not a tidied-up illustration of it.
 |---|---|---|---|---|
 | [pc20-feed-validator](pc20-feed-validator/) | drop-in | 1 | nothing | [itdv.podtards.com/feed-validator](https://itdv.podtards.com/feed-validator) |
 | [pwa-install-prompt](pwa-install-prompt/) | drop-in | 2 | nothing | [itdv.podtards.com](https://itdv.podtards.com) |
+| [lightning-wallet-payments](lightning-wallet-payments/) | wired | 5 | 3 packages | [itdv.podtards.com](https://itdv.podtards.com) |
+| [boostagram-keysend](boostagram-keysend/) | wired | 3 | nothing | nowhere - authored |
+| [boostbox-client](boostbox-client/) | wired | 3 | nothing | nowhere - authored |
+
+**Payments start at [`lightning-wallet-payments`](lightning-wallet-payments/).**
+That one connects a wallet and sends. The other two ride on top of it:
+[`boostagram-keysend`](boostagram-keysend/) attaches boost metadata to a
+keysend payment, and [`boostbox-client`](boostbox-client/) stores that metadata
+somewhere the payment description can point at.
 
 ## One recipe has been withdrawn
 
@@ -24,6 +33,25 @@ entire value was the safety it did not provide.
 
 What was wrong, and what a correct guard needs:
 [`../comparisons/image-proxy-ssrf.md`](../comparisons/image-proxy-ssrf.md).
+
+## Where the code came from, per file
+
+Three states, declared per file in `feature.json` and checked by
+`../check-recipes.sh` step 2. This matters more than the tier: it is the
+difference between a promise the catalog can keep and one it cannot.
+
+- **`extracted`** — byte-identical to a live site. `../PROVENANCE.tsv` records
+  the commit, and `../check-drift.sh` re-checks it.
+- **`patched`** — a live-site file plus a named security fix the site does not
+  have. `feature.json` lists what diverged and why. Do not diff it against the
+  site and "correct" the difference.
+- **`authored`** — written for this catalog. **No site runs it**, so it cannot
+  make the promise every other page here makes, and its README says so in the
+  first line. It exists where the feature was worth having and extraction was
+  impossible.
+
+`authored` code ships its own tests, because there is no production traffic
+vouching for it.
 
 ## Tiers, so you know what you're agreeing to
 

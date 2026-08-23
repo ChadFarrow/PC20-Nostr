@@ -115,6 +115,22 @@ its second argument straight to `subscribe`, so the array becomes a malformed
 payment hanging rather than failing, which is a much worse afternoon than a
 build error.
 
+## Verify the safety claims yourself
+
+This recipe asks you to trust that a guard guards. The last one in this catalog
+that asked that had three bypasses and was withdrawn, so do not take the
+paragraph's word for it:
+
+```bash
+npm i -D tsx typescript bech32 light-bolt11-decoder
+npx tsx tests/guards.test.ts
+```
+
+Checks 28 hosts that must be refused - every private, loopback, link-local,
+CGNAT and multicast literal, including all three spellings of an IPv4-mapped
+IPv6 address - and 7 real wallet hosts that must not be. Then offers a
+1,500,000 msat invoice against a 100,000 msat request and requires a refusal.
+
 ## What this still does not do
 
 Named because a recipe that lets you move money should not be vague about its

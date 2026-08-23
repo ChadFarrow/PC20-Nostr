@@ -15,6 +15,19 @@ dependencies, where each file goes, and which constants you must rename.
 |---|---|---|---|
 | [Podcasting 2.0 feed validator](catalog/recipes/pc20-feed-validator/) | 1 | nothing | [itdv.podtards.com/feed-validator](https://itdv.podtards.com/feed-validator) |
 | [PWA install prompt](catalog/recipes/pwa-install-prompt/) | 2 | nothing | [itdv.podtards.com](https://itdv.podtards.com) |
+| [Lightning wallet payments](catalog/recipes/lightning-wallet-payments/) | 5 | 3 packages | [itdv.podtards.com](https://itdv.podtards.com) |
+| [Boostagram over keysend](catalog/recipes/boostagram-keysend/) | 3 | nothing | nowhere — authored |
+| [BoostBox client](catalog/recipes/boostbox-client/) | 3 | nothing | nowhere — authored |
+
+**Want to send sats?** Start at
+[Lightning wallet payments](catalog/recipes/lightning-wallet-payments/) — it
+connects a wallet and pays. The other two build on it: boostagrams attach the
+boost metadata to a keysend payment, BoostBox stores that metadata behind a URL
+the payment description can carry.
+
+The last two are **authored, not extracted** — no site runs them. Everything
+else in the table is code taken from a running site. Each file says which it is,
+and `catalog/check-recipes.sh` fails if one does not.
 
 The sites: [DoerfelVerse](https://itdv.podtards.com),
 [Boost Me Bitch](https://boostmebitch.com),
@@ -32,16 +45,28 @@ number in these pages).
 
 A security review of everything here found three SSRF bypasses in an image
 proxy recipe, which was **withdrawn** as a result — the guard did not do what
-its README claimed. The Lightning modules are still published but carry a
-warning: one issue lets a hostile Lightning address charge an arbitrary
-amount, because the returned invoice is never decoded before it is paid.
+its README claimed. It also found four issues in the Lightning code, one of
+which lets a hostile Lightning address charge an arbitrary amount, because the
+returned invoice is never decoded before it is paid.
+
+That one exists in three places and is fixed in exactly one:
+
+| Where | State |
+|---|---|
+| The live site | all four present |
+| [`catalog/modules/lightning/`](catalog/modules/lightning/) | all four present — a module is evidence of what the site runs |
+| [Lightning wallet payments](catalog/recipes/lightning-wallet-payments/) | **fixed**, each fix named in its `feature.json` |
+
+Take the recipe if you want working code; read the module if you want to know
+what production does. Do not diff one against the other and "fix" the
+difference.
 
 - [`comparisons/image-proxy-ssrf.md`](catalog/comparisons/image-proxy-ssrf.md)
 - [`comparisons/lightning-payment-safety.md`](catalog/comparisons/lightning-payment-safety.md)
-  — includes a paste-ready fix
 
-The two recipes above were reviewed and are clean. Run
-`./catalog/check-recipes.sh --network` to re-check what ships.
+Every recipe was reviewed. Run `./catalog/check-recipes.sh --network` to
+re-check what ships, and each payment recipe's `tests/` to re-check its own
+claims.
 
 ## [pc20-favorites.md](pc20-favorites.md) — the spec
 

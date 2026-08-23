@@ -7,6 +7,12 @@ else can add them to their own app.
 [`recipes/`](recipes/).** Everything else here explains where that code came
 from and what it is missing.
 
+For payments — connecting a wallet, sending sats, boosts — start at
+[`recipes/lightning-wallet-payments/`](recipes/lightning-wallet-payments/), then
+[`boostagram-keysend`](recipes/boostagram-keysend/) and
+[`boostbox-client`](recipes/boostbox-client/) on top of it. Read the safety
+section of the first one before you copy it.
+
 ```
 recipes/      ← start here. One directory per feature, with install steps
 modules/      shared source that recipes build on
@@ -28,15 +34,29 @@ over HTTP rather than taken from a README:
 | Chad and Reeds Podcast | <https://candr.space> | `candr.space` |
 
 Related, GitHub-only:
-[`boostbox`](https://github.com/ChadFarrow/boostbox), a self-hosted
-Podcasting 2.0 boost-metadata service, and
+[`boostbox`](https://github.com/noblepayne/boostbox), a self-hostable
+Podcasting 2.0 boost-metadata service (MIT, upstream — `ChadFarrow/boostbox` is
+a fork of it), and
 [`lnurl-test-feed`](https://github.com/ChadFarrow/lnurl-test-feed).
 
-**Only live sites are sources.** Code that has never served real traffic does
-not go in a recipe, because the whole promise of a recipe is that the thing
-already works somewhere. `check-recipes.sh` enforces this against an explicit
-allowlist — it was written after code from an unreleased prototype reached the
-catalog by mistake.
+**Only live sites are sources for extracted code.** `check-recipes.sh` enforces
+this against an explicit allowlist — it was written after code from an
+unreleased prototype reached the catalog by mistake.
+
+Three recipes now carry files that are not extractions, and they are labelled
+rather than quietly mixed in. Every file in a recipe declares one of three
+states, checked by `check-recipes.sh` step 2:
+
+| State | Means | Promise |
+|---|---|---|
+| `extracted` | byte-identical to a live site | this works somewhere today |
+| `patched` | a site file plus a named security fix | this is what the site runs, minus a bug it has |
+| `authored` | written for this catalog | **no site runs it** — and its README says so first |
+
+`authored` exists because two features were worth having and could not be
+extracted: the only boostagram implementation is private and branded, and the
+only BoostBox integration puts its API key in the browser bundle. Authored code
+ships its own tests, because no production traffic vouches for it.
 
 ## What these sites do and don't share
 
@@ -142,6 +162,10 @@ before you build one:
 [`comparisons/site-identity-signing.md`](comparisons/site-identity-signing.md).
 
 RSS parsing is compared but not shipped for the same reason — every parser
-imports its own app's siblings. No split/TLV code ships either: the only implementation keeps its
-TLV construction private and hardcodes an app name and two feed IDs. See
+imports its own app's siblings.
+
+No split/TLV code could be **extracted**: the only implementation keeps its TLV
+construction private and hardcodes an app name and two feed IDs. That feature
+now ships as [`recipes/boostagram-keysend/`](recipes/boostagram-keysend/),
+authored rather than extracted, with both of those defects designed out. See
 [`comparisons/boostagram-tlv.md`](comparisons/boostagram-tlv.md).

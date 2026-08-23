@@ -117,6 +117,19 @@ Both are sent, because a receiver showing "1000 sats" when it was handed one
 | `7629169` | the boostagram, as UTF-8 JSON |
 | `7629175` | the Podcast Index feed GUID, as UTF-8 text |
 
+## Verify it yourself
+
+This code has no production traffic vouching for it, so it ships its proof:
+
+```bash
+npm i -D tsx typescript
+npx tsx tests/splits.test.ts
+```
+
+Thirteen checks, each one a property
+[`../../comparisons/boostagram-tlv.md`](../../comparisons/boostagram-tlv.md)
+says the production implementation lacks.
+
 ## Reading inbound boostagrams
 
 `boostagram-parse.ts` has no counterpart in any codebase this catalog was built

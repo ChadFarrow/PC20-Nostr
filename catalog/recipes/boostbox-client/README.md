@@ -108,6 +108,18 @@ They solve the same problem from opposite ends.
 
 Send both. They cost one extra request between them.
 
+## Verify it yourself
+
+```bash
+npm i -D tsx typescript
+npx tsx tests/route.test.ts     # map @/lib/* to files/ in tsconfig first
+```
+
+Confirms the route refuses to run unconfigured or with the default key,
+rejects seven malformed bodies, drops unknown fields rather than forwarding
+them, sends to the configured host rather than one from the request, and
+attaches `X-Api-Key` server-side.
+
 ## What the route does and does not do
 
 **Does:**
