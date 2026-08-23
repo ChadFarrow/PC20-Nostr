@@ -11,6 +11,25 @@ cost real money.
 
 Read at `ITDV-Lightning` `origin/main` `4bc69b2`.
 
+> ## Three copies, and only one of them is fixed
+>
+> This is the most confusing thing in the catalog, so it is stated before
+> anything else on the page.
+>
+> | Where | State |
+> |---|---|
+> | The live site | **all four issues present** |
+> | [`../modules/lightning/`](../modules/lightning/) | **all four present** - extracted byte-identical, which is the point of a module |
+> | [`../recipes/lightning-wallet-payments/`](../recipes/lightning-wallet-payments/) | **fixed** - `patched` files, listed per file in its `feature.json` |
+>
+> A recipe is copied into somebody else's app by an agent that may never read
+> this page, so it ships the fixes. A module is evidence about what a site
+> runs, so it does not. If you want working code, take the recipe. If you want
+> to know what production does, read the module.
+>
+> Do not diff the recipe's files against the site and "fix" the difference.
+> The difference is the point.
+
 ## 1. A hostile Lightning address can charge any amount
 
 `lnurl-service.ts` never decodes the invoice it returns. The only check is
@@ -56,6 +75,11 @@ metadata that described it — so a value-split recipient can be silently
 substituted.
 
 ### The fix
+
+Shipped in
+[`../recipes/lightning-wallet-payments/files/lnurl-service.ts`](../recipes/lightning-wallet-payments/files/lnurl-service.ts).
+Verified there: a 1,500,000 msat invoice offered against a 100,000 msat request
+is refused by amount, and a stale invoice is refused by expiry.
 
 Decode before paying, and treat the decoded amount as the truth. Add
 `light-bolt11-decoder`, then in `lnurl-service.ts` replace each bare
@@ -107,6 +131,13 @@ if (!data.pr) {
 return assertInvoiceMatches(data.pr, amountMillisats);
 ```
 
+> **This snippet does not compile as written.** `light-bolt11-decoder` ships
+> its own types, `decoded.sections` is a discriminated union, and not every
+> member has a `value` field - so `(s: any)` hides a `TS2339` rather than
+> answering it, and leaves `undefined` looking like a number. The shipped
+> version replaces the predicate with a narrowing helper. Found by typechecking
+> it under `strict`, which is how it should have been written down.
+
 Two things to add alongside it:
 
 - **Show the decoded amount, not the requested one**, in any confirmation UI.
@@ -140,6 +171,35 @@ and the realistic deployment is a Next.js server route.
 reject private, loopback and link-local hosts after resolution;
 `encodeURIComponent` the username; require the domain to be a bare registrable
 hostname.
+
+Shipped in the recipe, along with two more holes found while doing it:
+
+- **`fetch` follows redirects by itself**, so every hop after the first was a
+  URL no guard had seen. A hostile LNURL server answering `302` to
+  `http://169.254.169.254/` defeated the whole check no matter how good the
+  first test was. This is the same bug that got the image proxy withdrawn, in a
+  different file. The recipe follows redirects by hand, at most three, and
+  revalidates each hop.
+- **"after resolution" needs a resolver, and the module has none.** A hostname
+  is only half-checked without DNS - `evil.example.com` can have an A record of
+  `169.254.169.254` - and the realistic deployment is a route handler, where
+  that request leaves your infrastructure. The recipe's copy throws on the
+  server until `setHostResolver()` is called, rather than making a request it
+  cannot check.
+
+Verified against 35 hosts: 28 that must be refused and 7 that must not. Every
+private, loopback, link-local, CGNAT and multicast literal is refused,
+including **all three spellings of an IPv4-mapped IPv6 address** -
+`::ffff:127.0.0.1`, `::ffff:7f00:1` and `0:0:0:0:0:ffff:7f00:1` - which is
+exactly the bypass the image proxy shipped. Seven real wallet hosts still pass.
+
+Re-runnable:
+`../recipes/lightning-wallet-payments/tests/` - see that recipe's README.
+
+Still open, and named because a guard that overclaims is how this repo got
+here: DNS is resolved by the guard and again by `fetch`, so a record that
+changes in between defeats it. Closing that means pinning the socket to the
+checked address.
 
 ## 3. `verifyZapReceipt` does not verify anything
 

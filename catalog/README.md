@@ -3,9 +3,18 @@
 Working features from ChadFarrow's Podcasting 2.0 sites, packaged so someone
 else can add them to their own app.
 
+New to boostagrams, keysend or kind 10333?
+→ [`../GLOSSARY.md`](../GLOSSARY.md).
+
 **If you saw something on one of these sites and want it, go to
 [`recipes/`](recipes/).** Everything else here explains where that code came
 from and what it is missing.
+
+For payments — connecting a wallet, sending sats, boosts — start at
+[`recipes/lightning-wallet-payments/`](recipes/lightning-wallet-payments/), then
+[`boostagram-keysend`](recipes/boostagram-keysend/) and
+[`boostbox-client`](recipes/boostbox-client/) on top of it. Read the safety
+section of the first one before you copy it.
 
 ```
 recipes/      ← start here. One directory per feature, with install steps
@@ -28,15 +37,29 @@ over HTTP rather than taken from a README:
 | Chad and Reeds Podcast | <https://candr.space> | `candr.space` |
 
 Related, GitHub-only:
-[`boostbox`](https://github.com/ChadFarrow/boostbox), a self-hosted
-Podcasting 2.0 boost-metadata service, and
+[`boostbox`](https://github.com/noblepayne/boostbox), a self-hostable
+Podcasting 2.0 boost-metadata service (MIT, upstream — `ChadFarrow/boostbox` is
+a fork of it), and
 [`lnurl-test-feed`](https://github.com/ChadFarrow/lnurl-test-feed).
 
-**Only live sites are sources.** Code that has never served real traffic does
-not go in a recipe, because the whole promise of a recipe is that the thing
-already works somewhere. `check-recipes.sh` enforces this against an explicit
-allowlist — it was written after code from an unreleased prototype reached the
-catalog by mistake.
+**Only live sites are sources for extracted code.** `check-recipes.sh` enforces
+this against an explicit allowlist — it was written after code from an
+unreleased prototype reached the catalog by mistake.
+
+Three recipes now carry files that are not extractions, and they are labelled
+rather than quietly mixed in. Every file in a recipe declares one of three
+states, checked by `check-recipes.sh` step 2:
+
+| State | Means | Promise |
+|---|---|---|
+| `extracted` | byte-identical to a live site | this works somewhere today |
+| `patched` | a site file plus a named security fix | this is what the site runs, minus a bug it has |
+| `authored` | written for this catalog | **no site runs it** — and its README says so first |
+
+`authored` exists because two features were worth having and could not be
+extracted: the only boostagram implementation is private and branded, and the
+only BoostBox integration puts its API key in the browser bundle. Authored code
+ships its own tests, because no production traffic vouches for it.
 
 ## What these sites do and don't share
 
@@ -105,8 +128,30 @@ at least one of them is carrying thousands of uncommitted files.
 ## Security review
 
 A review of everything this repo ships found three SSRF bypasses in the image
-proxy — which was **withdrawn** as a result — and three issues in the Lightning
-modules, one of which can cost real money. Both are written up:
+proxy — which was **withdrawn** as a result — and four issues in the Lightning
+code, one of which can cost real money: the invoice a remote server returns is
+never decoded, so it can name its own price.
+
+That one exists in three places and is fixed in exactly one.
+
+```mermaid
+flowchart LR
+    S["the live site<br/>all four bugs"]
+    S -->|"extracted, unchanged"| M["modules/lightning/<br/>all four bugs — on purpose"]
+    S -->|"extracted, then fixed"| R["recipes/lightning-wallet-payments/<br/>fixed, each fix named"]
+
+    M -.->|"you want to know<br/>what production runs"| Q(["read this one"])
+    R -.->|"you want<br/>working code"| T(["take this one"])
+
+    style S fill:#7f1d1d,stroke:#ef4444,color:#fff
+    style M fill:#78350f,stroke:#f59e0b,color:#fff
+    style R fill:#14532d,stroke:#22c55e,color:#fff
+```
+
+A module is evidence of what a site runs, so patching it would destroy the only
+thing it is for. Do not diff one against the other and "fix" the difference.
+
+Both reviews are written up:
 
 - [`comparisons/image-proxy-ssrf.md`](comparisons/image-proxy-ssrf.md)
 - [`comparisons/lightning-payment-safety.md`](comparisons/lightning-payment-safety.md)
@@ -129,6 +174,15 @@ by itself. Two pages track what is owed:
   version spread and advisories, including a caret range on DoerfelVerse that
   permits eight `nostr-tools` releases, all of which break its build.
 
+## How this relates to the spec
+
+[`../pc20-favorites.md`](../pc20-favorites.md) says what the wire format is.
+This catalog says which code implements it correctly today, and where each app
+falls short. [`comparisons/favorites-10333.md`](comparisons/favorites-10333.md)
+is the join between them, and
+[`comparisons/trustworthy-read.md`](comparisons/trustworthy-read.md) defines
+the "trust" the spec's merging rules depend on.
+
 ## Not covered
 
 The player and app shell are not here. `contexts/AudioContext.tsx` is 3,166
@@ -142,6 +196,10 @@ before you build one:
 [`comparisons/site-identity-signing.md`](comparisons/site-identity-signing.md).
 
 RSS parsing is compared but not shipped for the same reason — every parser
-imports its own app's siblings. No split/TLV code ships either: the only implementation keeps its
-TLV construction private and hardcodes an app name and two feed IDs. See
+imports its own app's siblings.
+
+No split/TLV code could be **extracted**: the only implementation keeps its TLV
+construction private and hardcodes an app name and two feed IDs. That feature
+now ships as [`recipes/boostagram-keysend/`](recipes/boostagram-keysend/),
+authored rather than extracted, with both of those defects designed out. See
 [`comparisons/boostagram-tlv.md`](comparisons/boostagram-tlv.md).

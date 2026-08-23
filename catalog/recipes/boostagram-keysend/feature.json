@@ -1,0 +1,32 @@
+{
+  "name": "boostagram-keysend",
+  "tier": "wired",
+  "summary": "Split a boost across a <podcast:value> block's recipients and attach a bLIP-10 boostagram to each keysend payment, plus the decoder for reading inbound ones.",
+  "source": {
+    "repo": "authored",
+    "note": "Written for this catalog from the requirements in comparisons/boostagram-tlv.md. No live site runs this code. The one production implementation of the feature could not be extracted: its TLV construction is module-private, and an app name and two Podcast Index feed IDs are compiled into the records it builds."
+  },
+  "files": [
+    { "from": "files/boost-splits.ts",     "to": "lib/boost-splits.ts",     "state": "authored" },
+    { "from": "files/boostagram-tlv.ts",   "to": "lib/boostagram-tlv.ts",   "state": "authored" },
+    { "from": "files/boostagram-parse.ts", "to": "lib/boostagram-parse.ts", "state": "authored" }
+  ],
+  "dependencies": {},
+  "peer": {
+    "typescript": ">=5 (verified on 5.9.3, strict)"
+  },
+  "env": [],
+  "rename": [],
+  "requires": [
+    "lightning-wallet-payments - payKeysend() in lib/nwc-service.ts is the transport. This recipe builds what rides along with the payment; it does not send one."
+  ],
+  "caveats": [
+    "This code has never served production traffic. Every other recipe here promises the feature already works somewhere. This one cannot, and that is the trade for the feature existing at all.",
+    "appName and feedId are required parameters with no defaults. That is deliberate: the production implementation this replaces defaults the app name to its own and picks a feed ID by string-comparing one album's URL, so a copy attributes every boost to somebody else's show.",
+    "Needs crypto.randomUUID - every browser since 2021, and Node 19 or later. It throws rather than falling back to Math.random, because colliding boost_uuids merge two listeners' boosts into one on the receiving end.",
+    "splitBoost drops zero-sat allocations. A recipient with a share too small to earn one sat at this boost size gets nothing rather than a zero-sat keysend, which is a failed payment that looks sent.",
+    "A Lightning-address recipient in a value block cannot be paid by keysend. buildKeysendPayments returns those separately as lnAddressRecipients so they are visible rather than silently dropped; pay them through payLightningAddress in the wallet recipe.",
+    "The parser trusts nothing and verifies nothing. A boostagram is self-declared metadata riding along with a payment: the amount in it is whatever the sender wrote. Take the amount you were actually paid from your wallet, never from value_msat.",
+    "No <podcast:valueTimeSplit> support. No live site in this catalog parses that tag either, so there was nothing to base it on."
+  ]
+}

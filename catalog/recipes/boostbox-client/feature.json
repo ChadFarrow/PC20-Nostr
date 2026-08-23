@@ -1,0 +1,41 @@
+{
+  "name": "boostbox-client",
+  "tier": "wired",
+  "summary": "Store a boost's Podcasting 2.0 metadata in a BoostBox instance and get back a short URL for the payment description, with the API key held server-side.",
+  "source": {
+    "repo": "authored",
+    "note": "Written for this catalog against the documented HTTP API of BoostBox (https://github.com/noblepayne/boostbox, MIT). No BoostBox source is redistributed here. The pattern it replaces is live: a Podcasting 2.0 site reads NEXT_PUBLIC_BOOSTBOX_API_KEY from client components, which serves the key to every visitor."
+  },
+  "files": [
+    { "from": "files/boostbox-types.ts",  "to": "lib/boostbox-types.ts",       "state": "authored" },
+    { "from": "files/boostbox-client.ts", "to": "lib/boostbox-client.ts",      "state": "authored" },
+    { "from": "files/route.ts",           "to": "app/api/boostbox/route.ts",   "state": "authored" }
+  ],
+  "dependencies": {},
+  "peer": {
+    "next": ">=14 (App Router) - route.ts is a Next.js route handler",
+    "typescript": ">=5 (verified on 5.9.3, strict)"
+  },
+  "env": [
+    {
+      "name": "BOOSTBOX_API_KEY",
+      "scope": "server-only",
+      "why": "Sent as the X-Api-Key header. Must NOT carry a NEXT_PUBLIC_ prefix: Next.js inlines every NEXT_PUBLIC_* value into the browser bundle at build time, so a prefixed key is served to everyone who loads the page. Adding the prefix to silence an import error puts the key back in the bundle."
+    },
+    {
+      "name": "BOOSTBOX_URL",
+      "scope": "server-only",
+      "why": "Base URL of your BoostBox instance. The route builds its target from this and never from the request, so the route cannot be used as a proxy to somewhere else."
+    }
+  ],
+  "rename": [],
+  "caveats": [
+    "This code has never served production traffic. It is written against BoostBox's documented API, not extracted from a site that runs it.",
+    "The route refuses to start if BOOSTBOX_API_KEY is still 'v4v4me'. That is the default shipped with BoostBox itself, so anyone who knows the project knows it, and a deployment still using it is an open write endpoint.",
+    "Only the fields BoostBox documents are forwarded. A route that relays whatever it was handed is a way to send arbitrary bodies to another service using your credentials.",
+    "String fields are truncated to 4096 characters so one caller cannot walk your instance into its 413.",
+    "Nothing here proves a payment happened. BoostBox stores what you tell it; a boost record is a claim, not a receipt.",
+    "Submit before you pay. receipt.desc is the payment description you want to send, so the metadata stays reachable through a wallet that drops custom TLV records.",
+    "GET /boost/{id} is not wrapped. It needs no key and returns an HTML page with the JSON in a URL-encoded x-rss-payment header; call it directly if you need it."
+  ]
+}

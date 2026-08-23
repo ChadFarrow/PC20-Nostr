@@ -19,6 +19,12 @@ missing — are in [`../comparisons/`](../comparisons/).
 > paste-ready fix:
 > [`../comparisons/lightning-payment-safety.md`](../comparisons/lightning-payment-safety.md).
 >
+> **These files still have all of it, on purpose.** A module is evidence about
+> what a live site runs, so patching it here would destroy the thing it is for.
+> If you want working code rather than evidence, take
+> [`../recipes/lightning-wallet-payments/`](../recipes/lightning-wallet-payments/)
+> instead - same three files, with the issues fixed and each fix named.
+>
 > Version drift and advisories across the sites these came from:
 > [`../comparisons/dependency-drift.md`](../comparisons/dependency-drift.md).
 
@@ -28,13 +34,24 @@ missing — are in [`../comparisons/`](../comparisons/).
 |---|---|---|---|
 | `lightning/webln-service.ts` | 177 | **none** | ITDV-Lightning |
 | `lightning/lnurl-service.ts` | 233 | `bech32` | ITDV-Lightning |
-| `lightning/nwc-service.ts` | 557 | `nostr-tools` | ITDV-Lightning |
+| `lightning/nwc-service.ts` | 557 | `nostr-tools`, **and `@/lib/safe-storage`** | ITDV-Lightning |
 | `lightning/zap-receipt-service.ts` | 407 | `nostr-tools` | ITDV-Lightning |
 | `nostr/read-trust.ts` | 124 | **none** | boostmebitch |
 | `nostr/favorites-list.ts` | 722 | **none** | boostmebitch |
 | `rss-pc20/podcast-index-auth.ts` | 22 | `node:crypto` | MSP-2.0 |
 
-All seven typecheck under `strict` with only those packages present.
+Six of the seven typecheck under `strict` with only those packages present.
+
+> **Correction.** This page previously said all seven did, and listed
+> `nwc-service.ts`'s external imports as `nostr-tools` alone. Line 10 of that
+> file is `import { safeLocalStorage } from '@/lib/safe-storage'`, so it does
+> not compile on its own - it needs a file this directory does not ship.
+>
+> That is the difference between a module and a recipe, and it is why
+> [`../recipes/lightning-wallet-payments/`](../recipes/lightning-wallet-payments/)
+> ships `safe-storage.ts` alongside it. `check-recipes.sh` step 4 enforces the
+> rule for recipes; nothing enforced it here, which is how the claim stayed
+> wrong.
 
 ## `nostr-tools` must be pinned to 2.16.x
 
@@ -82,10 +99,12 @@ both blocking call sites in the site itself.
 
 ## What is deliberately missing
 
-No split/TLV module. The only live-site implementation keeps its TLV
-construction private and hardcodes an app name and two Podcast Index feed IDs,
-so there is nothing to extract without rewriting it; see
-[`../comparisons/boostagram-tlv.md`](../comparisons/boostagram-tlv.md).
+No split/TLV module, because there is still nothing to extract: the only
+live-site implementation keeps its TLV construction private and hardcodes an
+app name and two Podcast Index feed IDs. The feature now exists in the catalog
+as [`../recipes/boostagram-keysend/`](../recipes/boostagram-keysend/), which is
+**authored** rather than extracted and so does not belong in this directory.
+See [`../comparisons/boostagram-tlv.md`](../comparisons/boostagram-tlv.md).
 
 `lnurl-service.ts` has no LUD-12 comment negotiation: it appends `?comment=`
 with no check that the endpoint accepts comments and no length check, so an

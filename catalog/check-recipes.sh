@@ -23,7 +23,7 @@ note() { echo "FAIL  $*"; fail=1; }
 ALLOWED="ITDV-Lightning boostmebitch stablekraft-app MSP-2.0 candr.space"
 
 echo "== 1. provenance names only production repos"
-while IFS=$'\t' read -r dest repo _ref _sha _src; do
+while IFS=$'\t' read -r dest repo _ref _sha _src _state; do
   [ "$dest" = "catalog_path" ] && continue
   [ -n "$dest" ] || continue
   case " $ALLOWED " in
@@ -32,7 +32,67 @@ while IFS=$'\t' read -r dest repo _ref _sha _src; do
   esac
 done < "$HERE/PROVENANCE.tsv"
 
-echo "== 2. every recipe has a manifest, and every listed file exists"
+echo "== 2. every shipped file says where it came from"
+# Three states, and a file must be in exactly one of them:
+#
+#   extracted  byte-identical to a live site. PROVENANCE.tsv carries the row.
+#   patched    a live-site file plus a security fix the site does not have.
+#              PROVENANCE.tsv carries the row, and feature.json must name the
+#              issues fixed - a reader has to be able to tell what diverged
+#              and why without diffing against a repo they do not have.
+#   authored   new code that has never served traffic. No PROVENANCE row, and
+#              feature.json must say so out loud.
+#
+# This check exists so authored code cannot arrive unlabelled later. Every
+# other page in this catalog promises "this already works somewhere"; a file
+# that cannot make that promise has to be the one that says so.
+python3 - "$HERE" <<'STATE'
+import json, os, sys, csv
+here = sys.argv[1]
+prov = {}
+with open(os.path.join(here, "PROVENANCE.tsv")) as f:
+    for row in csv.reader(f, delimiter="\t"):
+        if not row or row[0] == "catalog_path":
+            continue
+        prov[row[0]] = row[5] if len(row) > 5 else "extracted"
+bad = 0
+rdir = os.path.join(here, "recipes")
+for name in sorted(os.listdir(rdir)):
+    d = os.path.join(rdir, name)
+    mpath = os.path.join(d, "feature.json")
+    if not os.path.isfile(mpath):
+        continue
+    try:
+        m = json.load(open(mpath))
+    except Exception:
+        continue  # the manifest check below reports the parse failure
+    for f in m.get("files", []):
+        rel = os.path.join("recipes", name, f["from"])
+        declared = f.get("state")
+        actual = prov.get(rel)
+        if actual is None:
+            if declared != "authored":
+                print("FAIL  %s has no PROVENANCE.tsv row, so feature.json must "
+                      "declare \"state\": \"authored\" (found %r)" % (rel, declared))
+                bad = 1
+            continue
+        if declared == "authored":
+            print("FAIL  %s is declared authored but has a PROVENANCE.tsv row" % rel)
+            bad = 1
+            continue
+        if declared is not None and declared != actual:
+            print("FAIL  %s is %r in PROVENANCE.tsv but %r in feature.json"
+                  % (rel, actual, declared))
+            bad = 1
+        if (declared or actual) == "patched" and not f.get("fixes"):
+            print("FAIL  %s is patched but feature.json lists no 'fixes'; say "
+                  "what diverged from the site and why" % rel)
+            bad = 1
+sys.exit(bad)
+STATE
+[ "$?" = "0" ] || fail=1
+
+echo "== 3. every recipe has a manifest, and every listed file exists"
 for d in "$HERE"/recipes/*/; do
   [ -d "$d" ] || continue
   name=$(basename "$d")
@@ -62,7 +122,7 @@ sys.exit(bad)
 PY
 done
 
-echo "== 3. no unshipped app-internal import"
+echo "== 4. no unshipped app-internal import"
 # An '@/...' import the recipe does not also ship is an import error in
 # someone else's repo, which is the difference between "just add it" and
 # "this is broken".
@@ -78,17 +138,27 @@ for d in "$HERE"/recipes/*/; do
   done
 done
 
-echo "== 4. no recipe teaches a secret leak"
+echo "== 5. no recipe teaches a secret leak"
 # Next.js inlines every NEXT_PUBLIC_* value into the browser bundle, so one
 # holding a key is served to everyone. Deliberately broader than NSEC: a live
 # site reads NEXT_PUBLIC_BOOSTBOX_API_KEY from a client component, and a
 # narrower pattern would have missed it.
-if grep -rniE "(NEXT_PUBLIC|VITE|REACT_APP)_[A-Z0-9_]*(NSEC|SECRET|PRIVATE|PRIVKEY|SEED|MNEMONIC|PASSWORD|TOKEN|API_?KEY)" \
+#
+# What counts is a READ or an ASSIGNMENT, not a mention. A recipe naming the
+# variable to tell a reader never to use it is doing its job, and flagging
+# that pushes us to delete the warning rather than the problem - the same
+# reasoning as the dead-URL check below. So this matches `env.NAME`,
+# `env["NAME"]` and `NAME=`, and leaves prose alone.
+#
+# Verified both ways: `process.env.NEXT_PUBLIC_BOOSTBOX_API_KEY`, which is the
+# real live-site leak this check was written for, is still caught.
+SECRETISH='(NEXT_PUBLIC|VITE|REACT_APP)_[A-Z0-9_]*(NSEC|SECRET|PRIVATE|PRIVKEY|SEED|MNEMONIC|PASSWORD|TOKEN|API_?KEY)'
+if grep -rnE "(env\.${SECRETISH}|env\[[\"']${SECRETISH}|^[^|]*\b${SECRETISH}=)" \
      "$HERE/recipes" 2>/dev/null; then
-  note "a recipe references a secret in a client-exposed variable (these are bundled and served publicly)"
+  note "a recipe reads or sets a secret in a client-exposed variable (these are bundled and served publicly)"
 fi
 
-echo "== 5. every app-specific constant is documented in 'rename'"
+echo "== 6. every app-specific constant is documented in 'rename'"
 # Match only against the rename entries, never the whole manifest: live_at is
 # itself a branded URL, so grepping the file passes on the URL and lets a real
 # hardcoded app name through. That is exactly the leak this check exists for.
@@ -114,7 +184,7 @@ sys.exit(bad)
 PY
 done
 
-echo "== 6. no recipe points a reader at a dead or legacy URL"
+echo "== 7. no recipe points a reader at a dead or legacy URL"
 # re.podtards.com does not resolve; msp.podtards.com is MSP's pre-
 # musicsideproject.com address. Either one makes a "see it working" link lie.
 #
@@ -133,7 +203,7 @@ for d in "$HERE"/recipes/*/; do
   esac
 done
 
-echo "== 7. no page names a repo that is not a live site"
+echo "== 8. no page names a repo that is not a live site"
 # Documentation drifts back toward whatever is easiest to cite, and naming a
 # repo here implies a reader could go look at it running somewhere. These are
 # the ones that have already had to be removed once: unreleased template
@@ -151,7 +221,7 @@ for name in $DENIED; do
 $(echo "$hits" | sed 's|^|        |')"
 done
 
-echo "== 8. every live_at is a plain http(s) URL"
+echo "== 9. every live_at is a plain http(s) URL"
 # Checked even without --network, because the value is about to be handed to
 # curl. curl parses options at ANY argument position, so a live_at beginning
 # with "-" is read as a flag rather than a URL. `-Kfile` makes curl read an
@@ -169,7 +239,7 @@ for d in "$HERE"/recipes/*/; do
 done
 
 if [ "$NET" = "1" ]; then
-  echo "== 9. every live_at still answers"
+  echo "== 10. every live_at still answers"
   for d in "$HERE"/recipes/*/; do
     [ -f "$d/feature.json" ] || continue
     url=$(python3 -c "import json,sys;print(json.load(open(sys.argv[1])).get('live_at',''))" "$d/feature.json")
