@@ -1,59 +1,49 @@
 # Boostagram over keysend (bLIP-10)
 
-**This code has never run in production.** Every other recipe in this catalog
-ships what a live site is serving right now. This one cannot, and you should
-know that before you copy it.
+A boost is sats plus a message. This turns one boost into the payments that
+carry it: split across everyone the feed says gets paid, each with the show,
+episode, timestamp and message attached.
 
-The reason is written up in
-[`../../comparisons/boostagram-tlv.md`](../../comparisons/boostagram-tlv.md):
-one live site implements boostagrams, its TLV construction is private to its
-own module, and its own app name and two Podcast Index feed IDs are compiled
-into the records it builds. Copied unchanged into another app it attributes
-every boost to somebody else's show. There was nothing to extract, so this was
-written from the requirements that page records instead.
+New to these words? → [`../../../GLOSSARY.md`](../../../GLOSSARY.md)
 
-What you get for that trade: the split arithmetic and the record format, with
-both documented failure modes designed out, plus a decoder that no codebase in
-this catalog has.
+**This code has never run in production.** Every other recipe here ships what a
+live site serves right now. This one cannot, because the only site that
+implements boostagrams keeps its record-building private and has its own app
+name and two feed IDs compiled into it — copied unchanged, it credits every
+boost to somebody else's show. So this was written from the requirements in
+[`../../comparisons/boostagram-tlv.md`](../../comparisons/boostagram-tlv.md)
+instead, with both defects designed out. It ships tests in place of traffic.
 
-## What it does
+## What happens to one boost
 
-Take a boost, a `<podcast:value>` block, and what is playing. Get back the
-keysend payments to send.
+```mermaid
+flowchart TD
+    V["podcast:value block<br/>Alice 60 · Bob 30 · Carol 10"] --> S["splitBoost(1000 sats)"]
+    S --> A["Alice · 600 sats"]
+    S --> B["Bob · 300 sats"]
+    S --> C["Carol · 100 sats — plus the remainder"]
 
-```ts
-import { splitBoost } from '@/lib/boost-splits';
-import { buildKeysendPayments } from '@/lib/boostagram-tlv';
-import { getNWCService } from '@/lib/nwc-service';
+    A --> KA["keysend<br/>uuid: aaa"]
+    B --> KB["keysend<br/>uuid: bbb"]
+    C --> KC["keysend<br/>uuid: ccc"]
 
-const allocations = splitBoost(1000, valueBlock.recipients);   // sats
+    KA --> T["every payment carries<br/>TLV 7629169 — the boostagram<br/>TLV 7629175 — the feed guid<br/>the same boost_uuid"]
+    KB --> T
+    KC --> T
 
-const { payments, lnAddressRecipients } = buildKeysendPayments(allocations, {
-  appName: 'Your App',          // required - no default, see below
-  feedId: feed.podcastIndexId,  // required - no default, see below
-  feedGuid: feed.guid,
-  podcast: feed.title,
-  episode: episode.title,
-  senderName: 'listener',
-  message: 'great episode',
-  ts: Math.floor(player.currentTime),
-});
+    T --> R["receiver regroups them<br/>into one boost"]
 
-const nwc = getNWCService();
-for (const p of payments) {
-  await nwc.payKeysend(p.destination, p.sats, p.tlvRecords);
-}
+    style T fill:#1e3a5f,stroke:#3b82f6,color:#fff
+    style R fill:#14532d,stroke:#22c55e,color:#fff
 ```
 
-`payKeysend` comes from
-[`../lightning-wallet-payments/`](../lightning-wallet-payments/). This recipe
-builds what rides along with a payment; it does not send one. Install that one
-too.
+One `boost_uuid` shared, a fresh `uuid` each. That pair is what lets a receiver
+show one boost instead of three unrelated payments. `value_msat` is the slice,
+`value_msat_total` the whole boost — send both, or a receiver reports the wrong
+number.
 
-`lnAddressRecipients` is the recipients in the same value block who cannot take
-a keysend. They are returned rather than dropped, because a value block mixing
-node pubkeys and Lightning addresses is normal and silently skipping half of it
-underpays people. Send those through `payLightningAddress`.
+The last recipient takes the remainder, because integer division otherwise
+loses sats on most three-way splits.
 
 ## Install
 
@@ -61,65 +51,62 @@ underpays people. Send those through `payLightningAddress`.
 # no packages
 ```
 
-| From | To |
-|---|---|
-| `files/boost-splits.ts` | `lib/boost-splits.ts` |
-| `files/boostagram-tlv.ts` | `lib/boostagram-tlv.ts` |
-| `files/boostagram-parse.ts` | `lib/boostagram-parse.ts` |
+Copy the three files to the paths in `feature.json`. Transport is
+`payKeysend` from
+[`../lightning-wallet-payments/`](../lightning-wallet-payments/) — install that
+too. This recipe builds what rides along; it does not send anything.
 
-Nothing to rename — but two things you must **pass**, see below.
+```ts
+import { splitBoost } from '@/lib/boost-splits';
+import { buildKeysendPayments } from '@/lib/boostagram-tlv';
 
-## `appName` and `feedId` are required on purpose
+const { payments, lnAddressRecipients } = buildKeysendPayments(
+  splitBoost(1000, valueBlock.recipients),
+  {
+    appName: 'Your App',            // required — no default
+    feedId: feed.podcastIndexId,    // required — no default
+    feedGuid: feed.guid,
+    podcast: feed.title,
+    episode: episode.title,
+    senderName: 'listener',
+    message: 'great episode',
+    ts: Math.floor(player.currentTime),
+  }
+);
 
-They have no defaults, and a call without them throws.
+for (const p of payments) await nwc.payKeysend(p.destination, p.sats, p.tlvRecords);
+```
 
-This is the whole reason the production implementation could not be shipped.
-It has `app_name: metadata.appName || 'ITDV App'`, so a caller who forgets
-sends somebody else's app name to every recipient. And it picks the Podcast
-Index feed ID by string-comparing against one album's URL, with a different
-hardcoded ID as the fallback for **every other feed in existence**.
+**`appName` and `feedId` have no defaults on purpose.** A required parameter
+cannot be forgotten; a default can, and that is exactly how the production
+implementation credits the wrong show.
 
-A required parameter cannot be forgotten. A default can.
+`lnAddressRecipients` is everyone in the same value block who cannot take a
+keysend. They are returned rather than dropped — pay them with
+`payLightningAddress`.
 
-## The two ways split arithmetic goes wrong
+## Reading inbound boostagrams
 
-Both values come out of a `<podcast:value>` block, which is to say out of
-someone else's RSS feed, which is to say you do not control them. `splitBoost`
-throws on both rather than paying.
+No codebase this catalog was built from can do this; every implementation is an
+encoder. If you want to show a creator what they were sent, this is the missing
+side.
 
-- **A total share of zero.** `floor(amount * share / 0)` is `NaN`, for every
-  recipient, and a `NaN` amount reaches a wallet as garbage.
-- **A negative share.** With shares `[-1, 2]`, a naive `amount - allocated`
-  remainder pays destination B **twice the boost**.
+```ts
+import { parseBoostagram, groupByBoost } from '@/lib/boostagram-parse';
 
-And the one that is not an error, just a leak: every recipient but the last
-gets `floor(amount * share / total)`, so the last one takes the remainder.
-Without that, integer division loses sats on most three-way splits.
+const parsed = incoming.map((tx) => parseBoostagram(tx.customRecords))
+                       .filter((b) => b !== null);
 
-Verified: `1000`, `999`, `1`, `7` and `33333` sats each split three ways add
-back up to exactly what went in.
+for (const [, parts] of groupByBoost(parsed)) { /* one boost */ }
+```
 
-## One `boost_uuid`, a separate `uuid` per payment
-
-A three-way split is three payments. They carry one shared `boost_uuid` and a
-fresh `uuid` each. That pair is what lets a receiver reassemble the parts into
-a single boostagram rather than showing three unrelated payments — which is
-what `groupByBoost` in the parser does.
-
-`value_msat` is this recipient's slice; `value_msat_total` is the whole boost.
-Both are sent, because a receiver showing "1000 sats" when it was handed one
-300-sat slice is reading the wrong field.
-
-## The records
-
-| Record | Carries |
-|---|---|
-| `7629169` | the boostagram, as UTF-8 JSON |
-| `7629175` | the Podcast Index feed GUID, as UTF-8 text |
+**Nothing in a boostagram is verified, and nothing can be.** It is text a
+stranger attached to a payment. Take the amount you were actually paid from
+your wallet, never from `value_msat`. A malformed record returns `null` rather
+than throwing, and every number is checked before use, because one `NaN`
+poisons any total built by summing boosts.
 
 ## Verify it yourself
-
-This code has no production traffic vouching for it, so it ships its proof:
 
 ```bash
 npm i -D tsx typescript
@@ -128,32 +115,6 @@ npx tsx tests/splits.test.ts
 
 Thirteen checks, each one a property
 [`../../comparisons/boostagram-tlv.md`](../../comparisons/boostagram-tlv.md)
-says the production implementation lacks.
-
-## Reading inbound boostagrams
-
-`boostagram-parse.ts` has no counterpart in any codebase this catalog was built
-from — every implementation there is an encoder. If you want to show a creator
-what they were sent, this is the missing side.
-
-```ts
-import { parseBoostagram, groupByBoost } from '@/lib/boostagram-parse';
-
-const parsed = incoming.map((tx) => parseBoostagram(tx.customRecords))
-                       .filter((b) => b !== null);
-
-for (const [, parts] of groupByBoost(parsed)) {
-  // parts are the splits of one boost
-}
-```
-
-**Nothing in a boostagram is verified, and nothing can be.** It is metadata a
-stranger attached to a payment: the app name, the sender name and the amount in
-it are all whatever they typed. Take the amount you were actually paid from
-your wallet, never from `value_msat`.
-
-The parser is written accordingly — a malformed record returns `null` instead
-of throwing into whatever loop is draining your wallet history, and every
-number read out of one is checked with `Number.isFinite` before use, because
-`parseInt` on a non-numeric value yields `NaN` and one `NaN` poisons any total
-computed by summing boosts.
+says the production implementation lacks — including shares totalling zero
+(every allocation becomes `NaN`) and shares `[-1, 2]` (the last recipient is
+paid twice the boost).

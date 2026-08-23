@@ -1,36 +1,40 @@
 # BoostBox client, with the key on the server
 
 [BoostBox](https://github.com/noblepayne/boostbox) is a small self-hostable
-service (MIT, Clojure) that stores Podcasting 2.0 payment metadata and hands
-back a short URL for it. You put that URL in the payment description, so a
-boost's message, show, episode and splits stay reachable even when the wallet
-in between drops custom TLV records — which is most of them.
+service (MIT) that stores a boost's metadata and hands back a short URL. You put
+that URL in the payment description, so the message, show and episode stay
+reachable even when the wallet in between drops TLV records — which most do.
+
+New to these words? → [`../../../GLOSSARY.md`](../../../GLOSSARY.md)
 
 **This code has never served production traffic.** It is written against
-BoostBox's documented API, not extracted from a site running it. No BoostBox
-source is redistributed here.
+BoostBox's documented API. No BoostBox source is redistributed here.
 
-## The reason this recipe exists
+## Why this recipe exists
 
 BoostBox authenticates with an `X-Api-Key` header. The obvious way to send one
-from a Next.js app is to read `NEXT_PUBLIC_BOOSTBOX_API_KEY` in the component
-that boosts.
+from Next.js is to read `NEXT_PUBLIC_BOOSTBOX_API_KEY` in the component that
+boosts. That does not do what it looks like:
 
-That does not do what it looks like it does. **Next.js inlines every
-`NEXT_PUBLIC_*` value into the browser bundle at build time**, so the key is
-served to everybody who loads the page, and anybody who reads it can write
-boosts under your name until you rotate it.
+```mermaid
+flowchart TB
+    subgraph good ["this recipe"]
+        direction LR
+        B2["browser<br/>no key"] --> RT["your route<br/>holds the key"] --> X2["BoostBox"]
+    end
 
-A live Podcasting 2.0 site does exactly this today: `lib/boostbox-service.ts`
-reads `NEXT_PUBLIC_BOOSTBOX_API_KEY` and is imported by two client components.
+    subgraph bad ["the obvious way — a live site does this"]
+        direction LR
+        B1["browser<br/>NEXT_PUBLIC_ key<br/>baked into the bundle"] --> X1["BoostBox"]
+    end
 
-This recipe is the shape that does not. The browser calls your own route; the
-route holds the key.
-
+    style B1 fill:#7f1d1d,stroke:#ef4444,color:#fff
+    style B2 fill:#14532d,stroke:#22c55e,color:#fff
+    style RT fill:#1e3a5f,stroke:#3b82f6,color:#fff
 ```
-browser  ──POST /api/boostbox──▶  your route  ──POST /boost + X-Api-Key──▶  BoostBox
-(no key)                          (the key)
-```
+Next.js inlines every `NEXT_PUBLIC_*` value into the browser bundle at build
+time, so that key is served to everybody who loads the page. Anyone who reads
+it can write boosts under your name until you rotate it.
 
 ## Install
 
@@ -38,13 +42,8 @@ browser  ──POST /api/boostbox──▶  your route  ──POST /boost + X-Ap
 # no packages
 ```
 
-| From | To |
-|---|---|
-| `files/boostbox-types.ts` | `lib/boostbox-types.ts` |
-| `files/boostbox-client.ts` | `lib/boostbox-client.ts` |
-| `files/route.ts` | `app/api/boostbox/route.ts` |
-
-Set two environment variables, **neither with a `NEXT_PUBLIC_` prefix**:
+Copy the three files to the paths in `feature.json`, then set two variables —
+**neither with a `NEXT_PUBLIC_` prefix**:
 
 ```bash
 BOOSTBOX_API_KEY=your-real-key
@@ -55,17 +54,13 @@ If you add the prefix to make an import error go away, you have put the key
 back in the bundle. The fix for that error is to call the route, not to import
 the route's module.
 
-### Do not keep the default key
-
-BoostBox ships with `v4v4me` as its default. Anyone who knows the project knows
-it, so a deployment still using it is an open write endpoint. **The route
-refuses to run with that value** and returns 503 rather than pretending it is
-configured.
+**Do not keep the default key.** BoostBox ships with `v4v4me`, so a deployment
+still using it is an open write endpoint. The route refuses to run with that
+value.
 
 ## Use
 
-Submit *before* you pay, because `receipt.desc` is what you want to send as the
-payment description.
+Submit *before* you pay — `receipt.desc` is what you send as the description.
 
 ```ts
 import { submitBoost, buildSubmission } from '@/lib/boostbox-client';
@@ -77,36 +72,35 @@ const receipt = await submitBoost(buildSubmission({
   value_msat_total: totalSats * 1000,   // the whole boost
   message: 'great episode',
   app_name: 'Your App',
-  sender_name: 'listener',
   feed_guid: feed.guid,
-  feed_title: feed.title,
   item_guid: episode.guid,
-  item_title: episode.title,
-  recipient_name: recipient.name,
-  recipient_address: recipient.address,
-  position: Math.floor(player.currentTime),
 }));
 
 // receipt.desc is 'rss::payment::boost <url> great episode'
 await nwc.payInvoice(invoice);          // memo: receipt.desc
 ```
 
-`value_msat` is this recipient's slice and `value_msat_total` is the whole
-boost — the same distinction the boostagram records make, and the same way to
-get it wrong. [`../boostagram-keysend/`](../boostagram-keysend/) produces both
-numbers from a value block.
+## Pair it with boostagrams
 
-## The two work together
+The two solve the same problem from opposite ends.
+[`../boostagram-keysend/`](../boostagram-keysend/) attaches the metadata to the
+payment as TLV records — complete, but only survives if every hop keeps them.
+This stores the metadata and puts a URL in the description — less data, but a
+description survives hops that records do not. Send both.
 
-They solve the same problem from opposite ends.
+## What the route does and does not do
 
-- **[`boostagram-keysend`](../boostagram-keysend/)** attaches the metadata to
-  the payment as TLV records. Complete, but only survives if every hop keeps
-  custom records.
-- **This recipe** stores the metadata somewhere and puts a URL in the payment
-  description. Less data, but a description survives hops that records do not.
+**Does:** holds the key; forwards only the fields BoostBox documents, so it
+cannot be used to send arbitrary bodies upstream under your credentials; builds
+its target from `BOOSTBOX_URL` and never from the request; validates types,
+truncates strings at 4096, times out at 10s, refuses redirects; returns 502
+with no upstream body.
 
-Send both. They cost one extra request between them.
+**Does not:** prove a payment happened — BoostBox stores what you tell it, so a
+boost record is a claim, not a receipt. It does not rate-limit either; put that
+in front of it if the endpoint is public.
+
+`GET /boost/{id}` is not wrapped. It needs no key — call it directly.
 
 ## Verify it yourself
 
@@ -115,31 +109,6 @@ npm i -D tsx typescript
 npx tsx tests/route.test.ts     # map @/lib/* to files/ in tsconfig first
 ```
 
-Confirms the route refuses to run unconfigured or with the default key,
-rejects seven malformed bodies, drops unknown fields rather than forwarding
-them, sends to the configured host rather than one from the request, and
-attaches `X-Api-Key` server-side.
-
-## What the route does and does not do
-
-**Does:**
-
-- Holds the key. Nothing key-shaped reaches the browser.
-- Forwards only the fields BoostBox documents. A route that relays whatever it
-  was handed is a way to send arbitrary bodies to another service using your
-  credentials.
-- Builds its target from `BOOSTBOX_URL` and never from the request, so it
-  cannot be pointed somewhere else.
-- Validates types before forwarding, truncates strings at 4096 characters, sets
-  a 10-second timeout, and refuses redirects.
-- Returns 502 with no upstream body. An error message from another service is
-  not yours to relay verbatim.
-
-**Does not:**
-
-- **Prove a payment happened.** BoostBox stores what you tell it. A boost
-  record is a claim, not a receipt.
-- **Rate-limit.** The route is as open as whatever sits in front of it. Put
-  your own limiter there if the endpoint is public.
-- **Wrap `GET /boost/{id}`.** It needs no key — it returns an HTML page with
-  the JSON in a URL-encoded `x-rss-payment` header. Call it directly.
+Confirms the route refuses to run unconfigured or with the default key, rejects
+seven malformed bodies, drops unknown fields, and attaches `X-Api-Key`
+server-side only.

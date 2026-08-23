@@ -26,6 +26,24 @@ That one connects a wallet and sends. The other two ride on top of it:
 keysend payment, and [`boostbox-client`](boostbox-client/) stores that metadata
 somewhere the payment description can point at.
 
+### The three payment recipes stack
+
+```mermaid
+flowchart TB
+    B["boostagram-keysend<br/>splits the boost, builds the TLV records"]
+    X["boostbox-client<br/>stores the metadata, returns a URL"]
+    W["lightning-wallet-payments<br/>connects a wallet and sends the sats"]
+
+    B --> W
+    X --> W
+
+    style W fill:#1e3a5f,stroke:#3b82f6,color:#fff
+```
+
+**Start at the bottom.** `lightning-wallet-payments` is the one that moves
+money; the other two decide what rides along with it. Installing either of them
+without it gives you records and URLs and no way to pay anybody.
+
 ## One recipe has been withdrawn
 
 There was an **image proxy** here. A security review of this repo found three

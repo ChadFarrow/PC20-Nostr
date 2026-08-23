@@ -134,15 +134,22 @@ never decoded, so it can name its own price.
 
 That one exists in three places and is fixed in exactly one.
 
-| Where | State |
-|---|---|
-| The live site | all four present |
-| [`modules/lightning/`](modules/lightning/) | all four present — a module is evidence of what the site runs, so patching it would destroy the only thing it is for |
-| [`recipes/lightning-wallet-payments/`](recipes/lightning-wallet-payments/) | **fixed**, each fix named in its `feature.json` |
+```mermaid
+flowchart LR
+    S["the live site<br/>all four bugs"]
+    S -->|"extracted, unchanged"| M["modules/lightning/<br/>all four bugs — on purpose"]
+    S -->|"extracted, then fixed"| R["recipes/lightning-wallet-payments/<br/>fixed, each fix named"]
 
-Take the recipe if you want working code. Read the module if you want to know
-what production does. Do not diff one against the other and "fix" the
-difference.
+    M -.->|"you want to know<br/>what production runs"| Q(["read this one"])
+    R -.->|"you want<br/>working code"| T(["take this one"])
+
+    style S fill:#7f1d1d,stroke:#ef4444,color:#fff
+    style M fill:#78350f,stroke:#f59e0b,color:#fff
+    style R fill:#14532d,stroke:#22c55e,color:#fff
+```
+
+A module is evidence of what a site runs, so patching it would destroy the only
+thing it is for. Do not diff one against the other and "fix" the difference.
 
 Both reviews are written up:
 
