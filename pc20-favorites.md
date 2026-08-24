@@ -226,6 +226,22 @@ other apps never see it, and no two writers need theirs to agree.
   app's side.
 - **Losing it is safe; guessing is not.** An empty baseline yields no
   removals, so the next publish is a pure union. Start there.
+- **If the event has two halves, answer "your own contribution" for each half
+  separately — and the half you did not publish into has no new contribution,
+  so its claims are CARRIED, never recomputed.** Under one whole-list choice a
+  writer feeds its local entries into one half and passes the other an empty
+  list. Recompute that half's claims from what you merged and you claim every
+  entry in it, another writer's included; nothing backs the claim next cycle,
+  the third bullet above fires on the whole half at once, and it is deleted.
+  Carrying instead keeps the claims made while that half *was* the one you
+  wrote into, so moving an entry between halves still works.
+
+  Two things make this hard to catch. The damage needs **two cycles** — the
+  first publish emits correct bytes and only the baseline recorded beside it
+  is wrong — and the first cycle need not publish at all, because a writer
+  that records a baseline when the bytes already match records the bad one
+  anyway. Both implementations of this format got it wrong; see test vector
+  13.
 
 ### 3. The merge
 
@@ -274,6 +290,20 @@ others.
 
 "I can't render this" is not the same claim as "this is junk". Deleting an
 entry should be a thing the user asked for.
+
+**This rule covers `content`, not only tags.** `content` is the one free slot
+in the event and it is shared like everything else here. A writer that has
+never heard of a private half must still republish the bytes it read, verbatim
+— it has nothing to decrypt, nothing to parse, and nothing to understand, only
+bytes to put back. Republishing `""` because that is what the format has
+always specified erases whatever another app put there: silently, on someone
+else's device, with no undo, and while behaving correctly by every other rule
+in this document. kind:10333 is replaceable and keeps no history, so there is
+nothing to recover from.
+
+Support for a private half is optional. Carrying one is not. Any republish
+path whose `content` is a literal rather than a value threaded from the read
+is the bug — a default parameter is how it gets written.
 
 ### 5. Publish only when the bytes change
 
@@ -369,6 +399,31 @@ left under it stays.** Both are "a feed in my baseline that I no longer
 hold"; only the first is a removal you may express. Getting this wrong
 deletes another app's tracks along with the group that named their parent.
 
+**12. An opaque `content` survives a republish by a writer that cannot read
+it.** Read an event whose `content` is a non-empty string your app has no
+meaning for, change a favorite, publish, and `content` must come back byte
+for byte. The sibling to vector 4, and the one that decides whether a private
+half can exist at all. Pin the inverse too, or an implementation that simply
+never touches `content` passes: a list built from scratch has an empty
+`content`, and a republish is empty only when the event you read was.
+
+**13. A writer does not delete the half it does not write into — and this
+takes TWO cycles to observe.** Read an event with entries in both halves,
+where the ones in the half you do not publish into are not yours. Run a full
+cycle, feed the baseline it recorded back in, and run a second. The foreign
+entries must still be there after the second. One cycle cannot see this: the
+first publish emits correct bytes and only the baseline beside them is wrong,
+so every single-cycle vector above passes over it. Both implementations of
+this format shipped it, in both directions — one published an empty `content`
+over a private half it was carrying, the other published an empty tag list
+over a public half.
+
+Pin the control in the same fixture, or a writer that never claims anything
+passes: a list adopted off the relay must still enter the baseline for the
+half you *do* write into, or a later move between halves copies instead of
+moving, and the entries the user asked to hide stay in plaintext beside the
+encrypted copy.
+
 ## Open questions / not yet resolved
 
 - **Unfavoriting a feed while a track of it stays favorited is
@@ -448,7 +503,22 @@ deletes another app's tracks along with the group that named their parent.
   entry from public to private is a removal and an addition, and a baseline
   that remembers only the identifier reads the move as "mine, and I removed
   it" on the next cycle and deletes it — the same failure as seeding a
-  baseline from another list.
+  baseline from another list. Rule 2 says how the two halves' claims differ:
+  the half you write into is recomputed, the half you carry keeps what it had.
+
+  - **Rendering both halves as one library is not the same as adopting both.**
+    An app that shows the union — the natural thing, since it is one person's
+    favorites — has to keep the rendered set separate from the set it
+    republishes, because local state goes wholly into the half that app writes
+    into. Adopt an entry out of the other half and the next publish moves it
+    across. For the user's own entries mid-switch that is the feature. For
+    another writer's it is a migration nobody asked for, and in the
+    private-to-public direction it is a **disclosure**: the entry reappears as
+    a plaintext `i` tag, relays index `i`, and the `#i` filter named above now
+    answers for it. The baseline is the only thing that can tell the two
+    apart, so adopt from the half you do not write into only what your
+    baseline already claims. Carrying an entry and showing it are fine
+    together; carrying it and *owning* it is not.
 
   What stays public whatever you do: the pubkey, the kind, `created_at`, and
   the event size. An observer still learns that this person keeps podcast
