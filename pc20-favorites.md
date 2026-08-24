@@ -218,6 +218,24 @@ other apps never see it, and no two writers need theirs to agree.
 - Record only **your own** contribution, never the whole list you just
   published — otherwise the entries you were carrying on another app's behalf
   become yours to delete on the next cycle.
+- **"Your own" means what you will keep asserting, not what you wrote.** The
+  two implementations of this format draw that line in different places and
+  both are conformant, so it is worth stating exactly. One records the entries
+  it holds locally. The other adopts the list it read into its own library —
+  it renders the whole thing and lets the user unfavorite any of it — and
+  records that, foreign entries included.
+
+  The second is not the clobber this rule forbids, because adoption makes the
+  claim true: those entries are in its local set, so it goes on asserting them
+  and the removal test never fires by accident. An app that renders the shared
+  list as one library **has** to claim what it renders, or the user can never
+  unfavorite an entry another app added.
+
+  So the test is not where the ids came from. It is whether you will still be
+  holding them next cycle: **you may claim an entry you have adopted and will
+  keep asserting; you may never claim one you are merely carrying.** Everything
+  below about two halves is that same sentence applied per half — you adopt out
+  of the half you write into, and you only carry the other.
 - A baseline describes **one list**. Never seed it from another list, another
   address, or an older format's baseline: that asserts you published ids to
   an event you have never written to, and the first entry that matches gets
@@ -232,7 +250,8 @@ other apps never see it, and no two writers need theirs to agree.
   writer feeds its local entries into one half and passes the other an empty
   list. Recompute that half's claims from what you merged and you claim every
   entry in it, another writer's included; nothing backs the claim next cycle,
-  the third bullet above fires on the whole half at once, and it is deleted.
+  so rule 3's *an entry in your baseline, absent locally* row fires on the
+  whole half at once and deletes it.
   Carrying instead keeps the claims made while that half *was* the one you
   wrote into, so moving an entry between halves still works.
 
@@ -240,8 +259,8 @@ other apps never see it, and no two writers need theirs to agree.
   first publish emits correct bytes and only the baseline recorded beside it
   is wrong — and the first cycle need not publish at all, because a writer
   that records a baseline when the bytes already match records the bad one
-  anyway. Both implementations of this format got it wrong; see test vector
-  13.
+  anyway. One implementation shipped this in both directions at once; see test
+  vector 13.
 
 ### 3. The merge
 
@@ -413,10 +432,12 @@ where the ones in the half you do not publish into are not yours. Run a full
 cycle, feed the baseline it recorded back in, and run a second. The foreign
 entries must still be there after the second. One cycle cannot see this: the
 first publish emits correct bytes and only the baseline beside them is wrong,
-so every single-cycle vector above passes over it. Both implementations of
-this format shipped it, in both directions — one published an empty `content`
-over a private half it was carrying, the other published an empty tag list
-over a public half.
+so every single-cycle vector above passes over it. One implementation shipped
+it in both directions at once: the same writer, in public mode, published an
+empty `content` over a private half it was carrying, and in private mode
+published an empty tag list over a public one. Whichever half a writer does
+not feed is the half at risk, so a writer with only one half is not exempt —
+it is simply not yet in a position to notice.
 
 Pin the control in the same fixture, or a writer that never claims anything
 passes: a list adopted off the relay must still enter the baseline for the
@@ -445,8 +466,8 @@ encrypted copy.
   optional to carry.** Every entry is a tag, tags are plaintext, and `i` is a
   single-letter tag, so relays index it: a `#i` filter answers "which pubkeys
   favorited this feed". The list is searchable in reverse, not merely readable
-  by someone who already has the pubkey. `content` is empty and is the only
-  free slot in the event.
+  by someone who already has the pubkey. `content` is the only free slot in the
+  event, and on a list with no private half it is empty.
 
   The shape this would take is
   [NIP-51](https://github.com/nostr-protocol/nips/blob/master/51.md)'s split:
@@ -460,17 +481,16 @@ encrypted copy.
   all private, or split per entry, and an app that never encrypts anything
   would still conform.
 
-  **What no app may do is drop the half it does not use.** Rule 4 covers tags
-  and says nothing about `content`, so a writer following this document to the
-  letter republishes the empty string the format has specified from the start.
-  The first favorite toggled in such an app erases every private entry:
-  silently, on someone else's device, with no undo —
-  precisely the loss [Merging](#merging) exists to prevent, except that no
-  rule currently forbids it. Extend rule 4 to `content` first, ship it in both
-  apps, and add the private half only after. Optional support with a mandatory
-  carry rule is the only combination that does not destroy data, and it needs
-  a sibling to test vector 4: an opaque `content` survives a republish by a
-  writer that cannot read it.
+  **What no app may do is drop the half it does not use, and rule 4 now says
+  so.** It did not always: rule 4 was written about tags, so a writer following
+  this document to the letter republished the empty string the format has
+  specified from the start, and the first favorite toggled in such an app
+  erased every private entry — silently, on someone else's device, with no undo
+  — precisely the loss [Merging](#merging) exists to prevent, while breaking no
+  rule. That is why the carry had to ship BEFORE any private half existed to
+  lose: optional support with a mandatory carry rule is the only combination
+  that does not destroy data. Rule 4 covers `content`, test vector 12 pins it,
+  and both writers implement it.
 
   Four further things break, and none of them is optional either:
 
