@@ -65,6 +65,12 @@ distinct kind, at the end**, not one per entry.
 }
 ```
 
+`content` is empty **on a list with no private entries**, which is what this
+example shows. It is not a constant: it is the one free slot in the event, and
+[rule 4](#4-carry-what-you-cant-read) requires you to republish whatever you
+found there byte for byte. Copying the `""` above into a writer is how another
+app's data gets deleted.
+
 **Take an entry's kind from the identifier, never from an adjacent tag.** The
 kind is already the identifier's prefix, so a `k` beside every `i` restates
 what position 1 has just said. On the first real event published in this
@@ -275,6 +281,42 @@ others.
 "I can't render this" is not the same claim as "this is junk". Deleting an
 entry should be a thing the user asked for.
 
+#### `content` is carried too, and this rule did not used to say so
+
+Everything above is about **tags**, and for most of this document's life that
+was the whole of it — `content` was empty, the Data Structure example showed
+`""`, and no rule mentioned it. That silence is a trap, so it is worth being
+explicit about what it costs.
+
+`content` is the only free slot in the event. A writer that supports a
+[private half](#open-questions--not-yet-resolved) puts NIP-44 ciphertext
+there. A writer that does not, and that follows this document to the letter,
+republishes the empty string the format has specified from the start. The
+first favorite toggled in the second app erases every private entry the first
+one wrote: silently, on someone else's device, with no undo, on a replaceable
+event that keeps no history to recover from — while behaving correctly by the
+document it was written against.
+
+So, as a rule and not as advice:
+
+> **Republish `event.content` byte for byte, unless you encrypted the bytes
+> you are replacing it with.** An empty `content` on a republish must be what
+> the read actually held.
+
+Two things follow, and both are easy to get wrong in the same direction:
+
+- **Do not give the value a default.** A default is how a `""` gets written
+  back in by habit — one caller that omits the argument compiles, type-checks
+  and deletes another app's data. Building a list from scratch is the only
+  case with nothing to carry, and it can say so at the call site.
+- **Capture it on the read.** An implementation that never reads
+  `event.content` has nothing to put back even in principle, which is the
+  state both existing implementations were in when this was found.
+
+Carrying is **mandatory**. Using `content` is **optional** — an app that never
+encrypts anything still conforms, and that combination is the only one that
+does not destroy data.
+
 ### 5. Publish only when the bytes change
 
 Compare your merged tag array against the array you read, byte for byte. If
@@ -369,6 +411,17 @@ left under it stays.** Both are "a feed in my baseline that I no longer
 hold"; only the first is a removal you may express. Getting this wrong
 deletes another app's tracks along with the group that named their parent.
 
+**12. An opaque `content` survives a republish by a writer that cannot read
+it.** The sibling to vector 1, for the half of the event that is not tags.
+Read a list whose `content` is a string you have no way to interpret, change
+a favorite, publish, and it must come back byte-identical. Pin the inverse in
+the same breath — a list built from scratch is legitimately empty — or a
+writer that simply never touches the field passes on a technicality.
+
+Both existing implementations passed every vector above it while blanking
+`content` on the first favorite anyone toggled, because none of them looked
+at that field. That is what makes this one worth stating separately.
+
 ## Open questions / not yet resolved
 
 - **Unfavoriting a feed while a track of it stays favorited is
@@ -405,17 +458,18 @@ deletes another app's tracks along with the group that named their parent.
   all private, or split per entry, and an app that never encrypts anything
   would still conform.
 
-  **What no app may do is drop the half it does not use.** Rule 4 covers tags
-  and says nothing about `content`, so a writer following this document to the
-  letter republishes the empty string the format has specified from the start.
-  The first favorite toggled in such an app erases every private entry:
-  silently, on someone else's device, with no undo —
-  precisely the loss [Merging](#merging) exists to prevent, except that no
-  rule currently forbids it. Extend rule 4 to `content` first, ship it in both
-  apps, and add the private half only after. Optional support with a mandatory
-  carry rule is the only combination that does not destroy data, and it needs
-  a sibling to test vector 4: an opaque `content` survives a republish by a
-  writer that cannot read it.
+  **What no app may do is drop the half it does not use.** This used to be the
+  blocker, and it is now [rule 4's `content`
+  clause](#content-is-carried-too-and-this-rule-did-not-used-to-say-so) with
+  [test vector 12](#test-vectors) beside it: carrying is mandatory, using it is
+  optional, and that is the only combination that does not destroy data.
+
+  **The remaining sequencing is reader-first, and it is not optional.** A
+  writer that encrypts before every other writer carries `content` does not
+  fail loudly — it silently makes those favorites disappear on the far side,
+  which is worse than the format it replaced. So: land the carry rule (done),
+  ship it in **both** implementations, and only then let either one start
+  writing a private half.
 
   Four further things break, and none of them is optional either:
 
