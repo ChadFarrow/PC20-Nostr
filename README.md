@@ -1,7 +1,8 @@
 # PC20-Nostr
 
 Working code from five live Podcasting 2.0 sites, packaged so you can drop a
-feature into your own app. Plus a draft spec for syncing favorites over Nostr.
+feature into your own app. Plus two draft specs for carrying Podcasting 2.0 data
+over Nostr.
 
 New to the terms? → **[GLOSSARY.md](GLOSSARY.md)**
 
@@ -27,12 +28,22 @@ taken from a site. Both say so in their first line.
 
 → **[catalog/](catalog/)** — where the code came from, and what it is missing.
 
-## The spec
+## The specs
+
+Both are proposals with real failure modes behind them, not settled practice.
+Both use self-assigned kinds — check the registry for a collision before you
+depend on either.
 
 **[pc20-favorites.md](pc20-favorites.md)** syncs a user's favorites between
 apps over Nostr, as one replaceable event at kind 10333. Two apps ship it.
-Read it as a proposal with real failure modes behind it, not as settled
-practice.
+
+**[nip-value-playback-events.md](nip-value-playback-events.md)** publishes
+what a streaming-sats or auto-boost payment was for, at kinds 3369 / 33369 /
+23369, so the metadata reaches something other than the recipient's Lightning
+node. One app implements the receipt kind, on a branch, unmerged — so it is
+the earlier of the two by a wide margin. Its privacy section is the part to
+read first: per-track receipts under a listener's own key are a public
+timestamped listening history, and "share my boosts" is not consent for it.
 
 ## Working on this repo
 
