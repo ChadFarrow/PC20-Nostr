@@ -41,7 +41,7 @@ whole design: the data becomes available without becoming content.
 | Kind | Range | Retention | Purpose |
 | --- | --- | --- | --- |
 | `3369` | regular | stored | one receipt per payment interval |
-| `33369` | addressable | latest per `(pubkey, kind, d)` | running totals per feed or item |
+| `33369` | addressable | latest per `(pubkey, kind, d)` | one author's totals per feed or item |
 | `23369` | ephemeral | not stored | live ticker for overlays |
 
 The ranges are the ones
@@ -173,27 +173,118 @@ saying they disagree. Capture them with the payment.
 
 ## Kind 33369: Value Playback Summary
 
-An addressable event holding aggregate totals. Each new event replaces the
-prior one for the same `d` value, so a consumer fetches one event instead of
-pulling and summing every receipt.
+An addressable event holding aggregate totals, so a consumer fetches one event
+instead of pulling and summing every receipt.
 
-`.d` SHOULD be the full NIP-73 id being summarized, for example
+**A summary is DERIVED, never accumulated.** It is a pure function of the
+`3369` receipts it summarizes: read them, sum them, publish the result. An app
+that instead keeps a running counter and adds to it has built something nobody
+else can reproduce or check, and — because the event is replaceable — something
+a second writer silently destroys.
+
+That single decision is what makes the kind safe to share, so the rest of this
+section is mostly its consequences.
+
+### Scope: the author, not the app
+
+**A `33369` summarizes every `3369` by its own author for that id, whichever
+app wrote them.** It is not "what this app paid" and it is not a global total
+across everyone.
+
+`.d` is the full NIP-73 id being summarized, for example
 `podcast:item:guid:d98d189b-dc7b-45b1-8720-d4b98690f31f`. Use the id verbatim
 rather than a bare guid, or feed-level, item-level and publisher-level
 summaries collide in one namespace.
 
-`.content` MAY carry a JSON object with additional breakdown. A consumer MUST
-NOT require it.
+This is what removes the collision rather than managing it. Addressable events
+are keyed by `(pubkey, kind, d)`, so two people never collide — different
+pubkey, different address. The only collision available is **one person, two
+apps, one key, same `d`**, and author scope dissolves it: both apps read the
+same receipts from the same relays and compute the same `amount` and `count`,
+so the second writer finds nothing to say and stays quiet. Two writers
+converge on a value instead of fighting over it, and no coordination is needed
+to arrange that — but see rule 3 below for the comparison that has to be made
+for this to hold, which is not the obvious one.
+
+**Do not namespace `d` by app to sidestep this.** It removes the collision by
+removing the sharing: a consumer then has to discover every app the person has
+ever used before it can trust a total, and an app the person stopped using
+leaves a permanently stale address that still answers queries.
+
+Kind `10333` solves its version of this with a read-merge-union, which works
+because favorites are set members. Totals are not — merging two numbers whose
+overlap is unknown double-counts — so the answer here is not to merge two
+results but to make both writers compute the same one.
+
+### Monotonicity
+
+**`amount` and `count` MUST NOT decrease at a given address.** A writer that
+computes a total lower than the one already stored there has an incomplete
+view, not a smaller truth: publish nothing.
+
+The justification is in the domain rather than in the protocol. Payments are
+append-only in reality — a payment that happened does not un-happen — so the
+only honest reason a derived total shrinks is that the writer failed to see
+some receipts. Relays lose events, an app queries a narrower relay set, a
+timeout truncates a page. Every one of those looks identical to "there is
+genuinely less", and picking the safe direction means never erasing the record
+of money that did move.
+
+This is also what stops the pathological case. Two apps with **partial and
+different** views of the receipts would otherwise flip-flop forever, each
+publish locally reasonable, the only symptom being that it never stops.
+Monotonicity converts that into a settle: the value rises to the most complete
+view any single writer has, and then stops.
+
+**Be clear about what that costs.** When no writer can see every receipt, the
+total is an understatement and nothing on the wire says so. `count` is what
+makes it detectable — a consumer that can see more receipts than the summary
+counts knows the summary is behind. That is why `count` is required here and
+optional on a receipt.
+
+### Publishing rules
+
+These are the same three [`10333`](pc20-favorites.md#merging) follows, for the
+same reasons.
+
+1. **Read the current summary before every publish**, and compare against what
+   you derived. This is what enforces monotonicity, and it is the only way to
+   notice another writer.
+2. **Never publish on a read you do not trust.** An empty or partial answer
+   from the relays means "nothing replied" at least as often as it means
+   "nothing is there", and a summary derived from a truncated receipt query is
+   exactly the understatement [Monotonicity](#monotonicity) exists to suppress.
+   A read that did not demonstrably reach a relay is not a zero.
+3. **Publish only when `amount` or `count` changes — compare the DERIVED
+   VALUES, never the bytes.** A summary recomputed on a timer is unchanged
+   almost every time, and republishing it is pure relay churn on a kind whose
+   volume section already names rate limits as the binding constraint.
+
+   The comparison must be on the two numbers because **the rest of the event
+   legitimately differs between writers and a byte test would loop forever**.
+   `alt` is free-text and two implementations will not phrase it the same way;
+   `first` and `last` are optional, so one writer emits them and another does
+   not. Under a byte test each app then sees an event that "changed", rewrites
+   it, and hands the other app the same trigger — two writers rewriting one
+   address against each other indefinitely, every publish locally reasonable,
+   the only symptom being that it never stops. Kind `10333` has this failure
+   mode too and names it for the same reason.
+
+### Tags
 
 | Tag | Value | Required |
 | --- | --- | --- |
 | `d` | NIP-73 id being summarized | yes |
 | `i`, `k` | as in `3369` | yes |
-| `amount` | total millisats | yes |
+| `amount` | total millisats over the author's receipts | yes |
+| `count` | number of receipts aggregated | yes |
 | `alt` | human-readable summary | yes |
-| `count` | number of receipts aggregated | no |
-| `first` | unix seconds, earliest receipt | no |
-| `last` | unix seconds, latest receipt | no |
+| `first` | unix seconds, earliest receipt counted | no |
+| `last` | unix seconds, latest receipt counted | no |
+
+`.content` MAY carry a JSON object with additional breakdown. A consumer MUST
+NOT require it, and a writer MUST NOT put anything there that the tags
+contradict.
 
 ```json
 {
@@ -207,19 +298,30 @@ NOT require it.
     ["count", "84"],
     ["first", "1739900000"],
     ["last", "1740000180"],
-    ["alt", "1420 sats streamed to this track in total"]
+    ["alt", "1420 sats streamed to this track by me in total"]
   ]
 }
 ```
 
-**A summary is one writer's arithmetic over its own receipts, and it is
-replaceable, so two apps summarizing the same `d` overwrite each other
-forever.** Kind `10333` has the same shape and answers it with a read-merge
-cycle, which works because entries are set members. Totals are not: merging
-two numbers whose overlap is unknown double-counts. Either the consumer
-aggregates across pubkeys — the safe reading, and the one that needs no
-coordination — or a single agreed author publishes and everyone trusts it.
-This document does not settle which; see [Open questions](#open-questions).
+Note the `alt`: a summary speaks for one person's payments, and its
+human-readable form should say so. "1420 sats streamed to this track" reads as
+a global figure and is the wrong claim by however many other listeners there
+are.
+
+### Totals across people
+
+**A consumer that wants "what has this track earned" sums the `33369` events
+from every author**, one `#d` or `#i` filter, no coordination. Author scope is
+what makes that sum correct: each event covers a disjoint set of payments, so
+there is nothing to de-duplicate.
+
+**A global total is not expressible as a `33369` and this document does not
+try.** A podcaster publishing what their show earned would be summarizing
+payments they did not make and hold no receipts for — an assertion no consumer
+can check against anything, which is a different kind of object from a derived
+summary and needs its own design. That also settles a question the earlier
+draft left open: the choice was never "podcaster-signed or app-signed", because
+those two answer different questions.
 
 ## Kind 23369: Value Playback Ticker
 
@@ -251,9 +353,22 @@ change — which on a music show is once per song, several times the timer rate,
 concentrated into the exact hours a show is on air. Size against the per-track
 case, because that is what meets a rate limit first.
 
-Publishers SHOULD send `3369` and `23369` to relays they operate and publish
-only `33369` summaries outward, to keep listener-rate traffic off
-general-purpose relays.
+Publishers SHOULD keep listener-rate `3369` and `23369` traffic off
+general-purpose relays — a relay they operate, or the author's own write
+relays — and publish `33369` summaries outward.
+
+**But receipts must stay readable by anything that will derive a summary from
+them, and that makes relay placement a correctness rule rather than a courtesy
+one.** A `33369` is a pure function of the author's receipts, which is the
+whole reason two apps under one key converge on the same total instead of
+overwriting each other. Send those receipts somewhere only one app can read
+and the property is gone: each app derives from a different subset, the
+monotonicity rule pins the total at whichever view happened to be widest, and
+every writer with a narrower one goes permanently silent. So publish `3369` to
+relays the AUTHOR reads — their NIP-65 write set is the obvious choice, since
+that is where their other apps already look — rather than to a set private to
+one app. "Off the general-purpose relays" and "somewhere only I can see" are
+different instructions, and only the first one is meant here.
 
 **Verify acceptance by writing AND reading back, per relay.** A relay may
 answer `OK true` and store nothing, and a publisher trusting the `OK` then
@@ -292,6 +407,18 @@ is that a receipt without a `name` tag satisfies the promise. It does not: the
 event is **signed**, so the author pubkey is present whatever the tags say,
 and it is the same pubkey the anonymity setting exists to withhold. There is
 no quieter receipt to send. The answer is no event.
+
+**A summary is a sharper disclosure than the receipts it derives from, and
+author scope is what makes it so.** A `33369` sits at a stable, guessable
+address — `(pubkey, 33369, <the NIP-73 id>)` — so a `#d` filter answers "who
+has streamed to this track" directly, and each answer carries a total and a
+date range rather than requiring anyone to assemble one. Receipts are already
+public and already `#i`-indexed, so this reveals no new fact; what it changes
+is the cost of asking, from a query plus arithmetic to a single lookup. It is
+also monotonic and therefore permanent by design. An app that offers receipts
+and summaries as one setting should say that the second one is the searchable
+half, and an app offering them separately should default the summary off even
+when receipts are on.
 
 The same reasoning constrains option 1. A server signing on every listener's
 behalf pools their histories under one key, which removes the per-listener
@@ -334,6 +461,32 @@ entries.
 against a relay reports a stored `23369` and an absent one as two different
 successes, and only a rejected write as a failure.
 
+**7. Two writers converge on a summary instead of overwriting it.** Give two
+writers the same author key and the same visible receipts, let the first
+publish a `33369` for one `d`, then run the second. It must publish nothing.
+Two things are being tested at once and both fail silently on their own: a
+writer that keeps a running counter instead of deriving computes a different
+number and overwrites, and a writer that compares the whole event instead of
+`amount`/`count` sees its own `alt` wording differ and rewrites. **Give the
+two writers different `alt` text and different `first`/`last` behaviour**, or
+the second half of the vector cannot fail and the ping-pong reaches production
+instead.
+
+**8. A shrinking total publishes nothing.** With a summary of 84 receipts
+already stored, hand a writer a receipt query that returns only 40 of them.
+It must publish nothing, leaving the stored 84. Assert on the absence of a
+publish, not on the value it computed — an implementation that derives 40
+correctly and then sends it has done the arithmetic right and the protocol
+wrong.
+
+**9. An untrustworthy read publishes nothing.** Same as 8, with a receipt query
+that fails or returns nothing at all rather than returning a subset. A derived
+total of zero must never reach a relay. This is a separate vector from 8
+because the code paths differ: 8 is caught by comparing against the stored
+value, 9 is caught before there is anything to compare, and an implementation
+that only has the first check will publish a zero into an address whose stored
+value it could not read either.
+
 ## What this format does not do
 
 - **No proof of payment for keysend.** `preimage` is optional because most
@@ -341,22 +494,34 @@ successes, and only a rejected write as a failure.
   either. A receipt is therefore an assertion by its author, not something a
   consumer can verify — which is fine for stats and wrong for anything
   settling an account. Do not build a payout system on it.
-- **No de-duplication across apps.** A listener signed into two apps on two
-  devices streams from both, and each publishes its own receipts under its own
-  session. `session` groups one app's consecutive intervals and says nothing
-  across apps. A consumer summing receipts for a track is summing payments,
-  which is correct, but it cannot answer "how many people" from this event
-  alone.
-- **No retraction.** A receipt published in error stays published. There is no
-  tombstone and `5`-kind deletion is a request, not a guarantee.
+- **No de-duplication of receipts across apps, and none needed.** A listener
+  signed into two apps on two devices streams from both, and each publishes
+  its own receipts. Those are distinct payments, so summing them is correct.
+  `session` groups one app's consecutive intervals and says nothing across
+  apps, so it cannot be used to tell one listen from two.
+- **No headcount.** Summing `33369` events answers "what did this track earn
+  from people who publish", and counting their authors gives a floor on how
+  many people that was — never the real audience, since a listener who has not
+  opted in leaves nothing behind at all. Treat both numbers as a lower bound
+  and do not present either as reach.
+- **No retraction.** A receipt published in error stays published: there is no
+  tombstone, and `5`-kind deletion is a request rather than a guarantee.
+  Summaries inherit this and make it sharper — they are monotonic, so an
+  overstatement caused by a receipt that should not have been published cannot
+  be corrected downward by any writer following this document. Deleting the
+  receipt does not lower the summary.
 
 ## Open questions
 
-- **Whether a summary should be signed by the podcaster or by each app.**
-  Podcaster-signed is authoritative and requires trust; app-signed is
-  verifiable and requires the consumer to merge across pubkeys. Until this is
-  settled, a consumer should aggregate rather than trust a single `33369`, and
-  a publisher should not assume its summary is the only one for a `d`.
+- **Whether monotonicity should ever be escapable.** `amount` and `count` at
+  an address never decrease, which is right for a record of payments that
+  really happened and wrong for a person who wants their listening history
+  reduced. Today the only retraction available is deleting the underlying
+  receipts and abandoning the summary, which leaves a permanently overstated
+  event that still answers queries. A signed downward revision would need a
+  way to distinguish "I mean this" from "my relay read was short", and nothing
+  here provides one — a `reset` marker a writer could set by mistake would
+  hand every incomplete view a licence to erase the total.
 - **Whether `amount` should be the sender's total or the individual split
   amount.** Per-split receipts describe payments more accurately and multiply
   event count by the number of recipients — on a four-way block that is four
