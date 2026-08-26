@@ -37,7 +37,7 @@ missing — are in [`../comparisons/`](../comparisons/).
 | `lightning/nwc-service.ts` | 557 | `nostr-tools`, **and `@/lib/safe-storage`** | ITDV-Lightning |
 | `lightning/zap-receipt-service.ts` | 407 | `nostr-tools` | ITDV-Lightning |
 | `nostr/read-trust.ts` | 124 | **none** | boostmebitch |
-| `nostr/favorites-list.ts` | 722 | **none** | boostmebitch |
+| `nostr/favorites-list.ts` | 1473 | **none** | boostmebitch |
 | `rss-pc20/podcast-index-auth.ts` | 22 | `node:crypto` | MSP-2.0 |
 
 Six of the seven typecheck under `strict` with only those packages present.

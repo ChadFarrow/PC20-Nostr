@@ -31,7 +31,7 @@ local `~/Vibe/stablekraft-app` checkout (three commits stale at the time this
 was written), reports bugs that were fixed upstream.
 
 This is the concrete reason for the
-[read-through-`origin/HEAD` rule](../README.md#never-read-the-local-checkout).
+[read-through-`origin/HEAD` rule](../../CLAUDE.md#read-originhead-never-the-local-checkout).
 Two independently-maintained implementations of one spec generate stale
 cross-references faster than anyone updates them.
 

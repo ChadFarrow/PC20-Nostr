@@ -5,7 +5,7 @@ persons, chapters and remote items.
 
 **Compared, not shipped.** Every parser depends on sibling modules in its own
 app, so none passes the
-[standalone-compile test](../README.md#rules-this-directory-is-held-to). This
+[standalone-compile test](../README.md#what-the-checkers-enforce). This
 page says which one to read.
 
 ## Where it lives
