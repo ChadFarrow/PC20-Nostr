@@ -65,6 +65,12 @@ distinct kind, at the end**, not one per entry.
 }
 ```
 
+`content` is empty **on a list with no private entries**, which is what this
+example shows. It is not a constant: it is the one free slot in the event, and
+[rule 4](#4-carry-what-you-cant-read) requires you to republish whatever you
+found there byte for byte. Copying the `""` above into a writer is how another
+app's data gets deleted.
+
 **Take an entry's kind from the identifier, never from an adjacent tag.** The
 kind is already the identifier's prefix, so a `k` beside every `i` restates
 what position 1 has just said. On the first real event published in this
@@ -260,7 +266,7 @@ other apps never see it, and no two writers need theirs to agree.
   is wrong — and the first cycle need not publish at all, because a writer
   that records a baseline when the bytes already match records the bad one
   anyway. One implementation shipped this in both directions at once; see test
-  vector 13.
+  vector 14.
 
 ### 3. The merge
 
@@ -310,19 +316,41 @@ others.
 "I can't render this" is not the same claim as "this is junk". Deleting an
 entry should be a thing the user asked for.
 
-**This rule covers `content`, not only tags.** `content` is the one free slot
-in the event and it is shared like everything else here. A writer that has
-never heard of a private half must still republish the bytes it read, verbatim
-— it has nothing to decrypt, nothing to parse, and nothing to understand, only
-bytes to put back. Republishing `""` because that is what the format has
-always specified erases whatever another app put there: silently, on someone
-else's device, with no undo, and while behaving correctly by every other rule
-in this document. kind:10333 is replaceable and keeps no history, so there is
-nothing to recover from.
+#### `content` is carried too, and this rule did not used to say so
 
-Support for a private half is optional. Carrying one is not. Any republish
-path whose `content` is a literal rather than a value threaded from the read
-is the bug — a default parameter is how it gets written.
+Everything above is about **tags**, and for most of this document's life that
+was the whole of it — `content` was empty, the Data Structure example showed
+`""`, and no rule mentioned it. That silence is a trap, so it is worth being
+explicit about what it costs.
+
+`content` is the only free slot in the event. A writer that supports a
+[private half](#open-questions--not-yet-resolved) puts NIP-44 ciphertext
+there. A writer that does not, and that follows this document to the letter,
+republishes the empty string the format has specified from the start. The
+first favorite toggled in the second app erases every private entry the first
+one wrote: silently, on someone else's device, with no undo, on a replaceable
+event that keeps no history to recover from — while behaving correctly by the
+document it was written against.
+
+So, as a rule and not as advice:
+
+> **Republish `event.content` byte for byte, unless you encrypted the bytes
+> you are replacing it with.** An empty `content` on a republish must be what
+> the read actually held.
+
+Two things follow, and both are easy to get wrong in the same direction:
+
+- **Do not give the value a default.** A default is how a `""` gets written
+  back in by habit — one caller that omits the argument compiles, type-checks
+  and deletes another app's data. Building a list from scratch is the only
+  case with nothing to carry, and it can say so at the call site.
+- **Capture it on the read.** An implementation that never reads
+  `event.content` has nothing to put back even in principle, which is the
+  state both existing implementations were in when this was found.
+
+Carrying is **mandatory**. Using `content` is **optional** — an app that never
+encrypts anything still conforms, and that combination is the only one that
+does not destroy data.
 
 ### 5. Publish only when the bytes change
 
@@ -419,14 +447,25 @@ hold"; only the first is a removal you may express. Getting this wrong
 deletes another app's tracks along with the group that named their parent.
 
 **12. An opaque `content` survives a republish by a writer that cannot read
-it.** Read an event whose `content` is a non-empty string your app has no
-meaning for, change a favorite, publish, and `content` must come back byte
-for byte. The sibling to vector 4, and the one that decides whether a private
-half can exist at all. Pin the inverse too, or an implementation that simply
-never touches `content` passes: a list built from scratch has an empty
-`content`, and a republish is empty only when the event you read was.
+it.** The sibling to vector 1, for the half of the event that is not tags.
+Read a list whose `content` is a string you have no way to interpret, change
+a favorite, publish, and it must come back byte-identical. Pin the inverse in
+the same breath — a list built from scratch is legitimately empty — or a
+writer that simply never touches the field passes on a technicality.
 
-**13. A writer does not delete the half it does not write into — and this
+Both existing implementations passed every vector above it while blanking
+`content` on the first favorite anyone toggled, because none of them looked
+at that field. That is what makes this one worth stating separately.
+
+**13. Going private takes the whole list, and coming back does not.** Read a
+list holding entries you did not write and cannot resolve, switch to private,
+and every entry must move — yours and theirs. Then switch back, and only the
+entries your baseline claims may return to the tags. The two halves of this
+vector fail in opposite directions: the first leaves a user 97% private with
+nothing on screen saying which entries are still public, and the second
+publishes another app's private entry as a relay-indexed `i` tag.
+
+**14. A writer does not delete the half it does not write into — and this
 takes TWO cycles to observe.** Read an event with entries in both halves,
 where the ones in the half you do not publish into are not yours. Run a full
 cycle, feed the baseline it recorded back in, and run a second. The foreign
@@ -481,16 +520,59 @@ encrypted copy.
   all private, or split per entry, and an app that never encrypts anything
   would still conform.
 
-  **What no app may do is drop the half it does not use, and rule 4 now says
-  so.** It did not always: rule 4 was written about tags, so a writer following
-  this document to the letter republished the empty string the format has
-  specified from the start, and the first favorite toggled in such an app
-  erased every private entry — silently, on someone else's device, with no undo
-  — precisely the loss [Merging](#merging) exists to prevent, while breaking no
-  rule. That is why the carry had to ship BEFORE any private half existed to
-  lose: optional support with a mandatory carry rule is the only combination
-  that does not destroy data. Rule 4 covers `content`, test vector 12 pins it,
-  and both writers implement it.
+  **What no app may do is drop the half it does not use.** This used to be the
+  blocker, and it is now [rule 4's `content`
+  clause](#content-is-carried-too-and-this-rule-did-not-used-to-say-so) with
+  [test vector 12](#test-vectors) beside it: carrying is mandatory, using it is
+  optional, and that is the only combination that does not destroy data.
+
+  **The choice belongs to the LIST, not to the app**, and getting this backwards
+  produces a list that is 97% private. It was tried the other way first, on the
+  reasonable-sounding rule that an app may only move entries it wrote: a user
+  set one app to Private, its own 436 entries were encrypted, and 13 written by
+  a second app stayed in the tags — public, relay-indexed, and searchable in
+  reverse. Measured, on a real account. The user had made a privacy choice and
+  the format had honoured most of it, which is the kind of partial that is worse
+  than a clear no: nothing on screen said which entries were still public, and
+  the remedy was to go and make the same choice again in every other app they
+  had ever signed into.
+
+  So: **whichever half currently holds entries is the mode of the whole list,
+  and every writer puts its entries in that half.** A writer that finds the
+  private half populated writes there too, whatever it did last time. Setting
+  Private in any one app moves everything, including entries that app cannot
+  resolve and did not write.
+
+  The asymmetry that makes this safe is the direction of travel:
+
+  - **public → private may move another app's entries.** It only ever *reduces*
+    exposure, it is reversible by any app that can decrypt, and the entries are
+    carried whole rather than dropped. The worst case is an entry sitting in a
+    half its author has not learned to read yet, which is what the sequencing
+    below exists to prevent.
+  - **private → public may NOT.** It is a disclosure, it publishes an `i` tag
+    relays index, and it cannot be taken back. Move only what your baseline says
+    you put there, and carry the rest where it is.
+
+  **A reader shows the private half whatever its own last choice was.** The
+  entries are the user's, whoever wrote them, and rendering them discloses
+  nothing. An implementation that filters the half it is not currently writing
+  down to what its own baseline claims — a natural way to keep one app from
+  adopting another's entries — hides the user's own favorites from them, on the
+  device they just made the choice on.
+
+  **The remaining sequencing is reader-first, and it is not optional.** A
+  writer that encrypts before every other writer carries `content` does not
+  fail loudly — it silently makes those favorites disappear on the far side,
+  which is worse than the format it replaced. So: land the carry rule (done),
+  ship it in **both** implementations, and only then let either one start
+  writing a private half.
+
+  Moving *another app's* entries has a further prerequisite on top of that, and
+  it is the same shape one step along: an app must be able to **read and render**
+  the private half before anything moves entries into it on its behalf. Until
+  then the move is indistinguishable from a deletion on that app's screen. Ship
+  the reading everywhere, then let the whole-list move go on.
 
   Four further things break, and none of them is optional either:
 
@@ -526,19 +608,18 @@ encrypted copy.
   baseline from another list. Rule 2 says how the two halves' claims differ:
   the half you write into is recomputed, the half you carry keeps what it had.
 
-  - **Rendering both halves as one library is not the same as adopting both.**
-    An app that shows the union — the natural thing, since it is one person's
-    favorites — has to keep the rendered set separate from the set it
-    republishes, because local state goes wholly into the half that app writes
-    into. Adopt an entry out of the other half and the next publish moves it
-    across. For the user's own entries mid-switch that is the feature. For
-    another writer's it is a migration nobody asked for, and in the
-    private-to-public direction it is a **disclosure**: the entry reappears as
-    a plaintext `i` tag, relays index `i`, and the `#i` filter named above now
-    answers for it. The baseline is the only thing that can tell the two
-    apart, so adopt from the half you do not write into only what your
-    baseline already claims. Carrying an entry and showing it are fine
-    together; carrying it and *owning* it is not.
+  **Rendering both halves as one library is not the same as adopting both.**
+  An app that shows the union — the natural thing, since it is one person's
+  favorites — still has to keep the set it renders apart from the set it
+  claims, because local state goes wholly into the half that app writes into.
+  Adopt an entry out of the other half and the next publish moves it across.
+  Which way that cuts is the asymmetry above: on a whole-list move to private
+  it is the point, and the entry is meant to travel. Going the other way it
+  is a **disclosure** — the entry reappears as a plaintext `i` tag, relays
+  index `i`, and the `#i` filter named above now answers for it — so out of
+  the private half you may adopt only what your baseline already claims, and
+  you carry the rest where it is. Carrying an entry and showing it are fine
+  together; carrying it and *owning* it is not.
 
   What stays public whatever you do: the pubkey, the kind, `created_at`, and
   the event size. An observer still learns that this person keeps podcast
