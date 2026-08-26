@@ -224,6 +224,24 @@ other apps never see it, and no two writers need theirs to agree.
 - Record only **your own** contribution, never the whole list you just
   published — otherwise the entries you were carrying on another app's behalf
   become yours to delete on the next cycle.
+- **"Your own" means what you will keep asserting, not what you wrote.** The
+  two implementations of this format draw that line in different places and
+  both are conformant, so it is worth stating exactly. One records the entries
+  it holds locally. The other adopts the list it read into its own library —
+  it renders the whole thing and lets the user unfavorite any of it — and
+  records that, foreign entries included.
+
+  The second is not the clobber this rule forbids, because adoption makes the
+  claim true: those entries are in its local set, so it goes on asserting them
+  and the removal test never fires by accident. An app that renders the shared
+  list as one library **has** to claim what it renders, or the user can never
+  unfavorite an entry another app added.
+
+  So the test is not where the ids came from. It is whether you will still be
+  holding them next cycle: **you may claim an entry you have adopted and will
+  keep asserting; you may never claim one you are merely carrying.** Everything
+  below about two halves is that same sentence applied per half — you adopt out
+  of the half you write into, and you only carry the other.
 - A baseline describes **one list**. Never seed it from another list, another
   address, or an older format's baseline: that asserts you published ids to
   an event you have never written to, and the first entry that matches gets
@@ -232,6 +250,23 @@ other apps never see it, and no two writers need theirs to agree.
   app's side.
 - **Losing it is safe; guessing is not.** An empty baseline yields no
   removals, so the next publish is a pure union. Start there.
+- **If the event has two halves, answer "your own contribution" for each half
+  separately — and the half you did not publish into has no new contribution,
+  so its claims are CARRIED, never recomputed.** Under one whole-list choice a
+  writer feeds its local entries into one half and passes the other an empty
+  list. Recompute that half's claims from what you merged and you claim every
+  entry in it, another writer's included; nothing backs the claim next cycle,
+  so rule 3's *an entry in your baseline, absent locally* row fires on the
+  whole half at once and deletes it.
+  Carrying instead keeps the claims made while that half *was* the one you
+  wrote into, so moving an entry between halves still works.
+
+  Two things make this hard to catch. The damage needs **two cycles** — the
+  first publish emits correct bytes and only the baseline recorded beside it
+  is wrong — and the first cycle need not publish at all, because a writer
+  that records a baseline when the bytes already match records the bad one
+  anyway. One implementation shipped this in both directions at once; see test
+  vector 14.
 
 ### 3. The merge
 
@@ -430,6 +465,25 @@ vector fail in opposite directions: the first leaves a user 97% private with
 nothing on screen saying which entries are still public, and the second
 publishes another app's private entry as a relay-indexed `i` tag.
 
+**14. A writer does not delete the half it does not write into — and this
+takes TWO cycles to observe.** Read an event with entries in both halves,
+where the ones in the half you do not publish into are not yours. Run a full
+cycle, feed the baseline it recorded back in, and run a second. The foreign
+entries must still be there after the second. One cycle cannot see this: the
+first publish emits correct bytes and only the baseline beside them is wrong,
+so every single-cycle vector above passes over it. One implementation shipped
+it in both directions at once: the same writer, in public mode, published an
+empty `content` over a private half it was carrying, and in private mode
+published an empty tag list over a public one. Whichever half a writer does
+not feed is the half at risk, so a writer with only one half is not exempt —
+it is simply not yet in a position to notice.
+
+Pin the control in the same fixture, or a writer that never claims anything
+passes: a list adopted off the relay must still enter the baseline for the
+half you *do* write into, or a later move between halves copies instead of
+moving, and the entries the user asked to hide stay in plaintext beside the
+encrypted copy.
+
 ## Open questions / not yet resolved
 
 - **Unfavoriting a feed while a track of it stays favorited is
@@ -451,8 +505,8 @@ publishes another app's private entry as a relay-indexed `i` tag.
   optional to carry.** Every entry is a tag, tags are plaintext, and `i` is a
   single-letter tag, so relays index it: a `#i` filter answers "which pubkeys
   favorited this feed". The list is searchable in reverse, not merely readable
-  by someone who already has the pubkey. `content` is empty and is the only
-  free slot in the event.
+  by someone who already has the pubkey. `content` is the only free slot in the
+  event, and on a list with no private half it is empty.
 
   The shape this would take is
   [NIP-51](https://github.com/nostr-protocol/nips/blob/master/51.md)'s split:
@@ -551,7 +605,21 @@ publishes another app's private entry as a relay-indexed `i` tag.
   entry from public to private is a removal and an addition, and a baseline
   that remembers only the identifier reads the move as "mine, and I removed
   it" on the next cycle and deletes it — the same failure as seeding a
-  baseline from another list.
+  baseline from another list. Rule 2 says how the two halves' claims differ:
+  the half you write into is recomputed, the half you carry keeps what it had.
+
+  **Rendering both halves as one library is not the same as adopting both.**
+  An app that shows the union — the natural thing, since it is one person's
+  favorites — still has to keep the set it renders apart from the set it
+  claims, because local state goes wholly into the half that app writes into.
+  Adopt an entry out of the other half and the next publish moves it across.
+  Which way that cuts is the asymmetry above: on a whole-list move to private
+  it is the point, and the entry is meant to travel. Going the other way it
+  is a **disclosure** — the entry reappears as a plaintext `i` tag, relays
+  index `i`, and the `#i` filter named above now answers for it — so out of
+  the private half you may adopt only what your baseline already claims, and
+  you carry the rest where it is. Carrying an entry and showing it are fine
+  together; carrying it and *owning* it is not.
 
   What stays public whatever you do: the pubkey, the kind, `created_at`, and
   the event size. An observer still learns that this person keeps podcast
