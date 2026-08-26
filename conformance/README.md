@@ -1,0 +1,127 @@
+# Conformance suite
+
+The 14 test vectors of [`../pc20-favorites.md`](../pc20-favorites.md), as code
+you can run against your own implementation.
+
+The spec states them as behaviors "so they can be written against any test
+runner". Until now that meant every implementer hand-translated them and hoped.
+Both existing apps found their defects by shipping instead — one of them
+records fifteen, and notes that the worst passed every check the other fourteen
+added.
+
+## Run it
+
+```bash
+node --test conformance/vectors.test.mjs
+```
+
+**Name the file, not the directory.** `node --test conformance/` fails with
+`Cannot find module` on Node 22 — it resolves the argument as a module before it
+looks for tests. Nothing is wrong with your setup.
+
+No dependencies, no build step, no `package.json`. Node 18 or newer.
+
+## Point it at your app
+
+Change one line at the top of `vectors.test.mjs`:
+
+```js
+import * as ADAPTER from './reference/favorites.mjs';   // <- your module here
+```
+
+Your module exports the functions in [`adapter.d.ts`](adapter.d.ts). Two do the
+work:
+
+| | |
+|---|---|
+| `parseTags(tags)` | Tag array in, structure out. Vectors 5, 6, 7. |
+| `plan({read, local, baseline, mode})` | One publish cycle, decided but not sent. Everything else. |
+
+Both are pure, so the suite needs no relay, no signer and no clock. A failure
+is your merge, never your test environment.
+
+Three things in that contract carry most of the weight, and each is a bug
+somebody has already shipped:
+
+- **`read: null` is not an empty list.** `null` means the read is not
+  trustworthy; `{tags: [], content: ''}` means the relay answered and has
+  nothing. Same code path for both republishes a whole library as empty.
+- **`publish: null` is a valid outcome.** It is how "the bytes did not change"
+  is said. A writer that always publishes has two apps rewriting the event
+  against each other forever.
+- **`baselineIfLanded` is returned, not recorded.** A baseline written for an
+  event that never reached a relay says "I am already asserting this", so the
+  entry is never retried — lost permanently, while the UI reports success.
+
+If your app's shapes differ, adapt in the shim rather than editing the vectors.
+The vectors are the spec; the shim is yours.
+
+## What each vector catches
+
+Numbering matches the spec exactly.
+
+| # | What it catches |
+|---|---|
+| 1 | A writer built from local state alone — the natural way to write one |
+| 2 | A failed read treated as an empty list |
+| 3 | A merge that is not idempotent, so two apps never converge |
+| 4 | Dropping a tag, `k` value or identifier written by a newer app |
+| 5 | Items reattached to the wrong feed; an unknown medium defaulted to `podcast` |
+| 6 | `podcast:item:guid:https` — a `k` value no relay filter matches |
+| 7 | A reader that walks `i`/`k` in pairs, showing an empty library and no error |
+| 8 | A baseline ignored, so removals either never propagate or delete everything |
+| 9 | The resurrection loop: an entry another app deleted returning on every load |
+| 10 | A lost publish made permanent by recording its baseline anyway |
+| 11 | Deleting another app's tracks along with the group that named their parent |
+| 12 | Blanking `content` over another app's private half |
+| 13 | A user left 97% private, or a private entry disclosed as a relay-indexed `i` tag |
+| 14 | Deleting the half you do not write into — invisible for one whole cycle |
+
+## The suite is mutation-tested
+
+A suite that passes everything is worth nothing. Each vector was checked by
+breaking the reference on purpose and confirming the right one fails:
+
+| Break the reference this way | Vectors that catch it |
+|---|---|
+| Hardcode `content: ''` on republish | **12, 13** |
+| Recompute the inactive half's baseline claims | **14** |
+| Publish local state, ignore the read | 1, 3, 4, 8, 9, 11, 13, 14 |
+| Compare against your own last publish, not the read | 1, 2, 3, 4, 6, 8, 10, 11, 12 |
+| Never compare at all — always publish | 3, 8, 9 |
+| Ignore the baseline | 8, 11 |
+| Append everything held locally | 9 |
+| Drop a group whose own entry was dropped | 11 |
+| Drop tags you cannot parse | 4 |
+| Default an unknown medium to `podcast` | 5 |
+| Take the kind by splitting at the last colon | 6 |
+| Walk `i`/`k` in pairs | 7 |
+| Record the baseline inside `plan` | 10 |
+
+The first two rows are not hypothetical. They are the two defects that reached
+production on 2026-08-25, and they are why this directory exists.
+
+## `reference/`
+
+An **authored** implementation — it has never served traffic. It exists so the
+14 assertions have something to run against, and as a worked example to read
+beside the spec. It is not a recommendation and not an extraction.
+
+For code a real site runs, see
+[`../catalog/modules/nostr/favorites-list.ts`](../catalog/modules/nostr/favorites-list.ts),
+with its trade-offs in
+[`../catalog/comparisons/favorites-10333.md`](../catalog/comparisons/favorites-10333.md).
+
+One simplification: the reference's private half uses a reversible,
+unauthenticated codec rather than NIP-44. The vectors only care whether a
+writer can read a half or not, and a fake codec models that without making the
+suite depend on a crypto library. Real NIP-44 differs in one way that matters —
+it draws a fresh nonce per encryption, so identical entries produce different
+ciphertext every time. Compare **decrypted arrays**, never ciphertext, or rule
+5 never holds and every load republishes.
+
+## Adding a vector
+
+A new normative rule in the spec needs a vector, and a new vector needs a case
+here. That is what stops the gap this directory closed from reopening the next
+time an app discovers a defect the hard way.
