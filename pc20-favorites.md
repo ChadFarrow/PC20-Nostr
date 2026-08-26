@@ -422,6 +422,14 @@ Both existing implementations passed every vector above it while blanking
 `content` on the first favorite anyone toggled, because none of them looked
 at that field. That is what makes this one worth stating separately.
 
+**13. Going private takes the whole list, and coming back does not.** Read a
+list holding entries you did not write and cannot resolve, switch to private,
+and every entry must move — yours and theirs. Then switch back, and only the
+entries your baseline claims may return to the tags. The two halves of this
+vector fail in opposite directions: the first leaves a user 97% private with
+nothing on screen saying which entries are still public, and the second
+publishes another app's private entry as a relay-indexed `i` tag.
+
 ## Open questions / not yet resolved
 
 - **Unfavoriting a feed while a track of it stays favorited is
@@ -464,12 +472,53 @@ at that field. That is what makes this one worth stating separately.
   [test vector 12](#test-vectors) beside it: carrying is mandatory, using it is
   optional, and that is the only combination that does not destroy data.
 
+  **The choice belongs to the LIST, not to the app**, and getting this backwards
+  produces a list that is 97% private. It was tried the other way first, on the
+  reasonable-sounding rule that an app may only move entries it wrote: a user
+  set one app to Private, its own 436 entries were encrypted, and 13 written by
+  a second app stayed in the tags — public, relay-indexed, and searchable in
+  reverse. Measured, on a real account. The user had made a privacy choice and
+  the format had honoured most of it, which is the kind of partial that is worse
+  than a clear no: nothing on screen said which entries were still public, and
+  the remedy was to go and make the same choice again in every other app they
+  had ever signed into.
+
+  So: **whichever half currently holds entries is the mode of the whole list,
+  and every writer puts its entries in that half.** A writer that finds the
+  private half populated writes there too, whatever it did last time. Setting
+  Private in any one app moves everything, including entries that app cannot
+  resolve and did not write.
+
+  The asymmetry that makes this safe is the direction of travel:
+
+  - **public → private may move another app's entries.** It only ever *reduces*
+    exposure, it is reversible by any app that can decrypt, and the entries are
+    carried whole rather than dropped. The worst case is an entry sitting in a
+    half its author has not learned to read yet, which is what the sequencing
+    below exists to prevent.
+  - **private → public may NOT.** It is a disclosure, it publishes an `i` tag
+    relays index, and it cannot be taken back. Move only what your baseline says
+    you put there, and carry the rest where it is.
+
+  **A reader shows the private half whatever its own last choice was.** The
+  entries are the user's, whoever wrote them, and rendering them discloses
+  nothing. An implementation that filters the half it is not currently writing
+  down to what its own baseline claims — a natural way to keep one app from
+  adopting another's entries — hides the user's own favorites from them, on the
+  device they just made the choice on.
+
   **The remaining sequencing is reader-first, and it is not optional.** A
   writer that encrypts before every other writer carries `content` does not
   fail loudly — it silently makes those favorites disappear on the far side,
   which is worse than the format it replaced. So: land the carry rule (done),
   ship it in **both** implementations, and only then let either one start
   writing a private half.
+
+  Moving *another app's* entries has a further prerequisite on top of that, and
+  it is the same shape one step along: an app must be able to **read and render**
+  the private half before anything moves entries into it on its behalf. Until
+  then the move is indistinguishable from a deletion on that app's screen. Ship
+  the reading everywhere, then let the whole-list move go on.
 
   Four further things break, and none of them is optional either:
 
