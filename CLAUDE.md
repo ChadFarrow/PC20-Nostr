@@ -132,24 +132,31 @@ now wrong more often than it used to be, not less. Name the app, say what it
 does, record the SHA you read it at, and keep the rule justified by the
 failure it prevents rather than by the fact that someone shipped it.
 
-**As of 2026-08-25 the two are out of step in a way the spec says destroys
-data.** §4 requires `content` to come back byte for byte, and the private-half
-section requires that carry to ship in *both* apps before either starts
-encrypting. It did not happen in that order:
+**On 2026-08-25 the two went out of step in a way the spec says destroys data,
+and it was closed the same night.** Recorded because the window was real, the
+order it happened in is the thing to learn from, and a reader who finds only the
+happy ending will not know why the rule is worded the way it is.
 
-- `stablekraft-app@fbb6612a` writes a NIP-44 ciphertext into `content`
-  (`lib/nostr/favorites-privacy.ts`, `lib/nostr/nip44.ts`, and
-  `favorites-sync-client.ts:646`), gated by no environment flag, and carries a
-  foreign ciphertext it cannot read.
-- `boostmebitch@edffe3c` hardcodes `content: ''` in `publishFavoritesTags`
-  (`lib/nostr/favorites.ts:129`) and never reads `event.content` at all —
-  `favorites-list.ts` does not contain the word.
+§4 requires `content` to come back byte for byte, and the private-half section
+requires that carry to ship in *both* apps before either starts encrypting. It
+did not happen in that order. `stablekraft-app` shipped a NIP-44 ciphertext into
+`content` and switched a real account to private while `boostmebitch@edffe3c`
+still hardcoded `content: ''` in `publishFavoritesTags` and never read
+`event.content` at all. For about an hour, one favorite toggled in boostmebitch
+would have erased 436 encrypted entries — silently, on someone else's device,
+with no undo, on a replaceable event that keeps no history. Exactly the loss §4
+exists to prevent, reached by shipping the halves in the wrong order rather than
+by getting any rule wrong.
 
-So a favorite toggled in boostmebitch erases every private entry stablekraft
-wrote: silently, on someone else's device, with no undo, on a replaceable
-event that keeps no history. That is the exact loss §4 exists to prevent, and
-it is not a spec question to re-open. The repos are read-only, so what this
-repo does about it is record it and keep the rule stated.
+Both now carry it: `boostmebitch@791dae6` (#222, #232) and `stablekraft-app@75a8fbf0`
+(#225, #226, #227). The spec gained the rule that had been missing —
+`content` is carried, not only tags (#23) — and the rule that the near miss
+argued for: the privacy choice belongs to the LIST, not the app (#25), because
+the first attempt at it left a user 97% private with nothing on screen naming
+the rest.
+
+**Do not read that as "both apps agree" and stop checking.** They agree on this,
+today, at those two SHAs. The sentence to avoid is still the general one.
 
 `catalog/comparisons/favorites-10333.md` tracks where the two currently agree
 and differ, read at a recorded commit. Update it rather than restating a
