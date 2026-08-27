@@ -28,6 +28,16 @@ and tracks its **feed GUID**.
 that does not change when its URL does. This is what lets two apps agree they
 are talking about the same podcast.
 
+**`<podcast:remoteItem>`** — a tag that points at another feed, or at one item
+inside another feed, by GUID rather than by copying it. `feedGuid` is the only
+required attribute; `feedUrl`, `itemGuid`, `medium` and `title` are optional.
+
+**List feed / `musicL`** — an RSS feed that carries `<podcast:remoteItem>` tags
+instead of episodes. Its `<podcast:medium>` is a medium name with `L` added, so
+`musicL` is a music playlist and `podcastL` is a list of shows. It holds much
+the same thing as kind 10333;
+[the two compared](pc20-favorites-vs-list-feeds.md).
+
 **Value 4 Value (V4V)** — the idea that listeners pay what a show is worth to
 them, as they listen, rather than through ads or a subscription. In practice
 that means streaming sats and boosts.
