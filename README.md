@@ -45,6 +45,11 @@ the earlier of the two by a wide margin. Its privacy section is the part to
 read first: per-track receipts under a listener's own key are a public
 timestamped listening history, and "share my boosts" is not consent for it.
 
+**[pc20-favorites-vs-list-feeds.md](pc20-favorites-vs-list-feeds.md)** puts the
+favorites spec beside the format Podcasting 2.0 already has for the same
+payload: a `musicL` feed of `<podcast:remoteItem>`s. Spec against spec, no
+proposal, and it prices what each side pays for its choice.
+
 ## Working on this repo
 
 → **[CLAUDE.md](CLAUDE.md)**. `catalog/check-recipes.sh` and
