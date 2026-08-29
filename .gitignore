@@ -1,0 +1,11 @@
+# macOS
+.DS_Store
+
+# Editor swap and backup files
+*.swp
+*.swo
+*~
+.*.sw?
+
+# Node, for the conformance suite
+node_modules/

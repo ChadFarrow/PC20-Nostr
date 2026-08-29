@@ -41,6 +41,63 @@ export const FAVORITES_KIND = 10333;
 /** NIP-31 label. We always emit our own — see `parseFavoritesList`. */
 export const LIST_ALT = 'PC 2.0 Favorites';
 
+/**
+ * Where this device puts the favorites it owns.
+ *
+ *   'public'  — plaintext `i` tags on the event. What every list is today.
+ *   'private' — a NIP-44 encrypted-to-self tag array in `content`.
+ *   'off'     — this device only. No read, no publish, nothing on a relay.
+ *
+ * ONE choice for the whole list, not one per entry. The spec permits a per-entry
+ * split and this app deliberately does not offer one: the half we are NOT using
+ * is still read, merged and carried, so another app's entries survive either
+ * way, and a single choice is the difference between two merges and 2N of them.
+ */
+export type FavoritesPrivacy = 'public' | 'private' | 'off';
+
+/**
+ * THE PRIVATE HALF IS ON. Every writer of this list now carries `content`.
+ *
+ * `i` is a single-letter tag, so relays index it and a `#i` filter answers
+ * "which pubkeys favorited this feed" — the public list is searchable in
+ * reverse, not merely readable by someone who already has the pubkey. That is
+ * the whole reason a private half exists.
+ *
+ * The condition this waited on has been met. Rule 4 ("carry what you can't
+ * read") covered TAGS and said nothing about `content`, so a conforming writer
+ * that had never heard of a private half republished the empty string the
+ * format has specified from the start, erasing every private entry — silently,
+ * on someone else's device, with no undo, while behaving correctly by the
+ * document it was written against. The spec now states the carry rule for
+ * `content` explicitly (PC20-Nostr#23), and StableKraft ships it
+ * (ChadFarrow/stablekraft-app#225, in production).
+ *
+ * Turned on 2026-08-26, and not a moment early: StableKraft's list was already
+ * private when this flipped, 436 entries of encrypted `content` sitting on the
+ * relays that the previous value of this constant would have blanked on the
+ * next favorite anyone toggled here.
+ *
+ * `privateFavoritesEnabled()` in `lib/nostr/favorites-sync.ts` ORs in a
+ * per-device opt-in; the constant is here rather than there because this module
+ * is the one a check script can load.
+ */
+export const PRIVATE_FAVORITES_ENABLED = true;
+
+/**
+ * Plaintext ceiling for the private half, in UTF-8 bytes.
+ *
+ * NIP-44 v2 as originally published capped plaintext at 65535 bytes. The
+ * current text allows 2^32-1 and switches to a 6-byte length prefix at 65536,
+ * so a library built to the older text REJECTS a payload across that line —
+ * and a private list that cannot be decrypted is indistinguishable from an
+ * empty one. Stay under it until signers catch up.
+ *
+ * The margin below 65536 is for the ciphertext, not for us: NIP-44 pads to a
+ * power-of-two chunk and then base64-encodes, so `content` runs about 1.5× the
+ * plaintext. 60 KB of entries is roughly 500 favorites.
+ */
+export const PRIVATE_PLAINTEXT_MAX = 60_000;
+
 export const SHOW_KIND = 'podcast:guid';
 export const ITEM_KIND = 'podcast:item:guid';
 export const PUBLISHER_KIND = 'podcast:publisher:guid';
@@ -181,6 +238,18 @@ export interface ParsedList {
   foreignTags: string[][];
   /** `k` values outside our table — a kind a newer writer emits. */
   foreignKinds: string[];
+  /**
+   * How many emitted nodes exist because THIS DEVICE holds them.
+   *
+   * Set by {@link mergeFavoritesList}; absent on a plain parse, where the
+   * question has no meaning. It is the only honest input to an "is this merge
+   * empty" test, and the difference is not academic — `nodes.length` counts
+   * CARRIED entries, which belong to another writer and are fed by no local
+   * state at all. A single foreign entry in either half therefore makes a merge
+   * built from an EMPTY local list look non-empty, which is exactly the input
+   * the wholesale-delete guard exists to refuse.
+   */
+  localFed?: number;
 }
 
 /** This device's favorites, grouped for the wire. */
@@ -207,9 +276,266 @@ export interface LocalList {
 export interface FavoritesBaseline {
   feeds: string[];
   items: string[];
+  /**
+   * The same two questions for the ENCRYPTED half, and they must be separate
+   * from the public ones or a mode switch deletes the list it is moving.
+   *
+   * Moving an entry from public to private is a removal on one side and an
+   * addition on the other. Against a single shared baseline those two steps
+   * cancel destructively: the public merge sees "ours, and we no longer hold
+   * it" and drops the entry, and the private append pass sees the same id in
+   * the baseline and skips it as "another app removed this, don't resurrect
+   * it". The entry is gone from both halves, in one publish, with every guard
+   * satisfied.
+   *
+   * Optional, and absent reads as `[]`, so a baseline written before this
+   * shipped reads as all-public — which is exactly what it is.
+   */
+  privateFeeds?: string[];
+  privateItems?: string[];
 }
 
 export const EMPTY_BASELINE: FavoritesBaseline = { feeds: [], items: [] };
+
+/**
+ * The two "nothing here" values, shared so the half a caller is NOT using is
+ * spelled the same way everywhere.
+ *
+ * Under one whole-list choice every cycle passes one of these for the other
+ * half, in three modules. Three literals is three chances for one of them to be
+ * subtly different — a `nodes: []` with a stray `foreignTags` would silently
+ * drop another writer's tags on the half nobody was looking at. Never mutated:
+ * `mergeFavoritesList` and `tagsFromList` both build new arrays.
+ */
+export const EMPTY_LOCAL: LocalList = { groups: [], loose: [] };
+export const EMPTY_PARSED: ParsedList = { nodes: [], foreignTags: [], foreignKinds: [] };
+
+/** Which half of the event a list lives in. */
+export type ListHalf = 'public' | 'private';
+
+/**
+ * One half of a baseline, in the shape {@link mergeFavoritesList} takes.
+ *
+ * The merge is run once per half and knows nothing about halves; this is what
+ * keeps it that way. Reading the wrong half here is the bug the split exists to
+ * prevent, so the two callers go through one function.
+ */
+export function baselineHalf(baseline: FavoritesBaseline, half: ListHalf): FavoritesBaseline {
+  if (half === 'public') return { feeds: baseline.feeds, items: baseline.items };
+  return { feeds: baseline.privateFeeds ?? [], items: baseline.privateItems ?? [] };
+}
+
+/**
+ * The baseline this device is asserting across BOTH halves.
+ *
+ * `baselineFrom` answers the question for one list; this is the pair, and it is
+ * what reaches disk. Callers pass the local list they actually published into
+ * each half — which, under one whole-list choice, means one of them is empty.
+ */
+/**
+ * Which half an account keeps its favorites in, read off the wire — or null
+ * when the wire cannot say.
+ *
+ * THE AMBIGUOUS CASE IS THE WHOLE POINT, AND IT MUST NOT GUESS. kind:10333 is
+ * one shared, multi-writer event, so a single plaintext `i` tag from any other
+ * writer — StableKraft, or this user's own second device still on Public —
+ * sits happily beside an encrypted half. Nothing makes the two exclusive.
+ *
+ * Testing `hasPublic` first therefore fails OPEN. A device seeded 'public' over
+ * a private account paints the decrypted entries into its store (the app
+ * renders the union of both halves), and the next publish emits every one of
+ * them as a plaintext `i` tag. `i` is a single-letter tag, so relays index it
+ * and a `#i` filter answers *which pubkeys favorited this feed* — the list
+ * becomes searchable in reverse, which is exactly the property the private half
+ * exists to remove. kind:10333 is replaceable and keeps no history, relays keep
+ * what they were sent, and nothing on screen changes. There is no retraction.
+ *
+ * Seeding the other way round is not symmetrical, so this does not simply
+ * reverse the tests: an account that is genuinely public, beside another app's
+ * private half, would be moved INTO `content` — no disclosure, but a real edit
+ * to a shared event that an app without NIP-44 then reads as an empty list.
+ *
+ * So each half answers only for itself, and BOTH answers together mean
+ * "unknowable from here" — which is a question for the user, not a coin toss.
+ * A null mode publishes nothing at all (`requestFavoritesSync`), so the safe
+ * state is also the default one.
+ */
+export function seedModeFromWire(hasPublic: boolean, hasPrivate: boolean): FavoritesPrivacy | null {
+  if (hasPublic && hasPrivate) return null;
+  if (hasPrivate) return 'private';
+  if (hasPublic) return 'public';
+  return null;
+}
+
+/**
+ * The baseline a published list's GROUPS assert.
+ *
+ * **Groups only, and deliberately so: what we cannot represent is never
+ * claimed.** A loose node is either ours (a favorite whose parent feed we never
+ * learned) or another writer's (an identifier kind outside our table), and this
+ * function cannot tell them apart — it only sees the merged wire. Claiming a
+ * foreign one would hand this device permission to delete another app's entry.
+ *
+ * The other half of that rule is that OUR loose entries must still be claimed,
+ * or they can never be unfavorited. Only the caller knows which are ours, so it
+ * unions them in from the local list — see `looseIdsWePublished`.
+ */
+export function baselineOfList(list: ParsedList | null | undefined): FavoritesBaseline {
+  if (!list) return EMPTY_BASELINE;
+  return baselineFrom(groupLocalFavorites(entriesFromList(list)));
+}
+
+/**
+ * The loose identifiers THIS DEVICE put on the wire.
+ *
+ * The intersection is the whole point. `merged` holds every loose node that
+ * survived, ours and carried alike; `local` holds only ours. An id in both is
+ * one we published and still assert, which is exactly what a baseline records —
+ * and leaving it out is not a small loss: `mergeFavoritesList`'s loose-removal
+ * test is gated on the baseline, so an unclaimed loose entry is re-emitted on
+ * every republish and re-adopted on every hydrate. The heart empties locally and
+ * the tag never leaves the relay, on any device, with no error.
+ */
+export function looseIdsWePublished(merged: ParsedList | null | undefined, local: LocalList): string[] {
+  if (!merged) return [];
+  const ours = new Set(local.loose.map((l) => l.tag[1]).filter((id): id is string => !!id));
+  const out: string[] = [];
+  for (const node of merged.nodes) {
+    if (node.t !== 'loose') continue;
+    const id = node.loose.tag[1];
+    if (id && ours.has(id) && !out.includes(id)) out.push(id);
+  }
+  return out;
+}
+
+export function baselineForHalves(publicLocal: LocalList, privateLocal: LocalList): FavoritesBaseline {
+  const pub = baselineFrom(publicLocal);
+  const priv = baselineFrom(privateLocal);
+  return { feeds: pub.feeds, items: pub.items, privateFeeds: priv.feeds, privateItems: priv.items };
+}
+
+/**
+ * May this baseline be believed?
+ *
+ * The baseline is a PROMISE that local state will keep asserting these ids, and
+ * it is the only thing that tells a foreign entry from one this device removed.
+ * It lives in one localStorage key; the favourites it speaks for live in
+ * others. Nothing makes those writes atomic, and they are wildly different
+ * sizes — bare ids against hundreds of KB of titles, authors and artwork URLs.
+ *
+ * So the small one can reach disk while the large one does not. `safeSet` falls
+ * back to an in-memory mirror when a write cannot land, and that mirror does not
+ * survive a reload. The next load then reads a baseline naming every favourite
+ * and a local cache holding none, which satisfies `mergeFavoritesList`'s
+ * removal test — *ours, and we no longer hold it* — for all of them at once.
+ *
+ * A baseline that claims ids while this device holds NOTHING is therefore not
+ * evidence of a removal; it is evidence that the pair fell out of step. Refuse
+ * it and every entry on the relay reads as another writer's, which is the safe
+ * direction: the worst case is that one genuine unfavourite waits for the next
+ * cycle, against a device that by definition has no favourites to unfavourite.
+ *
+ * Deliberately NOT a size comparison. "The baseline names more than we hold" is
+ * the ordinary state mid-removal and must stay publishable, so this asks only
+ * the one question that has no innocent answer.
+ */
+export function baselineIsTrustworthy(
+  baseline: FavoritesBaseline,
+  localHasEntries: boolean,
+  deliberatelyEmpty = false,
+): boolean {
+  // "I unfavorited everything" produces the SAME bytes as an unhydrated store —
+  // an empty local set beside a baseline that claims ids — and refusing both is
+  // what made deleting a whole list impossible: the removal never published,
+  // the cycle then recorded an empty baseline over the real one, and the next
+  // reload re-adopted every entry off the relay. Reported from a real account.
+  //
+  // The two are only separable at the moment of the action, which is why this
+  // takes an argument instead of trying to infer it. `storage.favCleared` is
+  // written by the store's removers and by nothing else; an unhydrated store
+  // never calls one, so a set flag is proof rather than a guess.
+  if (deliberatelyEmpty) return true;
+  const claimsSomething =
+    baseline.feeds.length > 0 ||
+    baseline.items.length > 0 ||
+    (baseline.privateFeeds?.length ?? 0) > 0 ||
+    (baseline.privateItems?.length ?? 0) > 0;
+  return !claimsSomething || localHasEntries;
+}
+
+// ---------------------------------------------------------------------------
+// The private half's plaintext
+// ---------------------------------------------------------------------------
+
+/**
+ * The private entries, as the bytes we hand a signer to encrypt.
+ *
+ * A stringified tag array, per the spec — the SAME shape as `event.tags`, so
+ * the grouping rules apply inside it unchanged and `parseFavoritesList` reads
+ * it without knowing which half it came from.
+ *
+ * The one deviation is the escaping, and it is not cosmetic: `?` is written as
+ * its JSON escape `\u003f`.
+ *
+ * Amber (NIP-55) URL-decodes the WHOLE `nostrsigner:` URI and only then splits
+ * it on `?`, so a plaintext carrying one is silently truncated there and the
+ * request comes back "Invalid request. Amber received a malformed nostrsigner
+ * request." Percent-encoding does not help — the `%3F` we write is what Amber
+ * decodes back into the character it splits on. And this payload is FULL of
+ * candidates: an RSS `<guid>` is an arbitrary publisher-chosen string and item
+ * guids are routinely permalink URLs, which is exactly why `parseItemGuid` is
+ * not UUID-gated. One favorited track with a query string in its guid would
+ * otherwise make every private publish on Android fail, forever, with a message
+ * that reads as "Amber isn't installed".
+ *
+ * `encodeAmberSafe` (`lib/nostr/amber-safe-text.ts`) is the usual answer and is
+ * WRONG here: it would put `bmb1.…` inside the ciphertext, and the other app
+ * decrypting this list would find something it has never been told about. This
+ * has to stay interoperable, so the escape has to be one every JSON reader
+ * already understands — which `\u003f` is. `JSON.parse` gives back the same
+ * string, byte for byte, in any implementation.
+ *
+ * `?` can only ever appear inside a string literal here (every element of every
+ * tag is a string, and the structural characters are `[`, `]`, `,` and `"`), so
+ * a global replace over the stringified output cannot corrupt the syntax. A `?`
+ * preceded by a backslash is preceded by an ESCAPED backslash — `\\` — so the
+ * replacement lands after it correctly.
+ */
+export function encodePrivateFavorites(tags: string[][]): string {
+  return JSON.stringify(tags).replace(/\?/g, '\\u003f');
+}
+
+/**
+ * Read a decrypted private half back into a tag array.
+ *
+ * Returns null when the plaintext is not an array of tag arrays. Null means
+ * "this is not a private favorites list", and the caller MUST treat it the same
+ * as a decrypt that failed: park the ciphertext and publish nothing derived
+ * from it. `lib/nostr/mutes.ts` has the hole this closes — a `JSON.parse` that
+ * succeeds on a non-array leaves the blob marked readable and empty, and the
+ * next republish rewrites `content` from those empty lists and destroys it.
+ */
+export function decodePrivateFavorites(plaintext: string): string[][] | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(plaintext);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(parsed)) return null;
+  const tags: string[][] = [];
+  for (const tag of parsed) {
+    if (!Array.isArray(tag)) return null;
+    if (!tag.every((v) => typeof v === 'string')) return null;
+    tags.push(tag as string[]);
+  }
+  return tags;
+}
+
+/** UTF-8 byte length, which is what the NIP-44 limit counts. */
+export function plaintextBytes(text: string): number {
+  return new TextEncoder().encode(text).length;
+}
 
 // ---------------------------------------------------------------------------
 // Reading
@@ -475,6 +801,9 @@ export function mergeFavoritesList({ read, local, baseline }: MergeInput): Parse
 
   const nodes: ListNode[] = [];
   const taken = new Set<string>();
+  // Incremented ONLY where a node is emitted because local state holds it —
+  // never where one is carried for another writer. See `ParsedList.localFed`.
+  let localFed = 0;
 
   for (const node of read.nodes) {
     if (node.t === 'loose') {
@@ -490,6 +819,7 @@ export function mergeFavoritesList({ read, local, baseline }: MergeInput): Parse
       // side. Which half it landed in is an accident of history; whether we
       // published it is the question.
       if (id && (publishedItems.has(id) || publishedFeeds.has(id)) && !localLooseIds.has(id)) continue;
+      if (id && localLooseIds.has(id)) localFed++;
       nodes.push({ t: 'loose', loose: { tag: node.loose.tag.slice(), medium: node.loose.medium } });
       continue;
     }
@@ -512,13 +842,30 @@ export function mergeFavoritesList({ read, local, baseline }: MergeInput): Parse
       continue;
     }
 
+    localFed++;
     nodes.push({
       t: 'group',
       group: {
         feedGuid: group.feedGuid,
         // Fill a gap, never overwrite a value another writer set.
         medium: group.medium ?? mine.medium,
-        itemGuids: [...kept, ...mine.itemGuids.filter((g) => !kept.includes(g))],
+        // Local items the read didn't carry are either NEW here, or ones we
+        // published that another writer has since removed. Only the first may
+        // go up: re-adding the second is the resurrection loop, the same one
+        // `fresh` guards against below for a group absent from the read.
+        //
+        // **This is the branch that shipped without the filter**, and the
+        // asymmetry is why it hid: whether an unfavorite stuck depended on
+        // whether its album happened to still have a second track on the list,
+        // which is invisible from the device doing the removing. The baseline
+        // is the discriminator — absence from the read alone would suppress a
+        // favorite the user just made.
+        itemGuids: [
+          ...kept,
+          ...mine.itemGuids.filter(
+            (g) => !kept.includes(g) && !publishedItems.has(itemId(g)),
+          ),
+        ],
       },
     });
   }
@@ -539,6 +886,7 @@ export function mergeFavoritesList({ read, local, baseline }: MergeInput): Parse
     if (publishedFeeds.has(showId(group.feedGuid)) && fresh.length === 0) continue;
 
     taken.add(group.feedGuid);
+    localFed++;
     nodes.push({ t: 'group', group: { ...group, itemGuids: fresh } });
   }
 
@@ -547,10 +895,11 @@ export function mergeFavoritesList({ read, local, baseline }: MergeInput): Parse
     if (!id) continue;
     if (read.nodes.some((n) => n.t === 'loose' && n.loose.tag[1] === id)) continue;
     if (publishedItems.has(id) || publishedFeeds.has(id)) continue;
+    localFed++;
     nodes.push({ t: 'loose', loose: { tag: loose.tag.slice(), medium: loose.medium } });
   }
 
-  return { nodes, foreignTags: read.foreignTags, foreignKinds: read.foreignKinds };
+  return { nodes, foreignTags: read.foreignTags, foreignKinds: read.foreignKinds, localFed };
 }
 
 /**
@@ -578,15 +927,87 @@ export function baselineFrom(local: LocalList): FavoritesBaseline {
 // Planning a publish
 // ---------------------------------------------------------------------------
 
-export type PublishReason = 'degraded' | 'unchanged' | 'nothing-to-create' | 'publish';
+export type PublishReason =
+  | 'degraded'
+  | 'unchanged'
+  | 'nothing-to-create'
+  | 'wholesale-delete'
+  | 'private-unreadable'
+  | 'private-too-large'
+  // Not a plan outcome — the hydrator's, for a wire `seedModeFromWire` refuses
+  // to read (entries in BOTH halves, so which one this device owns is
+  // unknowable). It withholds the private half rather than guess, and this is
+  // what stops that being silent.
+  | 'mode-ambiguous'
+  | 'publish';
 
 export interface FavoritesPlanInput {
+  /** The merged PUBLIC half. */
   merged: ParsedList;
   /** The raw tags of the event we read, or [] when there is none. */
   readTags: string[][];
   exists: boolean;
   trustworthy: boolean;
+  /**
+   * This device's favorites destined for the public half.
+   *
+   * VESTIGIAL: the baseline moved off `local` and onto the merge, so nothing in
+   * here reads it any more. Kept because every call site and check vector
+   * passes it, and because it documents which half `merged` was built from.
+   */
   local: LocalList;
+
+  // -- the private half -----------------------------------------------------
+  //
+  // All optional. Omitted, this plans exactly as it did before a private half
+  // existed, except that `content` is CARRIED rather than blanked — which is
+  // the carry rule, and it ships whether or not anything below is populated.
+
+  /** Where this device puts the favorites it owns. Defaults to 'public'. */
+  mode?: FavoritesPrivacy;
+  /** The merged PRIVATE half, or null when we could not read it. */
+  privateMerged?: ParsedList | null;
+  /** The decrypted tag array of the read, or [] when there is none. */
+  readPrivateTags?: string[][];
+  /** `event.content` verbatim. Carried untouched unless we re-encrypt. */
+  readContent?: string;
+  /** True when `content` is non-empty and we could not turn it into tags. */
+  privateUnreadable?: boolean;
+  /** This device's favorites destined for the private half. Vestigial, as `local`. */
+  privateLocal?: LocalList;
+  /**
+   * What this device last agreed with the relay on, so the claims about a half
+   * we could not read this cycle survive it. Without it an unreadable private
+   * half disowns every entry in it on the next publish.
+   */
+  previousBaseline?: FavoritesBaseline;
+  /**
+   * This emptiness is something a person did, not something that happened.
+   *
+   * The ONLY thing that may bypass the wholesale-delete refusal — that guard
+   * exists to catch an empty merge nobody asked for. Two provenances, both
+   * genuine:
+   *
+   *   - the withdrawal dialog ("also remove my entries from Nostr")
+   *   - the user unfavoriting their whole list, recorded by the store's
+   *     removers in `storage.favCleared` at the moment it happens
+   *
+   * Never inferred from state. An empty merge over a full read is the shape of
+   * the 2026-08-21 wipe, and the only thing separating that from a deliberate
+   * clear is whether somebody asked for it.
+   */
+  emptyIsIntentional?: boolean;
+  /**
+   * This cycle is a WITHDRAWAL: both halves get an empty local list, so neither
+   * is fed by this device.
+   *
+   * Distinct from {@link emptyIsIntentional}, which it implies but is not
+   * implied by — unfavoriting the whole list also empties the active half, and
+   * that half's baseline must still be recomputed from the (now empty) merge.
+   * Here the device removes everything it claimed, so afterwards it claims
+   * nothing and BOTH halves record an empty baseline.
+   */
+  withdraw?: boolean;
 }
 
 export interface FavoritesPlan {
@@ -595,6 +1016,27 @@ export interface FavoritesPlan {
   tags: string[][];
   /** Record only once the publish lands. Meaningful even when `publish` is false. */
   baseline: FavoritesBaseline;
+  /**
+   * The private tag array to encrypt. Only meaningful when
+   * {@link encryptPrivate} is true.
+   */
+  privateTags: string[][] | null;
+  /**
+   * What `content` must be when we are NOT re-encrypting: the ciphertext we
+   * read, verbatim, or '' when the private half is genuinely empty.
+   */
+  content: string;
+  /**
+   * Encrypt {@link privateTags} and use that as `content`.
+   *
+   * False is the common case and that is the point: NIP-44 draws a fresh nonce
+   * per encryption, so re-encrypting identical entries produces different bytes
+   * every time. Encrypt unconditionally and the byte comparison below can never
+   * report 'unchanged' — every page load republishes, and two apps rewrite the
+   * event at each other forever. Self-inflicted, and the spec names it as the
+   * first thing a private half breaks.
+   */
+  encryptPrivate: boolean;
 }
 
 /**
@@ -607,28 +1049,295 @@ export interface FavoritesPlan {
  * us notice that another app has since edited the event.
  *
  * Byte-equality with the read IS the spec's idempotence vector, executed on
- * every cycle in production rather than only in the check script.
+ * every cycle in production rather than only in the check script. With a
+ * private half that comparison has to be made on the DECRYPTED array, and the
+ * ciphertext compared only where we could not decrypt it — see
+ * {@link FavoritesPlan.encryptPrivate}.
  */
 export function planFavoritesPublish(input: FavoritesPlanInput): FavoritesPlan {
+  const mode: FavoritesPrivacy = input.mode ?? 'public';
+  const readContent = input.readContent ?? '';
+  const readPrivateTags = input.readPrivateTags ?? [];
+  const privateUnreadable = !!input.privateUnreadable;
+
   const tags = tagsFromList(input.merged);
-  const baseline = baselineFrom(input.local);
+
+  // THE BASELINE DESCRIBES BOTH HALVES AS THEY NOW STAND: the ACTIVE half
+  // derived from the MERGED result rather than from `local`, the inactive one
+  // carried from what this device last asserted about it.
+  //
+  // It used to be `baselineForHalves(local, privateLocal)` — one local list
+  // split by mode — which blanked the claims on the half this device was not
+  // currently using. Every ordinary publish in public mode therefore threw away
+  // whatever this device had asserted privately, and those entries became
+  // unremovable: absent from the baseline, the merge reads them as another
+  // writer's and carries them forever, while the app still renders them and
+  // offers a heart that does nothing. Reported as "I unfavorited 2 and they
+  // came back", off an event holding 9 public entries and an encrypted copy.
+  //
+  // Deriving the ACTIVE half from the merge is what makes an ADOPTED list
+  // removable at all: this app paints that half into one library and lets the
+  // user unfavorite any of it, so it has to claim what it renders. Entries it
+  // cannot represent are excluded by `entriesFromList`, which is the line
+  // between adopting a list and claiming a stranger's bytes.
+  //
+  // THE INACTIVE HALF IS CARRIED, NEVER RECOMPUTED, AND THE DIFFERENCE IS A
+  // DELETION. Under one whole-list choice `syncFavorites` hands that half
+  // `EMPTY_LOCAL` on every cycle, so a claim made off ITS merge has nothing
+  // backing it next time round — `mergeFavoritesList`'s removal test (ours, and
+  // we no longer hold it) then fires on every entry in it at once. Cycle 1
+  // claims another writer's entries and cycle 2 deletes them, and cycle 1 need
+  // not even publish, because the hydrator records a baseline on 'unchanged'
+  // too. Measured both ways round against this module: a public-mode device
+  // published `content: ''` over a foreign private half, and a private-mode
+  // device published `[]` over a foreign public one — the same cross-app
+  // deletion the carry rule exists to prevent, arriving through the baseline
+  // instead of through `content`.
+  //
+  // Carrying `previousBaseline` keeps the claims from when that half WAS active,
+  // so a mode switch still removes what it moved, and invents none over a writer
+  // we are merely carrying for.
+  const carried = (half: ListHalf): FavoritesBaseline => (half === 'public'
+    ? { feeds: input.previousBaseline?.feeds ?? [], items: input.previousBaseline?.items ?? [] }
+    : { feeds: input.previousBaseline?.privateFeeds ?? [], items: input.previousBaseline?.privateItems ?? [] });
+
+  // A withdrawal feeds NEITHER half and removes everything this device claimed,
+  // so afterwards it claims nothing. Not `carried`: a claim naming an entry that
+  // is now gone would make `mergeFavoritesList`'s `fresh` filter suppress it if
+  // the user ever favorites it again.
+  //
+  // **A CLAIM THAT HAS STOPPED BEING TRUE IS WORSE THAN NO CLAIM**, and a mode
+  // switch is the ordinary way one does. Switching private→public moves entries
+  // out of `content`, but `carried('private')` copies the pre-switch claims
+  // forward unchanged and every later public-mode cycle copies them again. When
+  // another app (or the user's second device) later favorites one of those same
+  // ids privately, this device matches the stale claim, reads it as
+  // ours-and-removed, and drops it — a cross-app deletion with no undo, driven
+  // by an assertion that expired at the moment of the switch.
+  //
+  // So an inactive half keeps only the claims whose entries are STILL THERE.
+  // This is never applied to an UNREADABLE half: absence from a half we could
+  // not open is not evidence of anything, and filtering on it would disown
+  // every private entry at once.
+  const stillPresent = (b: FavoritesBaseline, list: ParsedList | null | undefined): FavoritesBaseline => {
+    if (!list) return b;
+    const present = new Set<string>();
+    for (const node of list.nodes) {
+      if (node.t === 'loose') {
+        const id = node.loose.tag[1];
+        if (id) present.add(id);
+        continue;
+      }
+      present.add(showId(node.group.feedGuid));
+      for (const g of node.group.itemGuids) present.add(itemId(g));
+    }
+    return { feeds: b.feeds.filter((id) => present.has(id)), items: b.items.filter((id) => present.has(id)) };
+  };
+
+  // `withLoose` restores what `baselineOfList` deliberately cannot see. It reads
+  // GROUPS off the merged wire (which is what was actually published) and takes
+  // the loose ids from the LOCAL list (which is what tells ours from another
+  // writer's). Dropping the loose half is silent and permanent: an orphan
+  // favorite this device published would never enter a baseline, so
+  // `mergeFavoritesList`'s loose-removal test could never fire for it and the
+  // unfavorite would revert on every cycle, forever.
+  const withLoose = (b: FavoritesBaseline, list: ParsedList | null | undefined, l: LocalList) => {
+    const loose = looseIdsWePublished(list, l);
+    if (loose.length === 0) return b;
+    const items = new Set(b.items);
+    for (const id of loose) items.add(id);
+    return { ...b, items: [...items] };
+  };
+  const pub = input.withdraw
+    ? { feeds: [], items: [] }
+    // Inactive public half (private mode), same rule as the private one below.
+    : mode === 'private'
+      ? stillPresent(carried('public'), input.merged)
+      : withLoose(baselineOfList(input.merged), input.merged, input.local);
+  // A half we could not read is carried for the same reason and one of its own:
+  // it goes back verbatim, so what we asserted about it is still true, and
+  // recomputing it from nothing would silently disown every private entry.
+  const priv = input.withdraw
+    ? { feeds: [], items: [] }
+    // Unreadable: verbatim, always. We cannot see what is in there, so what we
+    // asserted about it is still the best answer we have, and recomputing it
+    // from nothing would silently disown every private entry.
+    : privateUnreadable
+      ? carried('private')
+      // Inactive but readable — the post-switch case. Carry, minus what the
+      // switch just moved out.
+      : mode !== 'private'
+        ? stillPresent(carried('private'), input.privateMerged)
+        : withLoose(baselineOfList(input.privateMerged), input.privateMerged, input.privateLocal ?? EMPTY_LOCAL);
+  const baseline: FavoritesBaseline = {
+    feeds: pub.feeds, items: pub.items, privateFeeds: priv.feeds, privateItems: priv.items,
+  };
+
+  // A private half with nothing in it is an EMPTY `content`, never an encrypted
+  // empty array — otherwise every list that has never used one carries a couple
+  // of hundred bytes of ciphertext for the rest of its life, and the comparison
+  // below has to spend a signer round trip to learn nothing.
+  //
+  // EMPTINESS IS A COUNT OF NODES, NOT OF TAGS, and the difference is not
+  // pedantic: `tagsFromList` always emits `['alt', LIST_ALT]`, so an empty list
+  // serialises to ONE tag, never zero. Testing the tag array made every
+  // ordinary public-mode publish encrypt an alt-only array into `content` —
+  // caught end to end, where a public list came back carrying 132 bytes of
+  // ciphertext holding no entries. It cost a signer round trip per publish and
+  // put a private half on the wire for users who had never asked for one.
+  const privateNodes = input.privateMerged ? input.privateMerged.nodes.length : 0;
+  const privateTags = input.privateMerged && privateNodes > 0 ? tagsFromList(input.privateMerged) : null;
+  const privateEmpty = privateTags === null;
+  const privateSame = privateUnreadable
+    ? true // carried verbatim, so by definition nothing about it changes
+    : JSON.stringify(privateTags ?? []) === JSON.stringify(readPrivateTags);
+
+  const encryptPrivate = !privateUnreadable && !privateSame && !privateEmpty;
+  // Unchanged ⇒ carry the ciphertext we read, byte for byte. Changed ⇒ either
+  // we encrypt (and the caller fills this in) or the half is now empty, and an
+  // empty private half is an empty `content`.
+  const content = privateSame ? readContent : '';
+
+  const plan = (publish: boolean, reason: PublishReason): FavoritesPlan => ({
+    publish,
+    reason,
+    tags,
+    baseline,
+    privateTags,
+    content,
+    encryptPrivate: publish && encryptPrivate,
+  });
 
   // Never write on top of a read that may have failed silently. Wholesale
   // replacement makes this the most expensive mistake the format allows: one
   // bad read, republished, is the entire list gone.
-  if (!input.trustworthy) return { publish: false, reason: 'degraded', tags, baseline };
+  if (!input.trustworthy) return plan(false, 'degraded');
 
-  if (JSON.stringify(tags) === JSON.stringify(input.readTags)) {
-    return { publish: false, reason: 'unchanged', tags, baseline };
+  // A CIPHERTEXT WE COULD NOT READ IS NOT A CIPHERTEXT WE MAY WRITE OVER.
+  //
+  // Carrying it verbatim is always safe, so a publish that only touches the
+  // public half proceeds. A publish that has to CHANGE `content` cannot: it
+  // would replace entries we never decoded, which is the same wholesale
+  // deletion the guard below refuses, arriving through a door that guard does
+  // not watch.
+  //
+  // In 'private' mode that is every publish — including the half-finished state
+  // during a switch, where this device still has public baseline entries to
+  // drop. Publishing only the drop would take them off the public half without
+  // ever putting them in the private one. A WITHDRAWAL is the other one: it
+  // empties both halves by definition, so it cannot carry `content` verbatim.
+  //
+  // **The question is whether this plan must CHANGE `content`, never whether an
+  // emptiness was intentional.** `emptyIsIntentional` is `withdraw ||
+  // localCleared`, and the second is a public-mode delete-all — which carries
+  // the ciphertext untouched (`privateSame` is hard-coded true for an unreadable
+  // half, so `content = readContent`). Folding it in refused a publish that
+  // changes nothing about `content`, and the refusal is permanent: `favCleared`
+  // is only retired by `recordFavoritesBaseline`, which never runs because the
+  // plan never publishes. The user reads "Your signer couldn't open the private
+  // half" forever and their delete-all never leaves the device.
+  //
+  // Not every signer implements NIP-44, and Amber is deliberately not asked to
+  // decrypt unattended, so this is an ordinary state rather than an error —
+  // which is exactly why it has to reach the screen. "Hidden here by choice"
+  // and "this app cannot read it" both render as a shorter list.
+  const wantsPrivateWrite = mode === 'private' || !!input.withdraw;
+  if (privateUnreadable && wantsPrivateWrite) return plan(false, 'private-unreadable');
+
+  // ONLY NOW may we say "nothing changed", and the order is the whole point.
+  //
+  // `privateSame` is TRUE when the private half is unreadable — it has to be,
+  // because a ciphertext we carry verbatim cannot differ from itself. Ask this
+  // question first and a private-mode cycle that failed to decrypt reports
+  // 'unchanged' rather than refusing: `syncFavorites` then calls `onSynced`,
+  // and the baseline it records claims the favorite the user just made was
+  // published. `local − baseline` is empty for that id from then on, so it is
+  // NEVER PUBLISHED AGAIN, while the UI reports success — the same permanent
+  // loss `assertPublished` exists to prevent, arriving through a door it does
+  // not watch.
+  //
+  // Found by writing the sequence out as a check vector: the first private
+  // publish works, and the second one silently swallows the entry.
+  if (privateSame && JSON.stringify(tags) === JSON.stringify(input.readTags)) {
+    return plan(false, 'unchanged');
   }
+
+  const publicNodes = input.merged.nodes.length;
 
   // Don't mint an empty event for a user who has no favorites — otherwise every
   // signed-in visitor gets a kind:10333 they never asked for.
-  if (!input.exists && input.merged.nodes.length === 0) {
-    return { publish: false, reason: 'nothing-to-create', tags, baseline };
+  if (!input.exists && publicNodes === 0 && privateNodes === 0) {
+    return plan(false, 'nothing-to-create');
   }
 
-  return { publish: true, reason: 'publish', tags, baseline };
+  // A MERGE THAT COMES OUT EMPTY OVER A LIST THAT IS NOT IS NEVER A USER ACTION.
+  //
+  // This is the hole the guard above only half covered: it declines to CREATE
+  // an empty event and says nothing about replacing a full one with an empty
+  // one. On 2026-08-21 that cost a live account 213 groups and 232 items in a
+  // single publish, and the read was perfectly healthy, so `trustworthy` was
+  // true and the degraded branch never fired.
+  //
+  // The mechanism is `mergeFavoritesList`'s removal test, which is correct in
+  // isolation:
+  //
+  //     ours, and we no longer hold it  ⇒  the user removed it here
+  //
+  // `local` empty with a populated baseline satisfies that for EVERY entry at
+  // once, so the merge dutifully removes all of them. But "this device holds
+  // nothing" is not the same claim as "the user cleared their favorites" — it
+  // is also what an unhydrated store looks like, and the store is rebuilt from
+  // scratch on every page load while the baseline is read from disk.
+  //
+  // WITH A PRIVATE HALF THIS IS ASKED OF THE UNION, NEVER OF EITHER HALF ALONE.
+  // Switching to private legitimately empties the public merge over a non-empty
+  // read — the exact shape below — so a per-half test would refuse the feature
+  // it exists to protect. A mode switch moves entries across and the union never
+  // drops, while an unhydrated store empties both at once.
+  //
+  // **BUT THE UNION MUST BE OVER LOCALLY-FED NODES, NEVER OVER `nodes.length`.**
+  // The tempting version reads the merged totals, and its justification — "both
+  // halves are fed from ONE local list" — is false for the half of the merge
+  // that matters here. `mergeFavoritesList` also CARRIES another writer's
+  // entries through untouched, and those are fed by no local state at all. So a
+  // single foreign entry in the private half makes `privateMerged.nodes.length`
+  // 1 while the public merge is legitimately 0, the guard never fires, and the
+  // public half publishes as an alt-only tag array: the 2026-08-21 wipe, from a
+  // guard written to prevent exactly it. `localFed` is the provenance count that
+  // answers the question actually being asked.
+  //
+  // Refusing costs a user who genuinely emptied their list one extra action.
+  // Publishing costs every favorite they have, on every device, with no undo,
+  // and a replaceable event keeps no history to recover from. That trade is not
+  // close. Deliberately keyed on what the RELAY holds rather than on the
+  // baseline: it is the thing about to be overwritten, and it is true even if
+  // the baseline is itself corrupt.
+  const readHadEntries =
+    input.readTags.some((t) => t[0] === 'i') || readPrivateTags.some((t) => t[0] === 'i');
+  // `?? nodes.length` is the conservative fallback for a list that did not come
+  // from a merge: over-counting can only make this guard fire LESS, so it must
+  // never be the silent default for a merged list — which is why
+  // `mergeFavoritesList` always sets the field.
+  const publicLocalFed = input.merged.localFed ?? input.merged.nodes.length;
+  const privateLocalFed = input.privateMerged
+    ? input.privateMerged.localFed ?? input.privateMerged.nodes.length
+    : 0;
+  if (publicLocalFed === 0 && privateLocalFed === 0 && readHadEntries && !input.emptyIsIntentional) {
+    return plan(false, 'wholesale-delete');
+  }
+
+  // A private list too big for the oldest NIP-44 in the wild reads back as
+  // EMPTY on whatever app hits the cliff, not as an error. Refusing here costs
+  // one favorite; publishing costs the whole list on that device.
+  if (
+    encryptPrivate &&
+    privateTags &&
+    plaintextBytes(encodePrivateFavorites(privateTags)) > PRIVATE_PLAINTEXT_MAX
+  ) {
+    return plan(false, 'private-too-large');
+  }
+
+  return plan(true, 'publish');
 }
 
 // ---------------------------------------------------------------------------
@@ -694,6 +1403,48 @@ export function partitionList(list: ParsedList): PartitionedList {
   }
 
   return { feeds, items, loose, malformed };
+}
+
+/**
+ * The rows of an INACTIVE half this device may adopt into its own store.
+ *
+ * The app renders the union of both halves as one library, but it publishes
+ * into ONE of them — so anything it adopts out of the half it is not using is
+ * republished into the half it IS using on the next cycle. For this device's
+ * own entries that is the point: a mode switch moves them. For another writer's
+ * it is a migration nobody asked for, and in the public direction it is a
+ * disclosure — a private entry re-emitted as a plaintext `i` tag, which relays
+ * index, which makes it reverse-searchable by feed. That is the property the
+ * private half exists to provide.
+ *
+ * The baseline is the only thing that can tell the two apart, because it names
+ * exactly what this device put there. So the active half is adopted whole and
+ * the inactive half is filtered through this.
+ *
+ * `loose` and `malformed` come back EMPTY on purpose. A loose entry is by
+ * definition one we have no meaning for, so it is carried on the wire and never
+ * adopted; `malformed` drives a cleanup hook that only ever edits the public
+ * half, and offering to remove an entry from the other one would print a count
+ * and take nothing away.
+ *
+ * An item survives without its feed row: `ListItem` carries its own `feedGuid`,
+ * and a group the baseline does not claim is one we opened only to place a
+ * track — not a favorite of the feed.
+ */
+export function claimedByBaseline(
+  part: PartitionedList,
+  baseline: FavoritesBaseline,
+  half: ListHalf,
+): PartitionedList {
+  const claimed = baselineHalf(baseline, half);
+  const feedSet = new Set(claimed.feeds);
+  const itemSet = new Set(claimed.items);
+  return {
+    feeds: part.feeds.filter((f) => feedSet.has(showId(f.feedGuid))),
+    items: part.items.filter((i) => itemSet.has(itemId(i.itemGuid))),
+    loose: [],
+    malformed: [],
+  };
 }
 
 /**

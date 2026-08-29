@@ -37,6 +37,17 @@ depend on either.
 **[pc20-favorites.md](pc20-favorites.md)** syncs a user's favorites between
 apps over Nostr, as one replaceable event at kind 10333. Two apps ship it.
 
+Adding it to a third? Run the spec's 14 test vectors against your own code:
+
+```bash
+node --test conformance/vectors.test.mjs
+```
+
+No dependencies and no build step — point the adapter at your merge and the
+same 14 run against it. → **[conformance/](conformance/)**. Both existing apps
+found their defects by shipping instead; one of them logged fifteen, and the
+worst passed every check the other fourteen added.
+
 **[nip-value-playback-events.md](nip-value-playback-events.md)** publishes
 what a streaming-sats or auto-boost payment was for, at kinds 3369 / 33369 /
 23369, so the metadata reaches something other than the recipient's Lightning
@@ -52,5 +63,6 @@ proposal, and it prices what each side pays for its choice.
 
 ## Working on this repo
 
-→ **[CLAUDE.md](CLAUDE.md)**. `catalog/check-recipes.sh` and
-`catalog/check-drift.sh` decide whether a change may land.
+→ **[CLAUDE.md](CLAUDE.md)**. `catalog/check-recipes.sh`,
+`catalog/check-drift.sh` and `node --test conformance/vectors.test.mjs` decide
+whether a change may land.

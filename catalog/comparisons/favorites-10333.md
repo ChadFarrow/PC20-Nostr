@@ -9,14 +9,37 @@ Two implementations exist. Nothing else in any repo writes kind 10333.
 
 ## Where it lives today
 
-| Repo | Path | State | Read at |
+| Repo | Path | Lines | Read at |
 |---|---|---|---|
-| `boostmebitch` | `lib/nostr/favorites-list.ts` | **canonical**, 722 lines | `1f26ba0` |
-| `stablekraft-app` | `lib/nostr/favorites-single-list.ts` | diverged, 662 lines | `db2eb22f` |
+| `boostmebitch` | `lib/nostr/favorites-list.ts` | 1473 | `55a6445` |
+| `stablekraft-app` | `lib/nostr/favorites-single-list.ts` + `favorites-privacy.ts` | 786 + 375 | `09c08c2b` |
 
 Supporting modules — boostmebitch: `favorites.ts`, `favorites-sync.ts`,
 `favorites-hydrator.ts`, `read-trust.ts`. stablekraft-app:
-`favorites-sync-client.ts`, `pc20-identifiers.ts`, `relay-read.ts`.
+`favorites-sync-client.ts`, `pc20-identifiers.ts`, `relay-read.ts`,
+`nip44.ts`.
+
+**Neither is "canonical" any more, and this table used to say boostmebitch
+was.** That ranking was made when it was 722 lines to stablekraft's 662 and
+the format had one half. Both have roughly doubled since, in different
+directions and against different pressures, and the ranking did not survive
+it. Read whichever answers the question you have, and record the SHA.
+
+### One of them has tests and the other has none
+
+| | Tests covering the format |
+|---|---|
+| `boostmebitch` | **0** — no test file of any kind in the repo |
+| `stablekraft-app` | 1541 lines: `favorites-single-list.test.ts` (1025), `favorites-privacy.test.ts` (516) |
+
+stablekraft's suite cites this spec's vectors by number and imports nothing
+but `node:test` and `node:assert/strict`. It is also, by its own header, where
+the vectors came from: *"The spec lists test vectors as an open question;
+these are a first set."*
+
+That asymmetry is the practical reason
+[`../../conformance/`](../../conformance/) exists. A third app should not have
+to pick an implementation to trust — it should run the vectors.
 
 ## Read this before comparing the two
 
@@ -31,14 +54,21 @@ local `~/Vibe/stablekraft-app` checkout (three commits stale at the time this
 was written), reports bugs that were fixed upstream.
 
 This is the concrete reason for the
-[read-through-`origin/HEAD` rule](../README.md#never-read-the-local-checkout).
+[read-through-`origin/HEAD` rule](../../CLAUDE.md#read-originhead-never-the-local-checkout).
 Two independently-maintained implementations of one spec generate stale
 cross-references faster than anyone updates them.
 
 ## What ships
 
 [`favorites-list.ts`](../modules/nostr/favorites-list.ts) — zero imports, same discipline as
-`read-trust.ts`.
+`read-trust.ts`. Re-extracted at `55a6445`; it had been sitting at `1f26ba0`
+and 722 lines, which predates the private half, the `content` carry and the
+per-half baseline. Anyone who copied it in that window got a file that would
+blank another app's private entries.
+
+**Conformance is not settled by reading either of these.** Run
+[`../../conformance/vectors.test.mjs`](../../conformance/vectors.test.mjs)
+against your own code instead.
 
 ### Where the two now agree
 

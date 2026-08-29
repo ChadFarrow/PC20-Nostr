@@ -20,7 +20,7 @@ do not rewrite existing prose into STE.
 
 ## What this repo is
 
-A **reference repo with three parts**, none of which is an application.
+A **reference repo with four parts**, none of which is an application.
 
 1. **The favorites spec.** `pc20-favorites.md` — an app-neutral format for
    syncing a user's podcast and music favorites between Podcasting 2.0 apps
@@ -36,7 +36,14 @@ A **reference repo with three parts**, none of which is an application.
    `claude/new-relay-type-draft-6osmum`. Read its privacy section first.
    Per-track receipts under a listener's own key are a public timestamped
    listening history, and "share my boosts" is not consent for that.
-3. **The catalog.** `catalog/` — working features from ChadFarrow's
+3. **The conformance suite.** `conformance/` — the favorites spec's 14 test
+   vectors, executable. `node --test conformance/vectors.test.mjs` (name the
+   file, not the directory: `node --test conformance/` fails to resolve on
+   Node 22). Zero dependencies, no build step. An implementer points the
+   adapter at their own merge and runs the same 14. The reference under
+   `conformance/reference/` is **authored** — it has never served traffic, and
+   it is there so the assertions have something to run against.
+4. **The catalog.** `catalog/` — working features from ChadFarrow's
    Podcasting 2.0 sites, packaged so someone else can add them to their own
    app. Four parts: `recipes/` (the front door), `modules/` (shared source),
    `comparisons/` (why each shipped copy won), `analysis/` (the scripts
@@ -252,6 +259,18 @@ and read the other one.
   removal test deletes the whole half at once. It takes two cycles to appear —
   the first publish emits correct bytes and only the baseline beside them is
   wrong — so every single-cycle test passes over it.
+- **A normative rule needs a vector, and a vector needs a case.** A new
+  "you must do X" in `pc20-favorites.md` earns a numbered entry under **Test
+  vectors**, and that entry earns a case in `conformance/vectors.test.mjs`
+  with the same number. The 14 vectors were prose for the document's whole
+  life, and in that time both apps discovered the same class of defect by
+  shipping it to a real user. A rule nobody can run is a rule the next
+  implementer learns the expensive way.
+- **A vector that no mutation can kill is not a vector.** Before adding one,
+  break the reference on purpose and confirm yours is what fails.
+  `conformance/README.md` carries the matrix; every one of the 14 is killed by
+  at least one mutation, and the first two rows of that table are the defects
+  that actually reached production on 2026-08-25.
 - **Every kind here is self-assigned, not NIP-allocated**: 10333 for
   favorites, 3369 / 33369 / 23369 for playback events. Say so wherever it
   matters, and keep the collision cost stated: relay filters are
