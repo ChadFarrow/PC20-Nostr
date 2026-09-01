@@ -1,10 +1,10 @@
 /**
- * The 14 test vectors of ../pc20-favorites.md, executable.
+ * The 15 test vectors of ../pc20-favorites.md, executable.
  *
  * The spec states them as behaviors "so they can be written against any test
  * runner". This is that, for one runner, driven through the two pure
  * functions described in ./adapter.d.ts. Point ADAPTER at your own
- * implementation and the same 14 run against it.
+ * implementation and the same 15 run against it.
  *
  * Numbering matches the spec exactly. If you add a vector there, add it here.
  */
@@ -482,5 +482,61 @@ test('14. A writer does not delete the half it does not write into (TWO cycles)'
   assert.ok(
     one.baselineIfLanded.public.includes(FEED_A),
     'a list adopted off the relay must still enter the baseline for the half we DO write into',
+  );
+});
+
+test('15. A list found with entries in BOTH halves is carried, then converged once', () => {
+  // The state: FEED_A is in both halves, FEED_C only in the private one, and
+  // this device's private baseline claims nothing — which is how a real
+  // account reached 284 entries in both halves at once.
+  const read = ev(
+    [ALT, ['medium', 'podcast'], ['i', FEED_A], ['i', FEED_B], K_FEED],
+    encodePrivate([['medium', 'podcast'], ['i', FEED_A], ['i', FEED_C]]),
+  );
+  const local = [feed(FEED_A, 'podcast')];
+
+  // A cycle may not converge the list on its own initiative. Emptying either
+  // half deletes entries this writer never wrote, and an entry appearing
+  // twice is not evidence that either copy is ours.
+  const carried = plan({ read, local, baseline: base([FEED_A]), mode: 'public' });
+  const after = carried.publish ?? read;
+  assert.deepEqual(
+    ids(after.tags),
+    [FEED_A, FEED_B],
+    'the public half was rewritten by a cycle that was only asked to carry it',
+  );
+  assert.deepEqual(
+    ids(decodePrivate(after.content)),
+    [FEED_A, FEED_C],
+    'the private half was tidied away — an overlap is not permission to delete it',
+  );
+
+  // Converging, once the baseline claims the half. Everything claimed comes
+  // back to the tags, and FEED_A must appear ONCE: it was already there, and
+  // the claimed-back copy is the same entry, not a second one. Concatenating
+  // the two opens a second group for one feed and double-counts it for every
+  // reader. Only reachable from this state, which is why no vector above
+  // catches it.
+  const converged = plan({
+    read,
+    local,
+    baseline: base([FEED_A], [FEED_A, FEED_C]),
+    mode: 'public',
+  });
+  assert.ok(converged.publish, 'converging should publish');
+  const out = ids(converged.publish.tags);
+  assert.deepEqual(
+    out.filter((id) => id === FEED_A).length,
+    1,
+    'the entry that was in both halves was emitted twice',
+  );
+  assert.ok(
+    out.includes(FEED_C),
+    'a claimed private-only entry was deleted rather than moved',
+  );
+  assert.deepEqual(
+    ids(decodePrivate(converged.publish.content)),
+    [],
+    'the private half should be empty once its claimed entries have moved',
   );
 });

@@ -379,8 +379,17 @@ export function plan({ read, local = [], baseline, mode = 'public' }) {
         if (t[0] !== 'i') return true;
         return !returning.has(t[1]);
       });
+      // Skip anything the active half ALREADY holds. An entry can sit in both
+      // halves at once — see vector 15 — and concatenating the claimed-back
+      // ones unconditionally emits that identifier twice, which opens a second
+      // group for the same feed and double-counts it for every reader. Only
+      // reachable from the both-halves state, which is why no vector below 15
+      // caught it.
+      const already = new Set(
+        mergedActive.filter((t) => t[0] === 'i').map((t) => t[1]),
+      );
       const claimedBack = inactiveReadTags.filter(
-        (t) => t[0] === 'i' && returning.has(t[1]),
+        (t) => t[0] === 'i' && returning.has(t[1]) && !already.has(t[1]),
       );
       mergedActive = mergeHalf(
         [...mergedActive, ...claimedBack],
