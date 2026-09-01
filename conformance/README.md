@@ -1,6 +1,6 @@
 # Conformance suite
 
-The 14 test vectors of [`../pc20-favorites.md`](../pc20-favorites.md), as code
+The 15 test vectors of [`../pc20-favorites.md`](../pc20-favorites.md), as code
 you can run against your own implementation.
 
 The spec states them as behaviors "so they can be written against any test
@@ -76,6 +76,7 @@ Numbering matches the spec exactly.
 | 12 | Blanking `content` over another app's private half |
 | 13 | A user left 97% private, or a private entry disclosed as a relay-indexed `i` tag |
 | 14 | Deleting the half you do not write into — invisible for one whole cycle |
+| 15 | A list stuck with entries in both halves: tidied away, or converged into a duplicated `i` tag |
 
 ## The suite is mutation-tested
 
@@ -104,7 +105,7 @@ production on 2026-08-25, and they are why this directory exists.
 ## `reference/`
 
 An **authored** implementation — it has never served traffic. It exists so the
-14 assertions have something to run against, and as a worked example to read
+15 assertions have something to run against, and as a worked example to read
 beside the spec. It is not a recommendation and not an extraction.
 
 For code a real site runs, see

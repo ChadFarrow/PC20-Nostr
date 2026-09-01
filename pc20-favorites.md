@@ -484,6 +484,23 @@ half you *do* write into, or a later move between halves copies instead of
 moving, and the entries the user asked to hide stay in plaintext beside the
 encrypted copy.
 
+**15. A list found with entries in BOTH halves is carried, then converged
+once.** Read an event whose public tags and whose decrypted `content` name
+some of the same entries, where the private half also holds entries the public
+half does not. A cycle must return both halves intact: an entry appearing
+twice is not evidence that either copy is yours, and a writer that tidies the
+list by emptying one deletes entries it never wrote. Then converge, with the
+baseline claiming the inactive half, and pin the thing only this state can
+produce — **an entry that was in both halves must be emitted ONCE**. The
+claimed-back copy is the same entry, not a second one, and concatenating them
+opens a second group for one feed and double-counts it for every reader. The
+reference implementation did exactly that, and no vector above reaches the
+state that shows it. Carrying it silently is the other failure: every entry in
+the overlap is public, so a user who chose Private has not got it and nothing
+says so. Measured: 284 public, 287 encrypted, 284 in both, on an account whose
+every screen said it was fine. Vector 13 pins the switch; this pins what the
+next reader owes the result.
+
 ## Open questions / not yet resolved
 
 - **Unfavoriting a feed while a track of it stays favorited is
