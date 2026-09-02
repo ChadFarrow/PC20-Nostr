@@ -1,6 +1,6 @@
 # Conformance suite
 
-The 17 test vectors of [`../pc20-favorites.md`](../pc20-favorites.md), as code
+The 24 test vectors of [`../pc20-favorites.md`](../pc20-favorites.md), as code
 you can run against your own implementation.
 
 The spec states them as behaviors "so they can be written against any test
@@ -23,10 +23,18 @@ No dependencies, no build step, no `package.json`. Node 18 or newer.
 
 ## Point it at your app
 
-Change one line at the top of `vectors.test.mjs`:
+Either change one line at the top of `vectors.test.mjs`:
 
 ```js
-import * as ADAPTER from './reference/favorites.mjs';   // <- your module here
+const ADAPTER = await import(/* ... */ './reference/favorites.mjs');   // <- your module here
+```
+
+or leave this repo untouched and name your shim from your own checkout, which
+is how the two existing apps run it:
+
+```bash
+PC20_FAVORITES_ADAPTER=./scripts/conformance-adapter.mjs \
+  node --test ../PC20-Nostr/conformance/vectors.test.mjs
 ```
 
 Your module exports the functions in [`adapter.d.ts`](adapter.d.ts). Two do the
@@ -34,8 +42,9 @@ work:
 
 | | |
 |---|---|
-| `parseTags(tags)` | Tag array in, structure out. Vectors 5, 6, 7. |
+| `parseTags(tags)` | Tag array in, structure out. Vectors 5, 6, 7, 19, 20. |
 | `plan({read, local, baseline, mode})` | One publish cycle, decided but not sent. Everything else. |
+| `encodePlaintext` / `decodePlaintext` / `seal` | The bytes on either side of the signer. Vectors 22, 23, 24. |
 
 Both are pure, so the suite needs no relay, no signer and no clock. A failure
 is your merge, never your test environment.
@@ -79,6 +88,13 @@ Numbering matches the spec exactly.
 | 15 | A list stuck with entries in both halves: tidied away, or converged into a duplicated `i` tag |
 | 16 | An empty list with no mode to infer — the favorite guessed into the wrong half |
 | 17 | A list declared public while the entries in it stayed encrypted |
+| 18 | Two apps reordering one group's items at each other forever; a new item attached to the wrong feed |
+| 19 | A duplicate feed group skipped, and the favorites under it lost |
+| 20 | An item with no group above it deleted as junk, or made to re-parent everything after it |
+| 21 | A foreign `alt` carried beside ours, or ours not first |
+| 22 | A literal `?` in the plaintext, breaking every private publish through a NIP-55 signer |
+| 23 | A non-array plaintext read as "empty", so the next republish erases it |
+| 24 | A private half past the NIP-44 v2 cliff, read back as empty on an older signer |
 
 ## The suite is mutation-tested
 
@@ -103,6 +119,14 @@ breaking the reference on purpose and confirming the right one fails:
 | Infer the mode from emptiness, ignoring `visibility` | **16** |
 | Let a standing preference restate a mode you cannot honour | **17** |
 | Re-encode an opaque private half as an empty array | **17** |
+| Append a known group's new items to the end of the event | **18** |
+| Put local items ahead of the ones read | **18** |
+| Skip a duplicate feed group | **19** |
+| Drop an item that has no group above it | **20** |
+| Carry the `alt` you read | **21** |
+| Hand the signer a plaintext with a literal `?` | **22** |
+| Read a non-array plaintext as an empty list | **23** |
+| Publish a private half past 60,000 bytes | **24** |
 
 The first two rows are not hypothetical. They are the two defects that reached
 production on 2026-08-25, and they are why this directory exists.
@@ -110,7 +134,7 @@ production on 2026-08-25, and they are why this directory exists.
 ## `reference/`
 
 An **authored** implementation — it has never served traffic. It exists so the
-17 assertions have something to run against, and as a worked example to read
+24 assertions have something to run against, and as a worked example to read
 beside the spec. It is not a recommendation and not an extraction.
 
 For code a real site runs, see

@@ -1,20 +1,42 @@
 /**
- * The 17 test vectors of ../pc20-favorites.md, executable.
+ * The 24 test vectors of ../pc20-favorites.md, executable.
  *
  * The spec states them as behaviors "so they can be written against any test
- * runner". This is that, for one runner, driven through the two pure
- * functions described in ./adapter.d.ts. Point ADAPTER at your own
- * implementation and the same 17 run against it.
+ * runner". This is that, for one runner, driven through the pure functions
+ * described in ./adapter.d.ts. Point ADAPTER at your own implementation and
+ * the same 24 run against it.
+ *
+ * Two ways to point it. Edit the import below, or leave this file alone and
+ * set `PC20_FAVORITES_ADAPTER` to the path of your shim — which is what lets
+ * an app run this suite from its own checkout without copying it:
+ *
+ *   PC20_FAVORITES_ADAPTER=./scripts/conformance-adapter.mjs \
+ *     node --test ../PC20-Nostr/conformance/vectors.test.mjs
  *
  * Numbering matches the spec exactly. If you add a vector there, add it here.
  */
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 
-import * as ADAPTER from './reference/favorites.mjs';
+const ADAPTER = await import(
+  process.env.PC20_FAVORITES_ADAPTER
+    ? pathToFileURL(path.resolve(process.env.PC20_FAVORITES_ADAPTER)).href
+    : './reference/favorites.mjs'
+);
 
-const { parseTags, kindOf, plan, decodePrivate, encodePrivate } = ADAPTER;
+const {
+  parseTags,
+  kindOf,
+  plan,
+  decodePrivate,
+  encodePrivate,
+  encodePlaintext,
+  decodePlaintext,
+  seal,
+} = ADAPTER;
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -705,4 +727,256 @@ test('17. A writer that cannot read a half may not restate the mode', () => {
     fresh.publish.tags.some((t) => t[0] === 'visibility' && t[1] === 'public'),
     'nothing was hidden from this writer, so it may say what the list is',
   );
+});
+
+test('18. Items keep their wire order, and a new item lands at the end of its own group', () => {
+  // Two groups, and the writer holds the first one's items in a DIFFERENT
+  // order from the wire, plus one new item for it. Three ways to get this
+  // wrong, and each one is a well-formed event:
+  //
+  //   local order first   — the other app reads it back, imposes ITS order,
+  //                         and the two rewrite the event at each other forever
+  //   append to the event — the new item lands after FEED_B and re-parents to it
+  //   sort by anything    — same as the first, with a different key
+  const read = ev([
+    ALT,
+    ['medium', 'podcast'],
+    ['i', FEED_A],
+    ['i', ITEM_A1],
+    ['i', ITEM_A2],
+    ['medium', 'music'],
+    ['i', FEED_B],
+    ['i', ITEM_B1],
+    K_FEED,
+    K_ITEM,
+  ]);
+  const ITEM_A3 = 'podcast:item:guid:aaaaaaaa-1111-0000-0000-000000000003';
+
+  const { publish } = plan({
+    read,
+    local: [
+      feed(FEED_A, 'podcast', [ITEM_A3, ITEM_A2, ITEM_A1]), // held in another order
+      feed(FEED_B, 'music', [ITEM_B1]),
+    ],
+    baseline: base([FEED_A, ITEM_A1, ITEM_A2, FEED_B, ITEM_B1]),
+    mode: 'public',
+  });
+
+  assert.ok(publish, 'a new item must produce a publish');
+  assert.deepEqual(
+    ids(publish.tags),
+    [FEED_A, ITEM_A1, ITEM_A2, ITEM_A3, FEED_B, ITEM_B1],
+    'read order kept, the new item after its own group and before the next',
+  );
+  const parsed = parseTags(publish.tags);
+  assert.equal(
+    parsed.entries.find((e) => e.id === ITEM_A3).parent,
+    FEED_A,
+    'the new item was appended to the event and attached to the wrong group',
+  );
+});
+
+test('19. The same feed twice on the wire loses no item', () => {
+  // A duplicate group is well-formed: a reader attaches each item to the most
+  // recently opened group, and both groups name the same feed. A writer that
+  // models groups by feed guid meets the second one already "taken" — and
+  // skipping it drops ITEM_A2, which is a real favorite named nowhere else.
+  const read = ev([
+    ALT,
+    ['medium', 'podcast'],
+    ['i', FEED_A],
+    ['i', ITEM_A1],
+    ['i', FEED_A],
+    ['i', ITEM_A2],
+    K_FEED,
+    K_ITEM,
+  ]);
+
+  // Carry it: nothing local, nothing claimed. Publishing nothing is fine;
+  // publishing something must still hold both items under FEED_A.
+  const carried = plan({ read, local: [], baseline: base(), mode: 'public' });
+  const after = carried.publish ?? read;
+  const parents = (tags) =>
+    parseTags(tags)
+      .entries.filter((e) => e.parent !== null)
+      .map((e) => [e.id, e.parent]);
+  assert.deepEqual(
+    parents(after.tags).sort(),
+    [[ITEM_A1, FEED_A], [ITEM_A2, FEED_A]].sort(),
+    "the duplicate group's item was dropped, or moved under another feed",
+  );
+
+  // Then a real change. The writer folds or carries — either keeps every item
+  // under its feed — and adds its own.
+  const ITEM_A3 = 'podcast:item:guid:aaaaaaaa-1111-0000-0000-000000000003';
+  const { publish } = plan({
+    read,
+    local: [feed(FEED_A, 'podcast', [ITEM_A1, ITEM_A3])],
+    baseline: base([FEED_A, ITEM_A1]),
+    mode: 'public',
+  });
+  assert.ok(publish, 'adding an item must publish');
+  assert.deepEqual(
+    parents(publish.tags).sort(),
+    [[ITEM_A1, FEED_A], [ITEM_A2, FEED_A], [ITEM_A3, FEED_A]].sort(),
+    "the duplicate group's item did not survive the writer's own change",
+  );
+});
+
+test('20. An item before any feed group is carried, in place, and opens nothing', () => {
+  // Nothing in this document writes one, and another writer may. It has no
+  // parent — that is the whole fact about it — and it must not become the
+  // parent of anything, close a group, or move.
+  const ORPHAN = 'podcast:item:guid:00000000-9999-0000-0000-000000000001';
+  const tags = [
+    ALT,
+    ['i', ORPHAN],
+    ['medium', 'podcast'],
+    ['i', FEED_A],
+    ['i', ITEM_A1],
+    K_FEED,
+    K_ITEM,
+  ];
+
+  const parsed = parseTags(tags);
+  const by = (id) => parsed.entries.find((e) => e.id === id);
+  assert.ok(by(ORPHAN), 'an orphan item is an entry, not junk');
+  assert.equal(by(ORPHAN).parent, null, 'an orphan has no parent');
+  assert.equal(by(ITEM_A1).parent, FEED_A, 'the orphan re-parented the items after it');
+
+  const { publish } = plan({
+    read: ev(tags),
+    local: [feed(FEED_A, 'podcast', [ITEM_A1]), feed(FEED_C, 'podcast')],
+    baseline: base([FEED_A, ITEM_A1]),
+    mode: 'public',
+  });
+  assert.ok(publish);
+  assert.ok(ids(publish.tags).includes(ORPHAN), 'the orphan was dropped');
+  assert.ok(
+    at(publish.tags, ORPHAN) < at(publish.tags, FEED_A),
+    'the orphan moved — and after a feed entry it would BE that feed\'s item',
+  );
+});
+
+test('21. Exactly one `alt`, ours, first', () => {
+  // A NIP-31 rendering hint, not user data. A writer regenerates it rather
+  // than carrying a foreign value, because the event can hold only one and a
+  // reader that has no definition for kind 10333 shows whatever is there.
+  const read = ev([
+    ['alt', 'Somebody else\'s label'],
+    ['medium', 'podcast'],
+    ['i', FEED_A],
+    K_FEED,
+  ]);
+  const { publish } = plan({
+    read,
+    local: [feed(FEED_A, 'podcast'), feed(FEED_C, 'podcast')],
+    baseline: base([FEED_A]),
+    mode: 'public',
+  });
+  assert.ok(publish);
+  assert.deepEqual(publish.tags[0], ALT, 'alt is the first tag and carries the canonical label');
+  assert.equal(
+    publish.tags.filter((t) => t[0] === 'alt').length,
+    1,
+    'a foreign alt was carried beside ours',
+  );
+});
+
+test('22. The private plaintext carries no `?`', () => {
+  // A NIP-55 signer URL-decodes the whole `nostrsigner:` URI and only then
+  // splits it on `?`. Item guids are routinely permalink URLs, so one favorited
+  // track with a query string would otherwise break every private publish on
+  // Android, forever, with an error that reads as "signer not installed". The
+  // escape is JSON's own, so every reader already understands it.
+  const QUERY_ITEM = 'podcast:item:guid:https://example.com/ep?id=42&x=y';
+  const tags = [['medium', 'podcast'], ['i', FEED_A], ['i', QUERY_ITEM]];
+
+  const text = encodePlaintext(tags);
+  assert.ok(!text.includes('?'), `the plaintext still carries a "?": ${text}`);
+  assert.deepEqual(JSON.parse(text), tags, 'the escape must be one JSON itself understands');
+  assert.deepEqual(decodePlaintext(text), tags, 'and round-trip through the reader');
+
+  // And through a whole cycle: what comes back out of `content` is the guid.
+  const { publish } = plan({
+    read: ev([]),
+    local: [feed(FEED_A, 'podcast', [QUERY_ITEM])],
+    baseline: base(),
+    mode: 'private',
+  });
+  assert.ok(publish);
+  assert.ok(ids(decodePrivate(publish.content)).includes(QUERY_ITEM));
+});
+
+test('23. A plaintext that is not a tag array is an unreadable half, not an empty one', () => {
+  // `JSON.parse` succeeding is not the same as having read a list. Valid JSON
+  // that is not an array of string arrays marks the half "readable and empty"
+  // in the obvious implementation, and the next republish rewrites `content`
+  // from that emptiness — another app's data gone, from a decrypt that worked.
+  assert.equal(decodePlaintext('{"tags":[]}'), null);
+  assert.equal(decodePlaintext('"a string"'), null);
+  assert.equal(decodePlaintext('[["i","x"],"not a tag"]'), null);
+  assert.equal(decodePlaintext('[["i","x"],["i",1]]'), null, 'a non-string element');
+  assert.deepEqual(decodePlaintext('[]'), [], 'an empty array IS an empty list');
+
+  // The same rule one level up: bytes this writer can open but not read as a
+  // list are carried exactly as an opaque `content` is (vector 12), and a
+  // writer may not publish INTO them.
+  const notAList = seal('{"not":"a list"}');
+  assert.equal(decodePrivate(notAList), null, 'the fixture must be unreadable-as-a-list');
+  const read = ev([ALT, ['medium', 'podcast'], ['i', FEED_A], K_FEED], notAList);
+
+  const carrying = plan({
+    read,
+    local: [feed(FEED_A, 'podcast'), feed(FEED_C, 'podcast')],
+    baseline: base([FEED_A]),
+    mode: 'public',
+  });
+  assert.ok(carrying.publish, 'a public-half change still publishes');
+  assert.equal(carrying.publish.content, notAList, 'the bytes were rewritten');
+
+  const into = plan({
+    read,
+    local: [feed(FEED_A, 'podcast')],
+    baseline: base([FEED_A]),
+    mode: 'private',
+  });
+  assert.equal(into.publish, null, 'published into a half this writer could not read');
+});
+
+test('24. A private half past the NIP-44 v2 cliff is refused, not published', () => {
+  // NIP-44 v2 as first published capped plaintext at 65535 bytes, and a signer
+  // built to that text rejects a payload across the line — so the list reads
+  // back as EMPTY on that device, not as an error. The writer refuses at
+  // 60,000 bytes of plaintext, which leaves room for what NIP-44 adds on the
+  // way to `content`. Refusing costs one favorite; publishing costs the whole
+  // list on the device that hits the cliff.
+  const wide = (n) =>
+    Array.from({ length: n }, (_, i) =>
+      `podcast:item:guid:https://example.com/a-fairly-long-permalink-path/episode-${String(i).padStart(4, '0')}-of-many`,
+    );
+
+  // Grow the fixture from the writer's own plaintext, so the vector tracks the
+  // cap rather than a guess about bytes per entry.
+  let items = wide(200);
+  while (encodePlaintext([['i', FEED_A], ...items.map((id) => ['i', id])]).length <= 60_000) {
+    items = wide(items.length + 100);
+  }
+  const over = plan({
+    read: ev([]),
+    local: [feed(FEED_A, 'podcast', items)],
+    baseline: base(),
+    mode: 'private',
+  });
+  assert.equal(over.publish, null, 'a private half past the cliff was published');
+  assert.deepEqual(over.baselineIfLanded, base(), 'a refused publish claims nothing');
+
+  // The control: the same shape well under the line publishes.
+  const under = plan({
+    read: ev([]),
+    local: [feed(FEED_A, 'podcast', wide(50))],
+    baseline: base(),
+    mode: 'private',
+  });
+  assert.ok(under.publish, 'a private half under the cliff must still publish');
 });

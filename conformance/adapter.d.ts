@@ -1,10 +1,10 @@
 /**
  * The contract `vectors.test.mjs` drives.
  *
- * Two pure functions. Everything the 17 vectors need is expressible through
- * them, and keeping them pure is what lets the suite run with no relay, no
- * signer, no clock and no network — so a failure is always your merge and
- * never your test environment.
+ * Two pure functions do the work, and a handful of small ones beside them.
+ * Everything the 24 vectors need is expressible through them, and keeping them
+ * pure is what lets the suite run with no relay, no signer, no clock and no
+ * network — so a failure is always your merge and never your test environment.
  *
  * These are types for reading. The suite is plain ESM and does not typecheck
  * them; if your app is TypeScript, implement the interface and export the two
@@ -160,9 +160,43 @@ export interface FavoritesAdapter {
    *
    * `null` is not an error. It is the ordinary case rule 4 is about: another
    * app's half, which you carry verbatim and never parse. Vector 12.
+   *
+   * `null` ALSO for bytes you can open that are not a tag array — see
+   * `decodePlaintext`. Vector 23.
    */
   decodePrivate(content: string): string[][] | null;
 
-  /** The inverse. Real writers use NIP-44 encrypt-to-self. */
+  /** The inverse: `seal(encodePlaintext(tags))`. Real writers use NIP-44. */
   encodePrivate(tags: string[][]): string;
+
+  /**
+   * The bytes handed to the signer, BEFORE encryption: the tag array
+   * stringified, with every `?` written as its JSON escape `\u003f`.
+   *
+   * A NIP-55 signer URL-decodes the whole `nostrsigner:` URI and only then
+   * splits it on `?`, and item guids are routinely permalink URLs. Vector 22.
+   *
+   * `plan` refuses to publish a private half whose plaintext exceeds 60,000
+   * UTF-8 bytes — NIP-44 v2's 65,535-byte cliff, less what NIP-44 adds on the
+   * way to `content`. Past it the list reads back as EMPTY on an older
+   * signer, not as an error. Vector 24.
+   */
+  encodePlaintext(tags: string[][]): string;
+
+  /**
+   * The plaintext back into a tag array, or NULL when it is not one.
+   *
+   * Valid JSON that is not an array of string arrays is `null`, never `[]`.
+   * "Readable and empty" is what the next republish overwrites `content`
+   * from. Vector 23.
+   */
+  decodePlaintext(text: string): string[][] | null;
+
+  /**
+   * Encrypt an arbitrary plaintext the way `encodePrivate` does, so a vector
+   * can put bytes in `content` that decrypt but are not a list. Vector 23.
+   * The reference's codec is a reversible stand-in; a real shim may wrap
+   * NIP-44 with a fixed key.
+   */
+  seal(text: string): string;
 }

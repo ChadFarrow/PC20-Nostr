@@ -76,6 +76,12 @@ app's data gets deleted.
 private](#the-list-is-public-or-private-and-the-event-says-which). It takes no
 part in grouping, and a reader that has never seen it ignores it safely.
 
+**`alt` is a NIP-31 label, not data.** Emit `["alt", "PC 2.0 Favorites"]` as
+the first tag, exactly once, and regenerate it on every publish rather than
+carrying the value you read: the event can hold only one, and a client with no
+definition for kind 10333 renders whatever is there. It takes no part in
+grouping, and a reader discards it. ([Vector 21](#test-vectors).)
+
 **Take an entry's kind from the identifier, never from an adjacent tag.** The
 kind is already the identifier's prefix, so a `k` beside every `i` restates
 what position 1 has just said. On the first real event published in this
@@ -120,6 +126,18 @@ which breaks `#k` discovery without breaking anything visible.
   told" as unknown costs a reader nothing — whereas defaulting turns an
   absence into a claim, and it is wrong for exactly the half of the list the
   hint exists to separate.
+- **An item entry with no feed group open above it has no parent.** Nothing in
+  this document writes one, and another writer may. Read it as an entry whose
+  parent is unknown, carry it where it sits, and let it neither open nor close
+  a group: moved to after a feed entry it would become that feed's item. A
+  reader that treats it as junk deletes a favorite; one that lets it close the
+  open group re-parents everything after it. ([Vector 20](#test-vectors).)
+- **The same feed may appear as two groups.** That is well-formed — each item
+  still attaches to the group most recently opened above it — and a writer
+  that models groups by feed guid meets the second one already taken. Fold its
+  items into the first, or carry both; never skip it. The items under a
+  duplicate are real favorites and are named nowhere else.
+  ([Vector 19](#test-vectors).)
 
 Tag order is therefore load-bearing, and this is the easiest thing in the
 format to break by accident. An item's parent feed and its medium are both
@@ -210,9 +228,18 @@ half the user had actually asked for. Now something does.
 **Absent, it is inferred, and that is the whole migration.** No `visibility`
 tag means: entries in exactly one half, that half is the mode; entries in
 both, or in neither, **ask the user and publish nothing until they answer.**
-Every list published before this section reads correctly under that rule, and
-a writer that emits the tag on its next publish upgrades the list in place.
-Emit it on public lists too, or its absence stays ambiguous forever.
+Every list published before this section reads correctly under that rule.
+
+**The tag is written on a choice, and carried once it is there.** A writer
+emits it for the first time when the user picks Public or Private in that
+app, and from then on every writer carries it forward on every publish —
+regenerated from what it read, never replayed as a foreign tag, or the event
+states the mode twice with the stale copy second. A writer's standing setting
+never stamps the tag onto a list that has none: that states a mode nobody
+picked, and on a list that already has a private half the stamp is what would
+license disclosing it. So a legacy list stays untagged until somebody chooses,
+which is what both existing implementations do. Emit it on a public choice as
+much as on a private one, or its absence stays ambiguous forever.
 
 **Changing the mode requires being able to read BOTH halves.** An app whose
 signer has no NIP-44 cannot see the private half, so it cannot move those
@@ -245,6 +272,45 @@ syncing withdraws the entries its own baseline claims and publishes nothing
 further; the list, the tag and every other app's entries are unaffected. There
 is no third `visibility` value, and writing one would tell every other writer
 to stop on the strength of one device's setting.
+
+### Writing the private half
+
+The private half is a tag array, stringified, encrypted to the author's own
+key with NIP-44, and put in `content`. The [grouping rules](#grouping-rules)
+apply inside it unchanged. Four rules govern the bytes, and each one is a
+defect an implementation shipped before it was written down here.
+
+- **The plaintext carries no `?`.** Write the character as its six-character
+  JSON escape, `\u003f`, before handing the string to the signer. A NIP-55
+  signer URL-decodes the whole `nostrsigner:` URI and only then splits it on
+  `?`, so a plaintext carrying one is truncated there and the request comes
+  back malformed — with an error that reads as "signer not installed". Item
+  guids are routinely permalink URLs, so this is not an edge case: one
+  favorited track with a query string in its guid breaks every private publish
+  on that device, forever. Percent-encoding does not help, because `%3F`
+  decodes back into the character it splits on. The JSON escape does, because
+  every reader already understands it: `JSON.parse` returns the same string
+  byte for byte in any implementation, so a writer that never heard of this
+  rule still reads the list. ([Vector 22](#test-vectors).)
+- **A plaintext that is not a tag array is an unreadable half.** Treat it
+  exactly as a decrypt that failed: carry `content` byte for byte, publish
+  nothing derived from it, and say so on screen. A `JSON.parse` that succeeds
+  on `{}` or on `"a string"` otherwise marks the half readable and empty, and
+  the next republish rewrites `content` from that emptiness — another app's
+  entries gone, from a decrypt that worked. ([Vector 23](#test-vectors).)
+- **Refuse to publish a plaintext past 60,000 bytes.** NIP-44 v2 as first
+  published capped plaintext at 65,535 bytes, and a signer built to that text
+  rejects a payload across the line — so on that device the list reads back
+  as empty, not as an error. The margin under 65,536 is for what NIP-44 adds
+  on the way to `content`: it pads to a power-of-two chunk and base64-encodes,
+  about 1.5×. Refusing costs the user one favorite and a message; publishing
+  costs them the whole list on whichever app hits the cliff, with nothing on
+  screen saying why. About 500 favorites fit. ([Vector 24](#test-vectors).)
+- **Compare decrypted arrays, never ciphertext.** NIP-44 draws a fresh nonce
+  per encryption, so identical entries produce different bytes every time, and
+  a ciphertext comparison republishes on every load, forever. Compare the
+  ciphertext only where you could not decrypt it — there, byte-identity is the
+  carry rule.
 
 ## Merging
 
@@ -374,7 +440,13 @@ someone else's data while looking correct:
 - **Entries you read keep their position; yours append.** Imposing your own
   order on every republish makes two apps reorder the event against each
   other forever, each publish locally reasonable, the only symptom being that
-  it never stops.
+  it never stops. **This holds inside a group as much as between them**: the
+  items you read keep their order, and a new item goes at the end of its own
+  group's run — not at the end of the event, where it attaches to whichever
+  group was opened last, and not ahead of the items already read, which is the
+  local-first order. The two existing implementations disagreed on exactly
+  this for the format's first three weeks, and the event was rewritten back
+  and forth in production the whole time. ([Vector 18](#test-vectors).)
 
 ### 4. Carry what you can't read
 
@@ -603,6 +675,48 @@ believe it converges on the strength of it. Pin the control in the same
 fixture — the same writer, the same list, but `content` it CAN decode — or an
 implementation that never restates the mode at all passes.
 
+**18. Items keep their wire order, and a new item lands at the end of its own
+group.** Read a list with two groups, hold the first group's items in a
+different order plus one new item, and publish: the items already read keep
+their order, the new one follows them and precedes the next group, and it
+parses with its own feed as parent. Three well-formed wrong answers: local
+order first (the other app then imposes its order back, forever), appended to
+the end of the event (it re-parents to the last group), or sorted by anything.
+
+**19. The same feed twice on the wire loses no item.** Read a list in which
+one feed opens two groups, each with an item, and both a carry and a change
+of your own must leave every item under that feed. A writer that models
+groups by guid meets the second one already taken, and skipping it drops the
+item beneath — a real favorite, named nowhere else.
+
+**20. An item before any feed group is carried, in place, and opens nothing.**
+Parse it as an entry with no parent; the items after the next feed entry
+belong to that feed, not to it. Republish, and it is still there, still ahead
+of the first group — moved to after a feed entry it would become that feed's
+item.
+
+**21. Exactly one `alt`, ours, first.** Read a list whose `alt` carries some
+other label, publish a change, and the event's first tag is
+`["alt", "PC 2.0 Favorites"]` with no second `alt` beside it.
+
+**22. The private plaintext carries no `?`.** Encode an item whose guid holds
+a query string: the plaintext contains no `?` character, `JSON.parse` of it
+returns the original tags, and a full cycle in private mode gives the guid
+back out of `content` unchanged.
+
+**23. A plaintext that is not a tag array is an unreadable half, not an empty
+one.** `{}`, a string, an array holding a non-array, an array holding a
+non-string all decode to null — and `[]` to an empty list. Put such bytes in
+`content`: a public-half change carries them byte for byte, and a writer set
+to private publishes nothing, because it may not write into a half it could
+not read.
+
+**24. A private half past the NIP-44 v2 cliff is refused.** Hold enough items
+that the plaintext exceeds 60,000 bytes, set private, and the cycle publishes
+nothing and claims nothing. The same shape well under the line publishes. Grow
+the fixture from the writer's own plaintext, so the vector tracks the cap
+rather than a guess about bytes per entry.
+
 ## Open questions / not yet resolved
 
 - **Unfavoriting a feed while a track of it stays favorited is
@@ -703,7 +817,9 @@ implementation that never restates the mode at all passes.
   then the move is indistinguishable from a deletion on that app's screen. Ship
   the reading everywhere, then let the whole-list move go on.
 
-  Four further things break, and none of them is optional either:
+  Four further things break, and none of them is optional either — the rules
+  for the bytes themselves are in [Writing the private
+  half](#writing-the-private-half):
 
   - **Idempotence, immediately.** NIP-44 draws a fresh nonce per encryption,
     so the same entries produce different bytes every time. The byte
