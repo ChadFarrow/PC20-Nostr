@@ -1,10 +1,10 @@
 /**
- * The 15 test vectors of ../pc20-favorites.md, executable.
+ * The 17 test vectors of ../pc20-favorites.md, executable.
  *
  * The spec states them as behaviors "so they can be written against any test
  * runner". This is that, for one runner, driven through the two pure
  * functions described in ./adapter.d.ts. Point ADAPTER at your own
- * implementation and the same 15 run against it.
+ * implementation and the same 17 run against it.
  *
  * Numbering matches the spec exactly. If you add a vector there, add it here.
  */
@@ -28,6 +28,8 @@ const ITEM_B1 = 'podcast:item:guid:bbbbbbbb-1111-0000-0000-000000000001';
 const FEED_C = 'podcast:guid:cccccccc-0000-0000-0000-000000000003';
 
 const ALT = ['alt', 'PC 2.0 Favorites'];
+const VIS_PUBLIC = ['visibility', 'public'];
+const VIS_PRIVATE = ['visibility', 'private'];
 const K_FEED = ['k', 'podcast:guid'];
 const K_ITEM = ['k', 'podcast:item:guid'];
 
@@ -538,5 +540,169 @@ test('15. A list found with entries in BOTH halves is carried, then converged on
     ids(decodePrivate(converged.publish.content)),
     [],
     'the private half should be empty once its claimed entries have moved',
+  );
+});
+
+test('16. The stated mode outranks whatever the halves happen to hold', () => {
+  // FIXTURE 1 — the empty list, which nothing else in this file can reach.
+  // Both halves are empty, so "whichever half holds entries is the mode" has
+  // no answer, and every implementation before the tag had to guess. Guessing
+  // `public` publishes this favorite as a relay-indexed `i` tag on the account
+  // of someone who chose Private in another app.
+  const emptyPrivate = ev([ALT, VIS_PRIVATE], '');
+  const seeded = plan({
+    read: emptyPrivate,
+    local: [feed(FEED_A, 'podcast')],
+    baseline: base(),
+    mode: null, // no stored preference: follow the list
+  });
+  assert.ok(seeded.publish, 'a first favorite must still produce a publish');
+  assert.deepEqual(
+    ids(seeded.publish.tags),
+    [],
+    'the favorite was disclosed as a plaintext tag on a list that said private',
+  );
+  assert.deepEqual(ids(decodePrivate(seeded.publish.content)), [FEED_A]);
+
+  // And with no tag, the same emptiness is a QUESTION. Publishing on a guess
+  // is the disclosure; the writer must ask.
+  const untagged = plan({
+    read: ev([ALT], ''),
+    local: [feed(FEED_A, 'podcast')],
+    baseline: base(),
+    mode: null,
+  });
+  assert.equal(
+    untagged.publish,
+    null,
+    'an empty untagged list has no mode to infer — asking is the only safe answer',
+  );
+
+  // FIXTURE 2 — the tag says public and the private half still holds entries.
+  // Only a writer that could read both halves may have written that tag, so it
+  // is the user's stated intent for the whole list: finish the move.
+  const halfConverged = ev(
+    [ALT, VIS_PUBLIC, ['medium', 'podcast'], ['i', FEED_A], K_FEED],
+    encodePrivate([['medium', 'podcast'], ['i', FEED_B]]),
+  );
+  const converged = plan({
+    read: halfConverged,
+    local: [feed(FEED_A, 'podcast')],
+    baseline: base([FEED_A]),
+    mode: 'public',
+  });
+  assert.ok(converged.publish, 'a half-converged list must be finished');
+  assert.deepEqual(ids(converged.publish.tags), [FEED_A, FEED_B]);
+  assert.deepEqual(
+    ids(decodePrivate(converged.publish.content)),
+    [],
+    'the half the tag does not name must end up empty',
+  );
+
+  // The control, and it is the half that fails a naive implementation: the
+  // SAME entries with no tag must NOT move. There is no stated intent, so
+  // vector 13's conservative rule stands and moving FEED_B would be a
+  // disclosure nobody asked for.
+  const noTag = plan({
+    read: ev(
+      [ALT, ['medium', 'podcast'], ['i', FEED_A], K_FEED],
+      encodePrivate([['medium', 'podcast'], ['i', FEED_B]]),
+    ),
+    local: [feed(FEED_A, 'podcast')],
+    baseline: base([FEED_A]),
+    mode: 'public',
+  });
+  const stillPrivate = noTag.publish ?? null;
+  assert.equal(
+    stillPrivate,
+    null,
+    "without a stated mode there is nothing to say, and another app's private entry stays private",
+  );
+});
+
+test('17. A writer that cannot read a half may not restate the mode', () => {
+  // `content` this writer's codec cannot decode — another app's NIP-44, or a
+  // signer with no `nip44` at all. The user has just chosen Public here.
+  const opaque = ev([ALT, VIS_PRIVATE, K_FEED], 'not-something-we-can-decode');
+
+  const { publish } = plan({
+    read: opaque,
+    local: [feed(FEED_A, 'podcast')],
+    baseline: base(),
+    mode: 'public',
+    userChose: true,
+  });
+
+  // Nothing may be said at all. Everything this writer would publish belongs
+  // in a half it cannot open, and the one thing it could technically emit —
+  // `visibility: public` — would be a false statement about someone's privacy
+  // that the next writer converges on the strength of.
+  assert.equal(
+    publish,
+    null,
+    'a writer that cannot open the half the list lives in has nothing it may say',
+  );
+
+  // The same shape one step along, and the reason `null` above is not enough
+  // on its own: a writer that DOES publish here must carry the bytes whole.
+  // The reference emitted an encoded empty array instead — rule 4's `content`
+  // clause broken by the one branch written to honour it, in a state no
+  // earlier vector reaches.
+  const carrying = plan({
+    read: opaque,
+    local: [],
+    baseline: base(),
+    mode: 'private',
+    userChose: true,
+  });
+  if (carrying.publish) {
+    assert.equal(
+      carrying.publish.content,
+      opaque.content,
+      'rule 4: bytes we cannot read are republished byte for byte',
+    );
+  }
+
+  // The control, in the same fixture: content this writer CAN read. Now the
+  // change is honest, so it must go through — an implementation that never
+  // restates the mode passes the assertions above for the wrong reason.
+  const readable = ev(
+    [ALT, VIS_PRIVATE, K_FEED],
+    encodePrivate([['medium', 'podcast'], ['i', FEED_B]]),
+  );
+  const allowed = plan({
+    read: readable,
+    local: [feed(FEED_A, 'podcast')],
+    baseline: base(),
+    mode: 'public',
+    userChose: true,
+  });
+  assert.ok(allowed.publish, 'an honest mode change must publish');
+  assert.ok(
+    allowed.publish.tags.some((t) => t[0] === 'visibility' && t[1] === 'public'),
+    'the user chose Public in an app that could see both halves',
+  );
+  assert.ok(
+    ids(allowed.publish.tags).includes(FEED_B),
+    'the whole list moves — a stated mode is what lifts the asymmetry',
+  );
+  assert.deepEqual(ids(decodePrivate(allowed.publish.content)), []);
+
+  // And the boundary: an EMPTY `content` is readable by anybody, because there
+  // is no half to be blind to. A signer with no NIP-44 must still be able to
+  // set the mode on a fresh list — treating empty as opaque freezes every new
+  // account on such a signer at whatever the first writer guessed.
+  const fresh = plan({
+    read: ev([ALT], ''),
+    local: [feed(FEED_A, 'podcast')],
+    baseline: base(),
+    mode: 'public',
+    canReadPrivate: false,
+    userChose: true,
+  });
+  assert.ok(fresh.publish, 'a fresh list must still accept a first favorite');
+  assert.ok(
+    fresh.publish.tags.some((t) => t[0] === 'visibility' && t[1] === 'public'),
+    'nothing was hidden from this writer, so it may say what the list is',
   );
 });

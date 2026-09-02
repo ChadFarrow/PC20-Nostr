@@ -49,6 +49,7 @@ distinct kind, at the end**, not one per entry.
   "kind": 10333,
   "tags": [
     ["alt", "PC 2.0 Favorites"],
+    ["visibility", "public"],
 
     ["medium", "podcast"],
     ["i", "podcast:guid:<feedGuid>"],
@@ -70,6 +71,10 @@ example shows. It is not a constant: it is the one free slot in the event, and
 [rule 4](#4-carry-what-you-cant-read) requires you to republish whatever you
 found there byte for byte. Copying the `""` above into a writer is how another
 app's data gets deleted.
+
+`visibility` says which half the list lives in — see [The list is public or
+private](#the-list-is-public-or-private-and-the-event-says-which). It takes no
+part in grouping, and a reader that has never seen it ignores it safely.
 
 **Take an entry's kind from the identifier, never from an adjacent tag.** The
 kind is already the identifier's prefix, so a `k` beside every `i` restates
@@ -168,6 +173,78 @@ Publish the medium only from what a feed actually declared. An app's own
 internal classification is not the same thing and usually carries a default —
 publishing that default makes a guess look authoritative, and a guess on this
 list is sticky, because no other app has any reason to correct it.
+
+### The list is public or private, and the event says which
+
+A list is wholly in the plaintext tags or wholly in the encrypted `content`.
+It is never split across the two, and an entry is never in both.
+
+**A `visibility` tag states which.** It is the mode of the whole list, not of
+the app that wrote it, and any app may change it at any time.
+
+```json
+["visibility", "public"]
+["visibility", "private"]
+```
+
+Multi-letter on purpose: relays index single-letter tags, so an `["v", …]`
+would let a `#v=private` filter enumerate the pubkeys that keep a private
+list. Nothing else about it is positional — put it next to `alt` and treat it,
+like `k`, as taking no part in [grouping](#grouping-rules).
+
+**Why a tag, when the encryption already says it.** Almost. "Whichever half
+holds entries is the mode" answers correctly for every list that has entries,
+and it is what both existing implementations do. It cannot answer for a list
+that has none — a new account, or one whose last favorite was just removed —
+and that is not an edge case, it is where every user starts. An app that
+guesses `public` there and publishes their next favorite has written a
+relay-indexed `i` tag for someone who chose Private in another app an hour
+ago, and `i` cannot be taken back. Guessing `private` is wrong the other way
+round and merely annoying. There is no safe default, so the event has to say.
+
+The second thing the tag buys is a **direction to fold in**. Before it, a list
+found with entries in both halves ([vector 15](#test-vectors)) was ambiguous:
+you could carry it, which is what that vector requires, but nothing said which
+half the user had actually asked for. Now something does.
+
+**Absent, it is inferred, and that is the whole migration.** No `visibility`
+tag means: entries in exactly one half, that half is the mode; entries in
+both, or in neither, **ask the user and publish nothing until they answer.**
+Every list published before this section reads correctly under that rule, and
+a writer that emits the tag on its next publish upgrades the list in place.
+Emit it on public lists too, or its absence stays ambiguous forever.
+
+**Changing the mode requires being able to read BOTH halves.** An app whose
+signer has no NIP-44 cannot see the private half, so it cannot move those
+entries and cannot honestly claim the list is public — it would be stating a
+convergence it is not able to perform, and the entries it cannot see would sit
+encrypted under a tag saying they are not. Such an app carries `content`
+verbatim, keeps writing into the half the tag names if it can, and says on
+screen that it cannot open the other one. An empty `content` satisfies this
+trivially, which is why a fresh list can be set either way by anybody.
+
+**That requirement is what makes the tag consent.** The old rule here was an
+asymmetry: public → private could move another app's entries because it only
+reduces exposure, and private → public could not, because publishing an `i`
+tag is a disclosure and irreversible. The asymmetry existed because no app
+could tell the user's intent for the whole list from the event. The tag is
+that intent, stated by an app that could see everything it was about to
+disclose — so with the tag present the move is symmetric:
+
+- **A writer that finds the tag and the entries disagreeing, and can read both
+  halves, converges toward the tag.** One copy of each entry, in the half the
+  tag names, and the other half emptied.
+- **A writer that cannot read both halves does not converge.** It carries, and
+  it reports the state rather than leaving it silent.
+- **With no tag, the old asymmetry still applies** — public → private moves
+  everything, private → public moves only what your baseline claims. There is
+  no stated intent to act on, so the conservative rule stands.
+
+**"Not on Nostr" is a local choice and is not on the wire.** An app that stops
+syncing withdraws the entries its own baseline claims and publishes nothing
+further; the list, the tag and every other app's entries are unaffected. There
+is no third `visibility` value, and writing one would tell every other writer
+to stop on the strength of one device's setting.
 
 ## Merging
 
@@ -501,6 +578,31 @@ says so. Measured: 284 public, 287 encrypted, 284 in both, on an account whose
 every screen said it was fine. Vector 13 pins the switch; this pins what the
 next reader owes the result.
 
+**16. The stated mode outranks whatever the halves happen to hold.** Two
+fixtures, and the first is the one nothing else can reach. Read a list with
+`["visibility","private"]`, **no entries in either half**, and publish one
+local favorite: it must land in `content`, not in the tags. Every rule above
+answers this from emptiness, and emptiness has no answer — an implementation
+that infers the mode discloses that favorite as a relay-indexed `i` tag, on
+the account of a user who chose Private somewhere else. Then the converging
+half: read a list with `["visibility","public"]` whose `content` still decodes
+to entries, and a writer that can read both halves must emit each of them
+once, in the tags, with the private half emptied. The tag is the consent that
+licenses that move; without the tag, [vector 13](#test-vectors)'s conservative
+rule still applies and the same fixture must NOT move them.
+
+**17. A writer that cannot read a half may not restate the mode.** Same
+`["visibility","private"]` list, `content` this writer's codec cannot decode,
+and the writer set to public. It must publish `content` byte-identical, must
+not emit `["visibility","public"]`, and must not move anything. This is the
+disclosure the [read-both-halves
+rule](#the-list-is-public-or-private-and-the-event-says-which) exists for: an
+app claiming a list is public while the entries it cannot see stay encrypted
+has published a false statement about someone's privacy, and the next app to
+believe it converges on the strength of it. Pin the control in the same
+fixture — the same writer, the same list, but `content` it CAN decode — or an
+implementation that never restates the mode at all passes.
+
 ## Open questions / not yet resolved
 
 - **Unfavoriting a feed while a track of it stays favorited is
@@ -533,9 +635,12 @@ next reader owes the result.
   author's own key. The [grouping rules](#grouping-rules) apply inside that
   array unchanged, because it is a tag array: `medium` still runs, and an item
   still attaches to the group above it. The two halves are two lists with two
-  orderings, and no entry is in both. A user's list could then be all public,
-  all private, or split per entry, and an app that never encrypts anything
-  would still conform.
+  orderings, and no entry is in both. A user's list is all public or all
+  private — **never split per entry**, which an earlier revision of this
+  document allowed and which is settled in [The list is public or
+  private](#the-list-is-public-or-private-and-the-event-says-which) — and an
+  app that never encrypts anything still conforms, because carrying is
+  mandatory and using it is not.
 
   **What no app may do is drop the half it does not use.** This used to be the
   blocker, and it is now [rule 4's `content`
@@ -554,13 +659,15 @@ next reader owes the result.
   the remedy was to go and make the same choice again in every other app they
   had ever signed into.
 
-  So: **whichever half currently holds entries is the mode of the whole list,
-  and every writer puts its entries in that half.** A writer that finds the
-  private half populated writes there too, whatever it did last time. Setting
-  Private in any one app moves everything, including entries that app cannot
-  resolve and did not write.
+  So: **the whole list has one mode, every writer puts its entries in that
+  half, and the event says which.** That is the `visibility` tag, and the rules
+  for reading it, changing it and folding a list toward it are in [The list is
+  public or private](#the-list-is-public-or-private-and-the-event-says-which).
+  Setting Private in any one app moves everything, including entries that app
+  cannot resolve and did not write.
 
-  The asymmetry that makes this safe is the direction of travel:
+  Absent the tag, the mode is inferred from whichever half holds entries, and
+  the direction of travel is asymmetric:
 
   - **public → private may move another app's entries.** It only ever *reduces*
     exposure, it is reversible by any app that can decrypt, and the entries are
@@ -570,6 +677,11 @@ next reader owes the result.
   - **private → public may NOT.** It is a disclosure, it publishes an `i` tag
     relays index, and it cannot be taken back. Move only what your baseline says
     you put there, and carry the rest where it is.
+
+  With the tag present the asymmetry lifts, because the thing it was
+  compensating for — no way to know the user's intent for the whole list — is
+  exactly what the tag supplies, and only an app that could read both halves is
+  allowed to have written it.
 
   **A reader shows the private half whatever its own last choice was.** The
   entries are the user's, whoever wrote them, and rendering them discloses

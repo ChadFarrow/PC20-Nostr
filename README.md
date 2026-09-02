@@ -37,7 +37,7 @@ depend on either.
 **[pc20-favorites.md](pc20-favorites.md)** syncs a user's favorites between
 apps over Nostr, as one replaceable event at kind 10333. Two apps ship it.
 
-Adding it to a third? Run the spec's 14 test vectors against your own code:
+Adding it to a third? Run the spec's 17 test vectors against your own code:
 
 ```bash
 node --test conformance/vectors.test.mjs

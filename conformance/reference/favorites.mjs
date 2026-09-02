@@ -23,6 +23,10 @@
 
 export const KIND = 10333;
 export const ALT = 'PC 2.0 Favorites';
+/** The tag naming which half the whole list lives in. Multi-letter on purpose:
+ *  relays index single-letter tags, and `#v=private` would enumerate the
+ *  pubkeys that keep one. */
+export const VISIBILITY = 'visibility';
 
 /**
  * The known-kinds table. Data Structure, "Derive the kind from a known-kinds
@@ -166,6 +170,27 @@ export function decodePrivate(content) {
 // The merge
 // ---------------------------------------------------------------------------
 
+/**
+ * One `i` per identifier, first position wins.
+ *
+ * Only reachable from the both-halves state: an entry in BOTH halves is one
+ * entry, and a whole-list move that concatenates the halves emits it twice —
+ * a second group for the same feed, double-counted by every reader. Vector 15
+ * pins it in one direction; the tag makes the other direction reachable too.
+ */
+function dedupeEntries(tags) {
+  const seen = new Set();
+  const out = [];
+  for (const tag of tags ?? []) {
+    if (tag[0] === 'i') {
+      if (seen.has(tag[1])) continue;
+      seen.add(tag[1]);
+    }
+    out.push(tag);
+  }
+  return out;
+}
+
 const idsOf = (localGroups) => {
   const out = new Set();
   for (const g of localGroups ?? []) {
@@ -275,7 +300,7 @@ function mergeHalf(readTags, localGroups, baselineIds, { adoptAll = false } = {}
  * derivable ones is what makes both `k` layouts (vector 7) converge on the
  * one the Data Structure section specifies.
  */
-function frame(entryTags, carried = []) {
+function frame(entryTags, carried = [], visibility = null) {
   const kinds = [];
   for (const t of entryTags) {
     if (t[0] !== 'i') continue;
@@ -285,11 +310,29 @@ function frame(entryTags, carried = []) {
   for (const k of carried) {
     if (k !== undefined && !kinds.includes(k)) kinds.push(k);
   }
-  return [['alt', ALT], ...entryTags, ...kinds.map((k) => ['k', k])];
+  const head = visibility ? [['alt', ALT], [VISIBILITY, visibility]] : [['alt', ALT]];
+  return [...head, ...entryTags, ...kinds.map((k) => ['k', k])];
 }
 
 /** Entry-bearing tags only — what `mergeHalf` consumes. */
-const stripFrame = (tags) => (tags ?? []).filter((t) => t[0] !== 'alt' && t[0] !== 'k');
+const stripFrame = (tags) =>
+  (tags ?? []).filter((t) => t[0] !== 'alt' && t[0] !== 'k' && t[0] !== VISIBILITY);
+
+/**
+ * The mode the event STATES, or null when it does not.
+ *
+ * Null is not "public". It means the list was written before this tag existed,
+ * and the caller falls back to inferring the mode from whichever half holds
+ * entries — which answers correctly for every list that has any, and cannot
+ * answer at all for a list that has none.
+ */
+export function statedVisibility(tags) {
+  for (const t of tags ?? []) {
+    if (t[0] !== VISIBILITY) continue;
+    if (t[1] === 'public' || t[1] === 'private') return t[1];
+  }
+  return null;
+}
 
 /** `k` values on the event that we cannot derive from our own entries. */
 const foreignKinds = (tags) =>
@@ -318,7 +361,14 @@ const sameTags = (a, b) => JSON.stringify(a) === JSON.stringify(b);
  * reached no relay is what makes a lost publish permanent (vector 10), so the
  * two are deliberately separate values rather than one side effect.
  */
-export function plan({ read, local = [], baseline, mode = 'public' }) {
+export function plan({
+  read,
+  local = [],
+  baseline,
+  mode = 'public',
+  canReadPrivate = true,
+  userChose = false,
+}) {
   const base = {
     public: [...(baseline?.public ?? [])],
     private: [...(baseline?.private ?? [])],
@@ -332,9 +382,72 @@ export function plan({ read, local = [], baseline, mode = 'public' }) {
 
   const readTags = stripFrame(read.tags);
   const readContent = read.content ?? '';
-  const readPrivate = decodePrivate(readContent); // null = opaque to us
+  // `canReadPrivate: false` stands in for a signer with no NIP-44. It is not
+  // the same as an unparseable payload and it reaches the same place: bytes we
+  // must carry and may not reason about.
+  //
+  // EXCEPT when there is nothing there. An empty `content` is readable by
+  // anybody — there is no half to be blind to — so a signer with no NIP-44 may
+  // still set the mode on a fresh list. Treating empty as opaque would freeze
+  // every new account on such a signer at whatever the first writer guessed.
+  const readPrivate =
+    canReadPrivate || readContent === '' ? decodePrivate(readContent) : null;
 
-  const goingPrivate = mode === 'private';
+  // What the EVENT says, which is not the same as what this writer wants.
+  // Null means the list predates the tag.
+  const stated = statedVisibility(read.tags);
+  const opaque = readPrivate === null;
+
+  // The fallback for a list with no tag: whichever half holds entries. It
+  // answers for every list that has any, and it cannot answer for one that has
+  // none — which is the gap the tag exists to close.
+  const hasPublicEntries = readTags.some((t) => t[0] === 'i');
+  const hasPrivateEntries = (readPrivate ?? []).some((t) => t[0] === 'i');
+  const inferred =
+    hasPublicEntries && !hasPrivateEntries
+      ? 'public'
+      : hasPrivateEntries && !hasPublicEntries
+        ? 'private'
+        : null; // both, or neither — a question, not an answer
+
+  // `mode: null` is a writer with no stored preference: it follows the list.
+  // If the list cannot say either, it must ASK — publishing on a guess is how
+  // a favorite someone hid becomes a relay-indexed `i` tag.
+  const listMode = stated ?? inferred;
+  if (mode === null && listMode === null) {
+    return { publish: null, baselineIfLanded: base };
+  }
+  const wanted = mode ?? listMode;
+
+  // CHANGING A STATED MODE TAKES TWO THINGS, and neither is this writer's
+  // standing preference.
+  //
+  //   the user asking for it — a stored setting that merely disagrees is two
+  //   apps holding different answers about one shared event, and letting the
+  //   one that loaded last win is how a list flips halves on a page load;
+  //
+  //   being able to read BOTH halves — an app whose signer has no NIP-44
+  //   cannot move what it cannot see, so claiming the list is public would
+  //   publish a false statement about someone's privacy, and the next writer
+  //   to believe it converges on the strength of it.
+  const mayChange = userChose && !opaque;
+  const effective = stated && stated !== wanted && !mayChange ? stated : wanted;
+
+  // The tag is carried forward once the list has one, and written for the
+  // first time only when the user has actually chosen. A writer stamping its
+  // own default on a legacy list would state a mode nobody picked — and on a
+  // list that already has a private half, that stamp is what would license
+  // disclosing it.
+  const mayState = userChose || stated !== null;
+
+  // The public direction is a DISCLOSURE, so it moves another app's entries
+  // only on a stated intent. Without one, the conservative rule stands and we
+  // take back only what our own baseline claims.
+  const licensedPublic =
+    effective === 'public' &&
+    (stated === 'public' || (mayChange && wanted === 'public'));
+
+  const goingPrivate = effective === 'private';
   const activeReadTags = goingPrivate ? (readPrivate ?? []) : readTags;
   const inactiveReadTags = goingPrivate ? readTags : (readPrivate ?? []);
   const activeBaseline = goingPrivate ? base.private : base.public;
@@ -343,7 +456,7 @@ export function plan({ read, local = [], baseline, mode = 'public' }) {
   // We cannot read the private half. Carry the bytes and never touch them.
   // Rule 4's `content` clause: "Republish event.content byte for byte, unless
   // you encrypted the bytes you are replacing it with."
-  const privateIsOpaque = readPrivate === null;
+  const privateIsOpaque = opaque;
 
   let mergedActive;
   let mergedInactive;
@@ -351,7 +464,13 @@ export function plan({ read, local = [], baseline, mode = 'public' }) {
   if (goingPrivate && privateIsOpaque) {
     // Another writer owns the private half and we cannot merge into it.
     // Do not switch on top of bytes we cannot read — that would drop them.
-    mergedActive = [];
+    //
+    // NULL, not `[]`. An empty array is a private half we are asserting is
+    // empty, and it re-encodes to real bytes that replace theirs — rule 4's
+    // `content` clause broken by the one branch that exists to honour it.
+    // Vector 17 is what caught this; vector 12 never reaches this branch,
+    // because it reads the opaque half from the OTHER side.
+    mergedActive = null;
     mergedInactive = readTags;
   } else if (goingPrivate) {
     // public → private takes the WHOLE list, ours and theirs. It only ever
@@ -359,11 +478,29 @@ export function plan({ read, local = [], baseline, mode = 'public' }) {
     const moving = mergeHalf(inactiveReadTags, local, inactiveBaseline, {
       adoptAll: true,
     });
-    mergedActive = mergeHalf(
-      [...activeReadTags, ...moving],
-      local,
-      activeBaseline,
-      { adoptAll: true },
+    mergedActive = dedupeEntries(
+      mergeHalf([...activeReadTags, ...moving], local, activeBaseline, {
+        adoptAll: true,
+      }),
+    );
+    mergedInactive = [];
+  } else if (licensedPublic && inactiveReadTags.some((t) => t[0] === 'i')) {
+    // THE STATED MODE IS THE CONSENT, and it is the only thing that lifts the
+    // private → public asymmetry. Two ways to have it: the event already says
+    // public — which only a writer that could read both halves may have
+    // written — or the user is choosing it right now, in an app that can see
+    // everything it is about to disclose. Either way the whole list moves and
+    // each entry is emitted once.
+    // No local state on the moving side: `moving` is what the OTHER half
+    // holds, not our own favorites a second time. The outer merge appends
+    // those once, where they belong.
+    const moving = mergeHalf(inactiveReadTags, [], inactiveBaseline, {
+      adoptAll: true,
+    });
+    mergedActive = dedupeEntries(
+      mergeHalf([...activeReadTags, ...moving], local, activeBaseline, {
+        adoptAll: true,
+      }),
     );
     mergedInactive = [];
   } else {
@@ -403,6 +540,7 @@ export function plan({ read, local = [], baseline, mode = 'public' }) {
   const publicTags = frame(
     goingPrivate ? mergedInactive : mergedActive,
     carriedKinds,
+    mayState ? effective : stated,
   );
   const privateTags = goingPrivate ? mergedActive : mergedInactive;
 
@@ -420,8 +558,12 @@ export function plan({ read, local = [], baseline, mode = 'public' }) {
   // different ciphertext every time and a bytes comparison always differs —
   // every load republishes, forever. The fake codec here is deterministic and
   // would hide that, so the comparison is written the way a real one must be.
+  // Compare against the read FRAMED AS IT WAS — its own `visibility`, not
+  // ours. Otherwise a list that predates the tag differs from itself forever
+  // and every load republishes. A list that genuinely lacks the tag does
+  // differ, once, and that publish is the migration.
   const unchanged =
-    sameTags(publicTags, frame(readTags, carriedKinds)) &&
+    sameTags(publicTags, frame(readTags, carriedKinds, stated)) &&
     JSON.stringify(privateTags ?? readPrivate) === JSON.stringify(readPrivate);
 
   const publish = unchanged ? null : { kind: KIND, tags: publicTags, content };
