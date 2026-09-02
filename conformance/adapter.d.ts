@@ -1,7 +1,7 @@
 /**
  * The contract `vectors.test.mjs` drives.
  *
- * Two pure functions. Everything the 14 vectors need is expressible through
+ * Two pure functions. Everything the 17 vectors need is expressible through
  * them, and keeping them pure is what lets the suite run with no relay, no
  * signer, no clock and no network — so a failure is always your merge and
  * never your test environment.
@@ -61,8 +61,44 @@ export interface PlanInput {
   local: LocalGroup[];
   /** This device's claims, per half. */
   baseline: Baseline;
-  /** Which half this writer feeds. The user's privacy setting in your app. */
-  mode: 'public' | 'private';
+  /**
+   * Which half this writer feeds — the user's privacy setting in your app.
+   *
+   * NULL means they have no stored setting yet, so this writer follows the
+   * list: the `visibility` tag if it has one, otherwise whichever half holds
+   * entries. When the list cannot say either — no tag, and both halves empty
+   * or both populated — `plan` must return `publish: null` and your app must
+   * ask. Publishing on a guess is how a favorite someone hid in another app
+   * becomes a relay-indexed `i` tag. Vector 16.
+   */
+  mode: 'public' | 'private' | null;
+  /**
+   * Can this writer decrypt the private half?
+   *
+   * False for a signer with no NIP-44 — a NIP-55 app-to-app signer, a
+   * read-only login — and it is a normal state for a real user, not an error.
+   * A writer that cannot see a half may not move what is in it and may not
+   * restate the mode; it carries `content` and says so on screen. Vector 17.
+   *
+   * Distinct from a payload your codec cannot parse, which `decodePrivate`
+   * already answers with null. Both arrive at the same place.
+   */
+  canReadPrivate?: boolean;
+  /**
+   * Is the user CHOOSING this mode right now, as opposed to it being your
+   * app's standing setting?
+   *
+   * Only a choice may write the `visibility` tag for the first time or change
+   * one that is already there. A standing setting that merely disagrees with
+   * the list is two apps holding different answers about one shared event, and
+   * letting whichever loaded last win is how a list flips halves on a page
+   * load with nothing on screen. Ask instead.
+   *
+   * It is also what licenses the private → public whole-list move, together
+   * with `canReadPrivate`: the user asked, in an app that could see everything
+   * it was about to disclose.
+   */
+  userChose?: boolean;
 }
 
 export interface PlanResult {

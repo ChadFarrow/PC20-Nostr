@@ -1,6 +1,6 @@
 # Conformance suite
 
-The 15 test vectors of [`../pc20-favorites.md`](../pc20-favorites.md), as code
+The 17 test vectors of [`../pc20-favorites.md`](../pc20-favorites.md), as code
 you can run against your own implementation.
 
 The spec states them as behaviors "so they can be written against any test
@@ -77,6 +77,8 @@ Numbering matches the spec exactly.
 | 13 | A user left 97% private, or a private entry disclosed as a relay-indexed `i` tag |
 | 14 | Deleting the half you do not write into — invisible for one whole cycle |
 | 15 | A list stuck with entries in both halves: tidied away, or converged into a duplicated `i` tag |
+| 16 | An empty list with no mode to infer — the favorite guessed into the wrong half |
+| 17 | A list declared public while the entries in it stayed encrypted |
 
 ## The suite is mutation-tested
 
@@ -98,6 +100,9 @@ breaking the reference on purpose and confirming the right one fails:
 | Take the kind by splitting at the last colon | 6 |
 | Walk `i`/`k` in pairs | 7 |
 | Record the baseline inside `plan` | 10 |
+| Infer the mode from emptiness, ignoring `visibility` | **16** |
+| Let a standing preference restate a mode you cannot honour | **17** |
+| Re-encode an opaque private half as an empty array | **17** |
 
 The first two rows are not hypothetical. They are the two defects that reached
 production on 2026-08-25, and they are why this directory exists.
@@ -105,7 +110,7 @@ production on 2026-08-25, and they are why this directory exists.
 ## `reference/`
 
 An **authored** implementation — it has never served traffic. It exists so the
-15 assertions have something to run against, and as a worked example to read
+17 assertions have something to run against, and as a worked example to read
 beside the spec. It is not a recommendation and not an extraction.
 
 For code a real site runs, see

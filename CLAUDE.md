@@ -36,7 +36,7 @@ A **reference repo with four parts**, none of which is an application.
    `claude/new-relay-type-draft-6osmum`. Read its privacy section first.
    Per-track receipts under a listener's own key are a public timestamped
    listening history, and "share my boosts" is not consent for that.
-3. **The conformance suite.** `conformance/` — the favorites spec's 14 test
+3. **The conformance suite.** `conformance/` — the favorites spec's 17 test
    vectors, executable. `node --test conformance/vectors.test.mjs` (name the
    file, not the directory: `node --test conformance/` fails to resolve on
    Node 22). Zero dependencies, no build step. An implementer points the
