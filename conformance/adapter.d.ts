@@ -121,6 +121,22 @@ export interface PlanResult {
    * asserts that planning records nothing on its own.
    */
   baselineIfLanded: Baseline;
+  /**
+   * What this device holds once the publish lands — or absent when a cycle
+   * leaves local state alone.
+   *
+   * Two models exist and both conform. A writer whose local state is a
+   * DATABASE the merge never writes (StableKraft) is unchanged by a cycle:
+   * foreign entries are carried and never held. A writer whose local state
+   * is a CACHE OF THE MERGE (Boost Me Bitch) paints the active half whole —
+   * an entry adopted that way is held from then on, claimed in the baseline,
+   * and removed by this device only if the user unfavorites it here. The
+   * multi-cycle vectors feed this back in as the next cycle's `local`, so
+   * each model is tested against what it actually does; the disclosure rules
+   * hold either way, because neither model adopts out of the INACTIVE half
+   * beyond what its baseline claims.
+   */
+  holds?: LocalGroup[];
 }
 
 /** The parsed shape of one entry. Vectors 5, 6 and 7 read this. */

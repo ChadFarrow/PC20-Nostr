@@ -112,8 +112,25 @@ test('1. A foreign entry survives your republish', () => {
     'the foreign feed moved out of its medium run',
   );
   assert.ok(
-    at(publish.tags, FEED_B) < at(publish.tags, FEED_C),
-    'entries read keep their position; ours append after them',
+    at(publish.tags, FEED_A) < at(publish.tags, ITEM_A1) &&
+      at(publish.tags, ITEM_A1) < at(publish.tags, FEED_B),
+    'entries read keep their relative order',
+  );
+
+  // Ours is appended — to the END OF ITS MEDIUM RUN, which is where the
+  // grouping rules put a podcast feed, and not necessarily to the end of the
+  // event. Either a second `medium podcast` run after FEED_B or a place in the
+  // first one is conforming; what is not is landing under `medium music`.
+  const parsed = parseTags(publish.tags);
+  assert.equal(
+    parsed.entries.find((e) => e.id === FEED_C).medium,
+    'podcast',
+    'our new feed was filed under the wrong medium',
+  );
+  assert.equal(
+    parsed.entries.find((e) => e.id === FEED_B).medium,
+    'music',
+    'the foreign feed was re-labelled',
   );
 });
 
@@ -426,10 +443,17 @@ test('13. Going private takes the whole list, and coming back does not', () => {
   ]);
   const local = [feed(FEED_A, 'podcast')];
 
-  // public -> private. Every entry moves, ours and theirs. It only ever
-  // reduces exposure and is reversible by any app that can decrypt. Moving
-  // only what we wrote is what left a real user 97% private.
-  const hidden = plan({ read, local, baseline: base([FEED_A]), mode: 'private' });
+  // public -> private, as a CHOICE — the user pressed Private here. Every
+  // entry moves, ours and theirs. It only ever reduces exposure and is
+  // reversible by any app that can decrypt. Moving only what we wrote is what
+  // left a real user 97% private.
+  const hidden = plan({
+    read,
+    local,
+    baseline: base([FEED_A]),
+    mode: 'private',
+    userChose: true,
+  });
   assert.ok(hidden.publish);
   assert.deepEqual(ids(hidden.publish.tags), [], 'entries were left in the public half');
 
@@ -441,23 +465,34 @@ test('13. Going private takes the whole list, and coming back does not', () => {
   );
 
   // private -> public is a DISCLOSURE. It publishes an `i` tag relays index
-  // and it cannot be taken back, so only what our baseline claims may return.
+  // and it cannot be taken back. The list now SAYS private, and a writer whose
+  // standing setting says public is in the conflict the visibility section
+  // describes: a standing preference does not restate a stated mode, so it
+  // follows the list or asks — both existing apps ask. A writer that does
+  // publish here may return only what its own baseline claims. Both answers
+  // are conforming; moving FEED_B is not.
   const shown = plan({
     read: hidden.publish,
-    local,
+    // What the device holds now — unchanged for a writer that carries, the
+    // whole private half for one that paints the active half into its store.
+    local: hidden.holds ?? local,
     baseline: hidden.baselineIfLanded,
     mode: 'public',
   });
 
-  const backOut = ids(shown.publish ? shown.publish.tags : []);
-  assert.ok(backOut.includes(FEED_A), 'our own entry should come back');
+  const after = shown.publish ?? hidden.publish;
+  const backOut = ids(after.tags);
   assert.ok(
     !backOut.includes(FEED_B),
     "another app's private entry was published as a relay-indexed `i` tag",
   );
   assert.ok(
-    ids(decodePrivate(shown.publish.content)).includes(FEED_B),
+    ids(decodePrivate(after.content)).includes(FEED_B),
     'their entry should stay where it is, not be dropped',
+  );
+  assert.ok(
+    ids(decodePrivate(after.content)).includes(FEED_A),
+    'our own entry must not be lost either — it is private, or it is public, never gone',
   );
 });
 
@@ -488,7 +523,7 @@ test('14. A writer does not delete the half it does not write into (TWO cycles)'
   // now fires on the whole half at once.
   const two = plan({
     read: afterOne,
-    local,
+    local: one.holds ?? local,
     baseline: one.baselineIfLanded,
     mode: 'public',
   });
@@ -535,15 +570,16 @@ test('15. A list found with entries in BOTH halves is carried, then converged on
     'the private half was tidied away — an overlap is not permission to delete it',
   );
 
-  // Converging, once the baseline claims the half. Everything claimed comes
-  // back to the tags, and FEED_A must appear ONCE: it was already there, and
-  // the claimed-back copy is the same entry, not a second one. Concatenating
-  // the two opens a second group for one feed and double-counts it for every
-  // reader. Only reachable from this state, which is why no vector above
-  // catches it.
+  // Converging, once the baseline claims the half. This device put FEED_A and
+  // FEED_C in the private half and still holds both — a claim without the
+  // entry behind it is a removal, rule 3 — so both come to the tags, and
+  // FEED_A must appear ONCE: it was already there, and the claimed-back copy
+  // is the same entry, not a second one. Concatenating the two opens a second
+  // group for one feed and double-counts it for every reader. Only reachable
+  // from this state, which is why no vector above catches it.
   const converged = plan({
     read,
-    local,
+    local: [feed(FEED_A, 'podcast'), feed(FEED_C, 'podcast')],
     baseline: base([FEED_A], [FEED_A, FEED_C]),
     mode: 'public',
   });
@@ -634,12 +670,22 @@ test('16. The stated mode outranks whatever the halves happen to hold', () => {
     baseline: base([FEED_A]),
     mode: 'public',
   });
-  const stillPrivate = noTag.publish ?? null;
-  assert.equal(
-    stillPrivate,
-    null,
-    "without a stated mode there is nothing to say, and another app's private entry stays private",
+  // A writer may republish here — its canonical rendering of the private half
+  // can differ from the bytes another app wrote — but it may not MOVE anything.
+  const stillPrivate = noTag.publish ?? noTag.read ?? null;
+  const settled = noTag.publish ?? {
+    tags: [ALT, ['medium', 'podcast'], ['i', FEED_A], K_FEED],
+    content: encodePrivate([['medium', 'podcast'], ['i', FEED_B]]),
+  };
+  assert.ok(
+    !ids(settled.tags).includes(FEED_B),
+    "without a stated mode there is nothing to say, and another app's private entry was disclosed",
   );
+  assert.ok(
+    ids(decodePrivate(settled.content)).includes(FEED_B),
+    "without a stated mode another app's private entry stays private",
+  );
+  void stillPrivate;
 });
 
 test('17. A writer that cannot read a half may not restate the mode', () => {

@@ -228,7 +228,11 @@ half the user had actually asked for. Now something does.
 **Absent, it is inferred, and that is the whole migration.** No `visibility`
 tag means: entries in exactly one half, that half is the mode; entries in
 both, or in neither, **ask the user and publish nothing until they answer.**
-Every list published before this section reads correctly under that rule.
+Every list published before this section reads correctly under that rule. And
+a writer whose standing setting names the EMPTY half of such a list follows
+the list or asks; it does not act on the setting. That is one app overruling
+another, which is the same conflict a stated mode exists to settle — both
+existing implementations stop and ask there.
 
 **The tag is written on a choice, and carried once it is there.** A writer
 emits it for the first time when the user picks Public or Private in that
@@ -544,8 +548,10 @@ runner.
 
 **1. A foreign entry survives your republish.** Read a list containing a feed
 group your app cannot resolve, publish, and the group and its items must come
-back byte-identical and in the same position. This is the vector that catches
-a writer built from local state alone, which is the natural way to write one.
+back byte-identical, in the same relative position, under the same medium.
+Your own new feed lands at the end of its medium run — which need not be the
+end of the event. This is the vector that catches a writer built from local
+state alone, which is the natural way to write one.
 
 **2. An empty list is distinguishable from a read that never happened.** A
 relay answering "I have nothing" and a relay that never answered must produce
@@ -607,12 +613,15 @@ Both existing implementations passed every vector above it while blanking
 at that field. That is what makes this one worth stating separately.
 
 **13. Going private takes the whole list, and coming back does not.** Read a
-list holding entries you did not write and cannot resolve, switch to private,
-and every entry must move — yours and theirs. Then switch back, and only the
-entries your baseline claims may return to the tags. The two halves of this
-vector fail in opposite directions: the first leaves a user 97% private with
-nothing on screen saying which entries are still public, and the second
-publishes another app's private entry as a relay-indexed `i` tag.
+list holding entries you did not write and cannot resolve, choose Private,
+and every entry must move — yours and theirs. Then read the result with a
+standing setting of Public and no choice, holding whatever this device now
+holds: the list says private, so a writer either follows it and publishes
+nothing, or asks — and if it publishes at all, only the entries its baseline
+claims may return to the tags, and nothing is lost from either half. The two
+halves of this vector fail in opposite directions: the first leaves a user
+97% private with nothing on screen saying which entries are still public, and
+the second publishes another app's private entry as a relay-indexed `i` tag.
 
 **14. A writer does not delete the half it does not write into — and this
 takes TWO cycles to observe.** Read an event with entries in both halves,
@@ -639,8 +648,9 @@ some of the same entries, where the private half also holds entries the public
 half does not. A cycle must return both halves intact: an entry appearing
 twice is not evidence that either copy is yours, and a writer that tidies the
 list by emptying one deletes entries it never wrote. Then converge, with the
-baseline claiming the inactive half, and pin the thing only this state can
-produce — **an entry that was in both halves must be emitted ONCE**. The
+baseline claiming the inactive half and the device still holding what it
+claims — a claim without the entry behind it is a removal, rule 3 — and pin
+the thing only this state can produce — **an entry that was in both halves must be emitted ONCE**. The
 claimed-back copy is the same entry, not a second one, and concatenating them
 opens a second group for one feed and double-counts it for every reader. The
 reference implementation did exactly that, and no vector above reaches the

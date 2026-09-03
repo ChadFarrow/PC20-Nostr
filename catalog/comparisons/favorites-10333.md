@@ -11,8 +11,11 @@ Two implementations exist. Nothing else in any repo writes kind 10333.
 
 | Repo | Path | Lines | Read at |
 |---|---|---|---|
-| `boostmebitch` | `lib/nostr/favorites-list.ts` | 1473 | `55a6445` |
-| `stablekraft-app` | `lib/nostr/favorites-single-list.ts` + `favorites-privacy.ts` | 786 + 375 | `09c08c2b` |
+| `boostmebitch` | `lib/nostr/favorites-list.ts` | 1834 | `545c5ca` |
+| `stablekraft-app` | `lib/nostr/favorites-single-list.ts` + `favorites-privacy.ts` | 853 + 750 | `4924389` |
+
+Both SHAs carry the `visibility` tag (PC20-Nostr#30), landed in the two apps
+on 2026-09-02 as `boostmebitch@9d55f2a` and `stablekraft-app@4924389`.
 
 Supporting modules — boostmebitch: `favorites.ts`, `favorites-sync.ts`,
 `favorites-hydrator.ts`, `read-trust.ts`. stablekraft-app:
@@ -25,21 +28,26 @@ the format had one half. Both have roughly doubled since, in different
 directions and against different pressures, and the ranking did not survive
 it. Read whichever answers the question you have, and record the SHA.
 
-### One of them has tests and the other has none
+### Both have tests, and both now run the spec's
 
 | | Tests covering the format |
 |---|---|
-| `boostmebitch` | **0** — no test file of any kind in the repo |
-| `stablekraft-app` | 1541 lines: `favorites-single-list.test.ts` (1025), `favorites-privacy.test.ts` (516) |
+| `boostmebitch` | `scripts/check-favsync.mjs` (2138 lines) — `npm run check:favsync`, loading the shipping module under plain Node; every vector replayed against a `naive()` |
+| `stablekraft-app` | 2008 lines: `favorites-single-list.test.ts` (1029), `favorites-privacy.test.ts` (979) |
 
 stablekraft's suite cites this spec's vectors by number and imports nothing
 but `node:test` and `node:assert/strict`. It is also, by its own header, where
 the vectors came from: *"The spec lists test vectors as an open question;
-these are a first set."*
+these are a first set."* (An earlier revision of this page said boostmebitch
+had no tests. It had none under `node --test`; it had a check script, and the
+page was read too literally.)
 
-That asymmetry is the practical reason
-[`../../conformance/`](../../conformance/) exists. A third app should not have
-to pick an implementation to trust — it should run the vectors.
+**Since 2026-09-02 each app also runs [`../../conformance/`](../../conformance/)
+against its own merge** — `npm run check:conformance` in either repo, through a
+thin shim (`boostmebitch/scripts/conformance-adapter.mjs`,
+`stablekraft-app/lib/nostr/favorites-conformance-adapter.ts`) and the
+`PC20_FAVORITES_ADAPTER` hook on `vectors.test.mjs`. The first run of each
+found real defects (below), and four vectors the document itself had wrong.
 
 ## Read this before comparing the two
 
@@ -86,24 +94,23 @@ against your own code instead.
 
 ### Where they still differ
 
-**1. Item order — the convergence bug.** boostmebitch keeps wire order and
-appends local-only items: `[...kept, ...mine.itemGuids.filter(...)]`.
-stablekraft puts local first: `[...mine.itemGuids, ...group.itemGuids.filter(...)]`.
+**1. Item order — the convergence bug. FIX OPEN at stablekraft.** At the SHAs
+above, boostmebitch keeps wire order and appends local-only items:
+`[...kept, ...mine.itemGuids.filter(...)]`. stablekraft puts local first:
+`[...mine.itemGuids, ...group.itemGuids.filter(...)]`.
 
 Imposing local order on every republish means the two apps reorder the event
 at each other forever. Each publish is locally reasonable; the only symptom
 is that it never stops. Because [tag order is
 semantic](../../pc20-favorites.md#grouping-rules), this is not cosmetic
 churn — it is a rewrite of the meaningful part of the event, on every cycle.
+The spec now says which order (vector 18), and stablekraft-app#236 adopts it.
 
-stablekraft already applies the correct rule to loose nodes, with the
-matching comment ("moving it is how two writers end up reordering the event
-against each other forever"). It just doesn't apply it to items.
-
-**2. The append pass and resurrection.** boostmebitch filters local groups
-absent from the wire against the baseline — `fresh = itemGuids.filter(guid =>
-!publishedItems.has(itemId(guid)))` — so an entry another app *removed* is
-not re-added. stablekraft's append loop is unconditional:
+**2. The append pass and resurrection. FIX OPEN at stablekraft.** boostmebitch
+filters local groups absent from the wire against the baseline — `fresh =
+itemGuids.filter(guid => !publishedItems.has(itemId(guid)))` — so an entry
+another app *removed* is not re-added. stablekraft's append loop at
+`4924389` is unconditional:
 
 ```js
 for (const group of local) {
@@ -114,7 +121,16 @@ for (const group of local) {
 
 An entry this device published, that another writer has since deleted, comes
 back on the next cycle. On the device that deleted it, the favorite returns
-by itself.
+by itself. Vector 9 caught it on the first conformance run; stablekraft-app#236 fixes
+it.
+
+**2b. A public writer over a private half it cannot open. FIX OPEN at
+stablekraft.** stablekraft refused EVERY publish when `content` held bytes its
+signer could not decrypt, mode regardless. On a list that does not say
+private that strands every favorite a NIP-55 user makes there the moment any
+other app writes a private half. boostmebitch refuses only a publish that
+would have to change `content`. Vector 12; stablekraft-app#236 carries the bytes and
+writes the public half.
 
 **3. Loose entries can never be unfavorited in stablekraft.** It carries
 loose nodes verbatim and never removes them. boostmebitch removes one when
@@ -138,10 +154,11 @@ loop could not engage at all.
 
 ### What stablekraft does better
 
-**Duplicate groups on the wire.** stablekraft folds the second occurrence's
-items into the first. boostmebitch skips it outright — `if
-(taken.has(group.feedGuid)) continue;` — which drops that group's items. They
-are real favorites and are named nowhere else, so they are lost.
+**Duplicate groups on the wire. FIX OPEN at boostmebitch.** stablekraft folds
+the second occurrence's items into the first. boostmebitch at `545c5ca` skips
+it outright — `if (taken.has(group.feedGuid)) continue;` — which drops that
+group's items. They are real favorites and are named nowhere else, so they
+are lost. Vector 19; boostmebitch#294 folds them, in wire order.
 
 **Staged rollout of destructive operations.** stablekraft gates inbound
 deletes behind `SHARED_FAVORITES_APPLY_DELETES`, off by default and log-only,
@@ -161,17 +178,29 @@ conflict](../../pc20-favorites.md), making it unreachable from the module
 surface is worth more than any amount of documentation telling callers not to
 do it.
 
+### One difference the vectors had to learn to hold
+
+**What "local" means after a cycle.** stablekraft's local state is a database
+the merge never writes; its inbound reconcile adds what it can resolve and
+nothing else, so a foreign entry is carried and never held. boostmebitch's
+local state is a cache of the merge: the hydrator paints the active half
+whole, so an entry adopted off the relay is held from then on, claimed in the
+baseline, and removed by that device only if the user unfavorites it there.
+Both conform — neither adopts out of the INACTIVE half beyond its baseline —
+but a multi-cycle vector that feeds the same `local` into cycle two is
+testing a state boostmebitch can never be in. The contract gained `holds` for
+it (`conformance/adapter.d.ts`), and vectors 13 and 14 feed it back.
+
 ## Known gaps
 
-- These two apps still disagree on item order, so the event is being
-  rewritten back and forth in production right now. Neither side has adopted
-  the other's fix. This is the single highest-value thing to resolve.
-- boostmebitch's duplicate-group data loss is unfixed.
+- Items 1, 2, 2b and the duplicate-group drop above are fixed in
+  stablekraft-app#236 and boostmebitch#294, open at the time of writing and
+  not on either `main`. Until they merge the event is still being reordered
+  in production.
 - The extracted file is the merge and wire format only. The read/publish
   driver (`favorites.ts`), the cycle serializer (`favorites-sync.ts`) and the
   hydrator are not extracted — they depend on that app's pool and storage.
   Read them in place.
-- Neither implementation has been checked against the spec's
-  [test vectors](../../pc20-favorites.md#test-vectors) by anything in this
-  repo. boostmebitch runs an equivalent of vector 1 implicitly through its
-  change gate; that is not the same as running them.
+- `check:conformance` in each app needs `../PC20-Nostr` beside the checkout.
+  Neither app's CI has that, so it runs by hand — which is one step better
+  than the vectors being prose, and one step short of being a gate.

@@ -524,7 +524,13 @@ export function plan({
   //   publish a false statement about someone's privacy, and the next writer
   //   to believe it converges on the strength of it.
   const mayChange = userChose && !opaque;
-  const effective = stated && stated !== wanted && !mayChange ? stated : wanted;
+  // The list's own answer — stated, or inferred from a single populated half
+  // — outranks this writer's standing setting. Acting on the setting is one
+  // app silently overruling another; the apps ask instead, and following the
+  // list is the answer that publishes nothing surprising. A choice may still
+  // change it. Vector 13's second half.
+  const effective =
+    listMode && listMode !== wanted && !mayChange ? listMode : wanted;
 
   // The tag is carried forward once the list has one, and written for the
   // first time only when the user has actually chosen. A writer stamping its
@@ -568,7 +574,11 @@ export function plan({
   } else if (goingPrivate) {
     // public → private takes the WHOLE list, ours and theirs. It only ever
     // reduces exposure, and it is reversible by any app that can decrypt.
-    const moving = mergeHalf(inactiveReadTags, local, inactiveBaseline, {
+    // No local state on the moving side: `moving` is what the OTHER half
+    // holds. Merging `local` into an empty public half here appended our own
+    // groups a second time, under a second `medium` run — a byte change on
+    // every private-mode cycle, so the list never reached a fixed point.
+    const moving = mergeHalf(inactiveReadTags, [], inactiveBaseline, {
       adoptAll: true,
     });
     mergedActive = dedupeEntries(
