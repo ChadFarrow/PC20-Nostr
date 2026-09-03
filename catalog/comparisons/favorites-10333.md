@@ -11,11 +11,13 @@ Two implementations exist. Nothing else in any repo writes kind 10333.
 
 | Repo | Path | Lines | Read at |
 |---|---|---|---|
-| `boostmebitch` | `lib/nostr/favorites-list.ts` | 1834 | `545c5ca` |
-| `stablekraft-app` | `lib/nostr/favorites-single-list.ts` + `favorites-privacy.ts` | 853 + 750 | `4924389` |
+| `boostmebitch` | `lib/nostr/favorites-list.ts` | 1862 | `76e1fe6` |
+| `stablekraft-app` | `lib/nostr/favorites-single-list.ts` + `favorites-privacy.ts` | 884 + 777 | `95d0a2fa` |
 
-Both SHAs carry the `visibility` tag (PC20-Nostr#30), landed in the two apps
-on 2026-09-02 as `boostmebitch@9d55f2a` and `stablekraft-app@4924389`.
+Both SHAs carry the `visibility` tag (PC20-Nostr#30, landed as
+`boostmebitch@9d55f2a` and `stablekraft-app@4924389` on 2026-09-02) and the
+fixes the first conformance run produced (boostmebitch#294 and
+stablekraft-app#236, merged 2026-09-03).
 
 Supporting modules — boostmebitch: `favorites.ts`, `favorites-sync.ts`,
 `favorites-hydrator.ts`, `read-trust.ts`. stablekraft-app:
@@ -69,9 +71,9 @@ cross-references faster than anyone updates them.
 ## What ships
 
 [`favorites-list.ts`](../modules/nostr/favorites-list.ts) — zero imports, same discipline as
-`read-trust.ts`. Re-extracted at `55a6445`; it had been sitting at `1f26ba0`
-and 722 lines, which predates the private half, the `content` carry and the
-per-half baseline. Anyone who copied it in that window got a file that would
+`read-trust.ts`. Re-extracted at `76e1fe6`, after boostmebitch#294; before that it
+sat at `55a6445`, and before that at `1f26ba0` and 722 lines, which predates
+the private half, the `content` carry and the per-half baseline. Anyone who copied it in that window got a file that would
 blank another app's private entries.
 
 **Conformance is not settled by reading either of these.** Run
@@ -91,11 +93,15 @@ against your own code instead.
 - Both keep a private per-device baseline, both refuse to publish on a
   degraded read, both preserve `foreignTags`/`foreignKinds`, and both derive
   the identifier kind from position 1 rather than walking `i`/`k` in pairs.
+- **Since 2026-09-03, the four things below marked FIXED.** They were the
+  divergences the first conformance run found, and each app's fix merged the
+  next day. Kept here in the past tense because the comparison is the
+  record of why the rules are worded as they are.
 
 ### Where they still differ
 
-**1. Item order — the convergence bug. FIX OPEN at stablekraft.** At the SHAs
-above, boostmebitch keeps wire order and appends local-only items:
+**1. Item order — the convergence bug. FIXED in stablekraft-app#236.** Before
+it, boostmebitch keeps wire order and appends local-only items:
 `[...kept, ...mine.itemGuids.filter(...)]`. stablekraft puts local first:
 `[...mine.itemGuids, ...group.itemGuids.filter(...)]`.
 
@@ -104,13 +110,13 @@ at each other forever. Each publish is locally reasonable; the only symptom
 is that it never stops. Because [tag order is
 semantic](../../pc20-favorites.md#grouping-rules), this is not cosmetic
 churn — it is a rewrite of the meaningful part of the event, on every cycle.
-The spec now says which order (vector 18), and stablekraft-app#236 adopts it.
+The spec now says which order (vector 18), and both apps keep it.
 
-**2. The append pass and resurrection. FIX OPEN at stablekraft.** boostmebitch
+**2. The append pass and resurrection. FIXED in stablekraft-app#236.** boostmebitch
 filters local groups absent from the wire against the baseline — `fresh =
 itemGuids.filter(guid => !publishedItems.has(itemId(guid)))` — so an entry
 another app *removed* is not re-added. stablekraft's append loop at
-`4924389` is unconditional:
+`4924389` was unconditional:
 
 ```js
 for (const group of local) {
@@ -121,16 +127,16 @@ for (const group of local) {
 
 An entry this device published, that another writer has since deleted, comes
 back on the next cycle. On the device that deleted it, the favorite returns
-by itself. Vector 9 caught it on the first conformance run; stablekraft-app#236 fixes
+by itself. Vector 9 caught it on the first conformance run; stablekraft-app#236 fixed
 it.
 
-**2b. A public writer over a private half it cannot open. FIX OPEN at
-stablekraft.** stablekraft refused EVERY publish when `content` held bytes its
+**2b. A public writer over a private half it cannot open. FIXED in
+stablekraft-app#236.** stablekraft refused EVERY publish when `content` held bytes its
 signer could not decrypt, mode regardless. On a list that does not say
 private that strands every favorite a NIP-55 user makes there the moment any
 other app writes a private half. boostmebitch refuses only a publish that
-would have to change `content`. Vector 12; stablekraft-app#236 carries the bytes and
-writes the public half.
+would have to change `content`. Vector 12; #236 carries the bytes and writes the
+public half.
 
 **3. Loose entries can never be unfavorited in stablekraft.** It carries
 loose nodes verbatim and never removes them. boostmebitch removes one when
@@ -154,11 +160,11 @@ loop could not engage at all.
 
 ### What stablekraft does better
 
-**Duplicate groups on the wire. FIX OPEN at boostmebitch.** stablekraft folds
-the second occurrence's items into the first. boostmebitch at `545c5ca` skips
+**Duplicate groups on the wire. FIXED in boostmebitch#294.** stablekraft folds
+the second occurrence's items into the first. boostmebitch at `545c5ca` skipped
 it outright — `if (taken.has(group.feedGuid)) continue;` — which drops that
 group's items. They are real favorites and are named nowhere else, so they
-are lost. Vector 19; boostmebitch#294 folds them, in wire order.
+are lost. Vector 19; #294 folds them, in wire order.
 
 **Staged rollout of destructive operations.** stablekraft gates inbound
 deletes behind `SHARED_FAVORITES_APPLY_DELETES`, off by default and log-only,
@@ -193,10 +199,6 @@ it (`conformance/adapter.d.ts`), and vectors 13 and 14 feed it back.
 
 ## Known gaps
 
-- Items 1, 2, 2b and the duplicate-group drop above are fixed in
-  stablekraft-app#236 and boostmebitch#294, open at the time of writing and
-  not on either `main`. Until they merge the event is still being reordered
-  in production.
 - The extracted file is the merge and wire format only. The read/publish
   driver (`favorites.ts`), the cycle serializer (`favorites-sync.ts`) and the
   hydrator are not extracted — they depend on that app's pool and storage.
