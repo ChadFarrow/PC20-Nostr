@@ -115,7 +115,23 @@ export const ITEM_PREFIX = `${ITEM_KIND}:`;
 const KNOWN_IDENTIFIER_KINDS = [PUBLISHER_KIND, ITEM_KIND, SHOW_KIND];
 
 /** Tag types this module owns. Anything else belongs to another writer. */
-const MANAGED_TAGS = new Set(['alt', 'medium', 'i', 'k']);
+const MANAGED_TAGS = new Set(['alt', 'medium', 'i', 'k', 'visibility']);
+
+/** Which half the WHOLE list lives in. Never a per-entry property. */
+export type ListVisibility = 'public' | 'private';
+
+/**
+ * The tag naming that half.
+ *
+ * Multi-letter on purpose: relays index single-letter tags, so a `["v", …]`
+ * would let a `#v=private` filter enumerate the pubkeys that keep a private
+ * list. It takes no part in grouping — treat it like `k`.
+ *
+ * It is in {@link MANAGED_TAGS} so a read does NOT carry it as a foreign tag.
+ * Carrying it would replay the copy we read AND emit our own, so the event
+ * would state the mode twice with the stale one second.
+ */
+export const VISIBILITY_TAG = 'visibility';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -234,6 +250,15 @@ export type ListNode =
 export interface ParsedList {
   /** Groups and loose entries, IN READ ORDER. The order is the data. */
   nodes: ListNode[];
+  /**
+   * The mode the event STATES, or null when it does not.
+   *
+   * Null is not 'public'. It means the list was written before this tag
+   * existed, and the caller falls back to inferring the mode from whichever
+   * half holds entries — which answers for every list that has any, and cannot
+   * answer at all for one that has none.
+   */
+  visibility: ListVisibility | null;
   /** Tag types belonging to another writer, replayed verbatim. */
   foreignTags: string[][];
   /** `k` values outside our table — a kind a newer writer emits. */
@@ -308,7 +333,12 @@ export const EMPTY_BASELINE: FavoritesBaseline = { feeds: [], items: [] };
  * `mergeFavoritesList` and `tagsFromList` both build new arrays.
  */
 export const EMPTY_LOCAL: LocalList = { groups: [], loose: [] };
-export const EMPTY_PARSED: ParsedList = { nodes: [], foreignTags: [], foreignKinds: [] };
+export const EMPTY_PARSED: ParsedList = {
+  nodes: [],
+  visibility: null,
+  foreignTags: [],
+  foreignKinds: [],
+};
 
 /** Which half of the event a list lives in. */
 export type ListHalf = 'public' | 'private';
@@ -365,6 +395,148 @@ export function seedModeFromWire(hasPublic: boolean, hasPrivate: boolean): Favor
   if (hasPrivate) return 'private';
   if (hasPublic) return 'public';
   return null;
+}
+
+/**
+ * A RECORDED mode the wire flatly contradicts, corrected — or null to leave it.
+ *
+ * `favPrivacy` rides in the kind:30078 settings backup, whose d-tag is
+ * deliberately unbranded, so every device and both deploys restore the same
+ * value. A stale `'public'` there is therefore not a local slip: it is applied
+ * on every sign-in, everywhere, and `seedFavoritesMode` short-circuits on a
+ * recorded mode and never asks the wire again.
+ *
+ * Measured on a real account: 0 public `i` tags, 880 private ones, and a
+ * restored `'public'`. In public mode the private half is filtered by
+ * `claimedByBaseline`, which on a device with no baseline drops ALL of it — 218
+ * feeds and 230 items, to an empty library, with the cycle reporting no error.
+ * The original device hides it, because its baseline claims those entries; only
+ * a device that has never synced shows the fault.
+ *
+ * THE CORRECTION IS ONE-WAY, AND THAT ASYMMETRY IS THE SAFETY PROPERTY.
+ * `'public'` → `'private'` moves nothing and discloses nothing: it is only
+ * reached when the wire holds NO public entries, so there is nothing in
+ * plaintext to be wrong about. The reverse is the disclosure this file exists
+ * to prevent — a device that decided `'public'` over a private list republishes
+ * every entry as an indexed `i` tag, and `#i` then answers *which pubkeys
+ * favorited this feed*, permanently. So this never returns `'public'`.
+ *
+ * `hasPublic` must be FALSE, not merely outnumbered. One plaintext tag from any
+ * other writer means the account may genuinely be public, and moving a real
+ * public list into `content` is an edit to a shared event that every app
+ * without NIP-44 then reads as empty.
+ *
+ * `'off'` is a deliberate opt-out and is never corrected — the user asked for
+ * no sync at all, and the wire has no standing to overrule that.
+ *
+ * Local only. The caller does not republish the settings backup: that would be
+ * an unattended write during hydration, and it is unnecessary — every device
+ * applies this same correction off the same wire.
+ */
+/**
+ * The mode this cycle writes, and whether it may say so on the wire.
+ *
+ * ONE function because the two answers are the same decision. Splitting them
+ * is how a writer ends up publishing into one half while the tag names the
+ * other, which is the split state stated as a fact.
+ *
+ * `stated` is the `visibility` tag as read, or null on a list written before
+ * it. Null is not 'public': it means the list never said, so the old inference
+ * from emptiness still stands and this returns `stored` untouched.
+ *
+ * THREE RULES, and each one is a thing that went wrong on a real account.
+ *
+ * 1. **A stated mode outranks a stored preference.** The mode is per-app and
+ *    per-device while the event is shared, so two apps can hold opposite
+ *    answers; letting whichever loaded last win is how a list of 287 entries
+ *    flips halves on a page load with nothing on screen.
+ *
+ * 2. **Only a real choice may write or change the tag.** Stamping this app's
+ *    standing default on a legacy list states a mode nobody picked — and on a
+ *    list that already has a private half, that stamp is what would license
+ *    disclosing it.
+ *
+ * 3. **Changing it also requires having read the other half.** A signer with
+ *    no NIP-44 cannot move what it cannot see, so declaring the list public
+ *    would publish a false claim about someone's privacy that the next writer
+ *    converges on. An EMPTY private half is exempt: there is no half to be
+ *    blind to, and treating it as opaque would freeze every new account on
+ *    such a signer at whatever the first writer guessed.
+ *
+ * Spec: PC20-Nostr, "The list is public or private, and the event says which".
+ */
+export function effectiveListMode(input: {
+  /** What this app has recorded, or null when the user has not been asked. */
+  stored: FavoritesPrivacy | null;
+  /** The `visibility` tag as read. */
+  stated: ListVisibility | null;
+  /** Is the user choosing right now, as opposed to this being the setting? */
+  userChose?: boolean;
+  /** Could this writer decrypt the private half? */
+  canReadPrivate?: boolean;
+  /** Is there no private half at all? Then there is nothing to be blind to. */
+  privateIsEmpty?: boolean;
+}): { mode: FavoritesPrivacy | null; stating: ListVisibility | null } {
+  const { stored, stated } = input;
+  const mayChange =
+    !!input.userChose && (input.canReadPrivate !== false || !!input.privateIsEmpty);
+
+  // Nobody has answered here. Follow the list rather than guessing, and state
+  // nothing — adopting a mode is not choosing one.
+  if (!stored) return { mode: stated, stating: stated };
+
+  // 'off' is a LOCAL choice and is not on the wire — see the spec's "'Not on
+  // Nostr' is a local choice". The tag such a device carries is whatever the
+  // list already said; it states nothing of its own.
+  if (stored === 'off') return { mode: 'off', stating: stated };
+
+  const mode: ListVisibility = stated && stated !== stored && !mayChange ? stated : stored;
+
+  // Carried forward once the list has a tag; written for the first time only
+  // on a real choice.
+  return { mode, stating: mayChange || stated ? mode : null };
+}
+
+/**
+ * State the list's mode on a tag array that is about to become the EVENT.
+ *
+ * Kept out of `tagsFromList` on purpose. That function builds both halves, and
+ * the private half is a tag array inside `content` — a mode stated there is a
+ * claim about the list made where no reader may act on it, and this module's
+ * own parser drops it. So the tag is added once, to the array that really is
+ * the event's, and never to the other one.
+ *
+ * Inserted after `alt` so the head of the event is stable across republishes;
+ * position is not semantic for either tag.
+ */
+export function withVisibility(
+  tags: string[][],
+  visibility: ListVisibility | null,
+): string[][] {
+  if (!visibility) return tags;
+  const out = tags.filter((t) => t[0] !== VISIBILITY_TAG);
+  const at = out.findIndex((t) => t[0] === 'alt');
+  out.splice(at === -1 ? 0 : at + 1, 0, [VISIBILITY_TAG, visibility]);
+  return out;
+}
+
+/** The mode a raw tag array states, or null. */
+export function statedVisibility(tags: string[][]): ListVisibility | null {
+  for (const tag of tags) {
+    if (tag[0] !== VISIBILITY_TAG) continue;
+    if (tag[1] === 'public' || tag[1] === 'private') return tag[1];
+  }
+  return null;
+}
+
+export function correctedModeFromWire(
+  recorded: FavoritesPrivacy | null,
+  hasPublic: boolean,
+  hasPrivate: boolean,
+): FavoritesPrivacy | null {
+  if (recorded !== 'public') return null;
+  if (hasPublic || !hasPrivate) return null;
+  return 'private';
 }
 
 /**
@@ -463,6 +635,53 @@ export function baselineIsTrustworthy(
   return !claimsSomething || localHasEntries;
 }
 
+/**
+ * May a REFUSED read still be painted?
+ *
+ * `wholesale-delete` answers "do not publish this". It does not, on its own,
+ * answer "do not render this", and conflating the two is why the same account
+ * on a NEW ORIGIN sees an empty library over a full list. The two deploys are
+ * separate origins, so `localStorage` starts empty on the second one; `local`
+ * is therefore empty, `localFed` is 0 on both halves, and the planner correctly
+ * refuses to publish — but the merge it refused is NOT empty. It carries every
+ * relay node. The refusal was withholding a list from the user to protect a
+ * device that holds nothing.
+ *
+ * THE GUARD NEEDS SOMETHING TO PROTECT. All three conditions, and each is a
+ * different way to get this wrong:
+ *
+ * - `cacheHasEntries` false — nothing on disk to destroy. This is the whole
+ *   reason painting is safe here: `setFavorites` writes THROUGH to
+ *   `localStorage`, and the destructive case the guard exists for is painting
+ *   OVER `cached[feed.feedGuid]`, the only record separating a real album
+ *   favorite from a group opened to place a track. An empty cache has no such
+ *   record to lose.
+ * - `baselineClaimsEntries` false — this device has never agreed anything with
+ *   the relay. A baseline naming ids beside a cache holding none is the exact
+ *   input of the 2026-08-21 wipe, and it must keep refusing. Pass the RAW
+ *   stored baseline, not `trustedBaseline`, which has already dropped that
+ *   claim and would report the dangerous shape as clean.
+ * - `carriedNodes > 0` — there is something to adopt. Painting nothing is the
+ *   destructive case itself, so "adopt" over an empty read is the one answer
+ *   that must never be yes.
+ *
+ * Publishing and the baseline are NOT unblocked by this. The caller still
+ * publishes nothing and records nothing, so the adoption is one-way: the next
+ * cycle sees a populated store, `localFed` is non-zero, and the ordinary path
+ * takes over. That is the same adoption `planFavoritesPublish` already
+ * describes when it derives the active half from the merge — this only lets a
+ * device with no history reach it.
+ */
+export function mayAdoptRefusedRead(input: {
+  cacheHasEntries: boolean;
+  baselineClaimsEntries: boolean;
+  carriedNodes: number;
+}): boolean {
+  if (input.cacheHasEntries) return false;
+  if (input.baselineClaimsEntries) return false;
+  return input.carriedNodes > 0;
+}
+
 // ---------------------------------------------------------------------------
 // The private half's plaintext
 // ---------------------------------------------------------------------------
@@ -559,6 +778,7 @@ export function parseFavoritesList(tags: string[][]): ParsedList {
   const nodes: ListNode[] = [];
   const foreignTags: string[][] = [];
   const foreignKinds: string[] = [];
+  let visibility: ListVisibility | null = null;
   let medium: string | undefined;
   let current: FeedGroup | null = null;
 
@@ -566,6 +786,14 @@ export function parseFavoritesList(tags: string[][]): ParsedList {
     const type = tag[0];
 
     if (type === 'alt') continue;
+
+    // Read, never carried. A `visibility` tag found INSIDE the private half is
+    // dropped rather than round-tripped: the mode is a property of the list,
+    // not of a half, so a claim made there is one no reader may act on.
+    if (type === VISIBILITY_TAG) {
+      if (tag[1] === 'public' || tag[1] === 'private') visibility = tag[1];
+      continue;
+    }
 
     if (type === 'k') {
       const value = tag[1];
@@ -612,7 +840,7 @@ export function parseFavoritesList(tags: string[][]): ParsedList {
     nodes.push({ t: 'loose', loose: { tag: tag.slice(), medium } });
   }
 
-  return { nodes, foreignTags, foreignKinds };
+  return { nodes, visibility, foreignTags, foreignKinds };
 }
 
 // ---------------------------------------------------------------------------
@@ -760,6 +988,104 @@ export interface MergeInput {
 }
 
 /**
+ * Whether a switch to Private takes the WHOLE list, including entries this
+ * device did not write.
+ *
+ * **ON since 2026-09-02, and the prerequisite was on this app rather than the
+ * format.** The spec's sequencing is explicit: an app must be able to READ and
+ * RENDER the other half before anything moves entries into it on that app's
+ * behalf, or the move is indistinguishable from a deletion on that app's
+ * screen. The order was: ship the rendering, confirm on a real account that a
+ * moved entry appears, THEN turn this on. All three are done — the carried half
+ * renders (#288–#290, `carried` in lib/types.ts) and was confirmed on a live
+ * 287-entry list — and the other writer, Project StableKraft, has had its own
+ * move on for longer.
+ *
+ * Leaving it off is not the safe side once the rendering ships. It is what
+ * produces "97% private": a choice the format honours for most of a list, with
+ * the rest sitting in plaintext `i` tags relays index, and nothing on screen
+ * naming which.
+ *
+ * **The asymmetry does NOT depend on this flag and must survive its removal.**
+ * public → private may move another app's entries unconditionally.
+ * private → public may not, EXCEPT on a stated `visibility` — see
+ * `effectiveListMode`. Without that tag there is no way to know the user's
+ * intent for the whole list, so the move stays limited to what our baseline
+ * claims; with it, the intent is on the wire and was written by an app that
+ * could read both halves.
+ */
+export const WHOLE_LIST_PRIVACY_MOVE = true;
+
+/**
+ * Fold one half's nodes into another's, for the whole-list move into private.
+ *
+ * **A concatenation is the obvious version and it is wrong.** An entry can be a
+ * group in BOTH halves at once — nothing in the format forbids it, and a switch
+ * that publishes into one half while its removal from the other stays
+ * baseline-gated lands there by itself. Measured on a real account: 284
+ * favorites public, 287 encrypted, all 284 in both. Concatenating then emits
+ * one feed as TWO groups, which double-counts it for every reader and gives its
+ * items two parents to sit under. The same defect shipped in the format's
+ * reference implementation and in the other writer of this list, in opposite
+ * directions; it is spec test vector 15.
+ *
+ * Folding rather than dropping the duplicate, because the incoming group may
+ * carry items the one already here does not — this is a MOVE, and an item under
+ * a duplicate group is as much the user's as the group itself.
+ *
+ * **Order is the receiving half's.** Tag order is the data, so the side already
+ * in place keeps its positions and incoming items append. Loose nodes fold on
+ * their identifier: a duplicate there is one entry named twice, not two.
+ */
+export function foldHalves(here: ParsedList, moving: ParsedList): ParsedList {
+  const nodes: ListNode[] = here.nodes.map((n) => (n.t === 'group'
+    ? { t: 'group', group: { ...n.group, itemGuids: [...n.group.itemGuids] } }
+    : n));
+  const groupAt = new Map<string, number>();
+  const looseIds = new Set<string>();
+  nodes.forEach((n, i) => {
+    if (n.t === 'group') groupAt.set(n.group.feedGuid, i);
+    else if (n.loose.tag[1]) looseIds.add(n.loose.tag[1]);
+  });
+
+  for (const node of moving.nodes) {
+    if (node.t === 'loose') {
+      const id = node.loose.tag[1];
+      if (id && looseIds.has(id)) continue;
+      if (id) looseIds.add(id);
+      nodes.push(node);
+      continue;
+    }
+    const at = groupAt.get(node.group.feedGuid);
+    if (at === undefined) {
+      groupAt.set(node.group.feedGuid, nodes.length);
+      nodes.push({ t: 'group', group: { ...node.group, itemGuids: [...node.group.itemGuids] } });
+      continue;
+    }
+    const existing = nodes[at];
+    if (existing.t !== 'group') continue;
+    for (const guid of node.group.itemGuids) {
+      if (!existing.group.itemGuids.includes(guid)) existing.group.itemGuids.push(guid);
+    }
+    // The medium hint only ever FILLS a gap. Overwriting one the feed declared
+    // with one it did not is how a hint becomes wrong.
+    if (!existing.group.medium && node.group.medium) existing.group.medium = node.group.medium;
+  }
+
+  const foreignTags = [...here.foreignTags];
+  for (const tag of moving.foreignTags) {
+    if (!foreignTags.some((t) => JSON.stringify(t) === JSON.stringify(tag))) foreignTags.push(tag);
+  }
+  const foreignKinds = [...here.foreignKinds];
+  for (const kind of moving.foreignKinds) {
+    if (!foreignKinds.includes(kind)) foreignKinds.push(kind);
+  }
+  // The mode belongs to the LIST, so a fold of two halves cannot decide it and
+  // does not try. `effectiveListMode` is the only thing that answers it.
+  return { nodes, visibility: here.visibility, foreignTags, foreignKinds };
+}
+
+/**
  * Combine the relay's list with this device's, using the baseline to tell a
  * foreign entry from one we removed.
  *
@@ -899,7 +1225,15 @@ export function mergeFavoritesList({ read, local, baseline }: MergeInput): Parse
     nodes.push({ t: 'loose', loose: { tag: loose.tag.slice(), medium: loose.medium } });
   }
 
-  return { nodes, foreignTags: read.foreignTags, foreignKinds: read.foreignKinds, localFed };
+  // Carried from the read. `mergeFavoritesList` folds ONE half; the mode is a
+  // property of the whole list and is not this function's to decide.
+  return {
+    nodes,
+    visibility: read.visibility,
+    foreignTags: read.foreignTags,
+    foreignKinds: read.foreignKinds,
+    localFed,
+  };
 }
 
 /**
@@ -1008,6 +1342,30 @@ export interface FavoritesPlanInput {
    * nothing and BOTH halves record an empty baseline.
    */
   withdraw?: boolean;
+  /**
+   * The `visibility` tag this publish states.
+   *
+   * Decided by {@link effectiveListMode}, not here — the caller has already
+   * used the same answer to choose which half `merged` was built from, and two
+   * places deciding it is how a writer publishes into one half while the tag
+   * names the other.
+   *
+   * **OMITTED MEANS CARRY WHAT THE READ SAID, and that default is load-bearing
+   * rather than a convenience.** `tagsFromList` rebuilds the whole tag array
+   * from the model, and `visibility` is a managed tag, so a caller that says
+   * nothing would emit an event WITHOUT it — silently retracting a mode
+   * another app stated. `<FavoritesHydrator>` plans a cycle of its own and is
+   * exactly such a caller: it found this by turning every hydrate on a stated
+   * list into a `wholesale-delete` refusal, because the rebuilt tags no longer
+   * matched the read.
+   *
+   * An explicit `null` states nothing, and only a caller that has decided that
+   * should pass it.
+   *
+   * Applied to the EVENT's tags only. Never to `privateTags`, which becomes
+   * `content`: a mode stated inside a half is a claim no reader may act on.
+   */
+  stating?: ListVisibility | null;
 }
 
 export interface FavoritesPlan {
@@ -1060,7 +1418,10 @@ export function planFavoritesPublish(input: FavoritesPlanInput): FavoritesPlan {
   const readPrivateTags = input.readPrivateTags ?? [];
   const privateUnreadable = !!input.privateUnreadable;
 
-  const tags = tagsFromList(input.merged);
+  const tags = withVisibility(
+    tagsFromList(input.merged),
+    input.stating === undefined ? statedVisibility(input.readTags) : input.stating,
+  );
 
   // THE BASELINE DESCRIBES BOTH HALVES AS THEY NOW STAND: the ACTIVE half
   // derived from the MERGED result rather than from `local`, the inactive one

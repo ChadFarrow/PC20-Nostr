@@ -1,7 +1,7 @@
 /**
  * AUTHORED. This file has never served traffic.
  *
- * It exists so `../vectors.test.mjs` has something to run against — 14
+ * It exists so `../vectors.test.mjs` has something to run against — 24
  * assertions nobody has watched go green are prose in a new costume. It is a
  * worked example of the rules in `../../pc20-favorites.md`, not a
  * recommendation and not an extraction. If you want code a real site runs,
@@ -142,10 +142,72 @@ export function parse(event) {
 
 const PRIV_PREFIX = 'PRIV1:';
 
-/** NOT encryption. See the header. */
+/**
+ * The largest plaintext a writer may hand a signer, in UTF-8 bytes.
+ *
+ * NIP-44 v2 as first published capped plaintext at 65535 bytes; the current
+ * text allows more and switches to a 6-byte length prefix at 65536, so a
+ * library built to the older text REJECTS a payload across that line — and a
+ * private half that cannot be decrypted is indistinguishable from an empty
+ * one. Sized under the cliff with room for the 1.5x NIP-44 adds on the way to
+ * `content`. Writing the private half, "Refuse to publish past 60,000 bytes".
+ */
+export const PRIVATE_PLAINTEXT_MAX = 60_000;
+
+/** UTF-8 byte length, which is what the NIP-44 limit counts. */
+export const plaintextBytes = (text) => Buffer.byteLength(text, 'utf8');
+
+/**
+ * The bytes handed to the signer: a stringified tag array, with `?` written as
+ * its six-character JSON escape.
+ *
+ * Writing the private half, "The plaintext carries no `?`": a NIP-55 signer
+ * URL-decodes the whole `nostrsigner:` URI and only then splits it on `?`, so
+ * one favorited track with a query string in its guid would otherwise break
+ * every private publish on Android, forever. Every JSON reader already
+ * understands the escape, so the other app decodes it without being told.
+ */
+export function encodePlaintext(tags) {
+  return JSON.stringify(tags ?? []).replace(/\?/g, '\\u003f');
+}
+
+/**
+ * The plaintext back into a tag array, or NULL when it is not one.
+ *
+ * Null, not `[]`, for valid JSON that is not an array of string arrays. A
+ * `JSON.parse` that succeeds on `{}` would otherwise mark the half readable
+ * and empty, and the next republish rewrites `content` from that emptiness.
+ * Writing the private half, "A plaintext that is not a tag array is unreadable".
+ */
+export function decodePlaintext(text) {
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(parsed)) return null;
+  for (const tag of parsed) {
+    if (!Array.isArray(tag) || !tag.every((v) => typeof v === 'string')) return null;
+  }
+  return parsed;
+}
+
+/** NOT encryption — see the header. Stands in for NIP-44 encrypt-to-self. */
+export function seal(text) {
+  return PRIV_PREFIX + Buffer.from(text, 'utf8').toString('base64');
+}
+
+/** The inverse, or null for bytes this writer did not seal. */
+function unseal(content) {
+  if (!content.startsWith(PRIV_PREFIX)) return null;
+  return Buffer.from(content.slice(PRIV_PREFIX.length), 'base64').toString('utf8');
+}
+
+/** Plaintext then seal — the shape a real writer follows with NIP-44. */
 export function encodePrivate(tags) {
   if (!tags || tags.length === 0) return '';
-  return PRIV_PREFIX + Buffer.from(JSON.stringify(tags), 'utf8').toString('base64');
+  return seal(encodePlaintext(tags));
 }
 
 /**
@@ -155,15 +217,9 @@ export function encodePrivate(tags) {
  */
 export function decodePrivate(content) {
   if (!content) return [];
-  if (!content.startsWith(PRIV_PREFIX)) return null; // opaque — foreign writer
-  try {
-    const parsed = JSON.parse(
-      Buffer.from(content.slice(PRIV_PREFIX.length), 'base64').toString('utf8'),
-    );
-    return Array.isArray(parsed) ? parsed : null;
-  } catch {
-    return null;
-  }
+  const text = unseal(content);
+  if (text === null) return null; // opaque — foreign writer
+  return decodePlaintext(text);
 }
 
 // ---------------------------------------------------------------------------
@@ -238,7 +294,15 @@ function mergeHalf(readTags, localGroups, baselineIds, { adoptAll = false } = {}
     if (anyItemSurvives) decision.set(g.index, true);
   }
 
+  // Which group each emitted `i` belongs to, so a new item for a group that is
+  // already on the list can be placed at the end of THAT group's run. Appending
+  // it to the end of the event instead re-parents it to whichever group was
+  // opened last — well-formed, and wrong. Vector 18.
+  const ownerOf = new Map(); // tag index -> group id
+  for (const e of parsed.entries) ownerOf.set(e.index, e.parent ?? e.id);
+
   const out = [];
+  const owner = []; // parallel to `out`
   let emittedMedium = null;
   (readTags ?? []).forEach((tag, index) => {
     const name = tag[0];
@@ -259,18 +323,29 @@ function mergeHalf(readTags, localGroups, baselineIds, { adoptAll = false } = {}
       );
       if (anyKept) {
         out.push(tag);
+        owner.push(null);
         emittedMedium = tag[1] ?? null;
       }
       return;
     }
     if (decision.has(index)) {
-      if (decision.get(index)) out.push(tag);
+      if (decision.get(index)) {
+        out.push(tag);
+        owner.push(ownerOf.get(index) ?? null);
+      }
       return;
     }
     out.push(tag); // foreign tag, or an `i` no writer here can parse — carried whole
+    owner.push(null);
   });
 
-  // Pass 2: append what we hold that was not on the list.
+  // Pass 2: add what we hold that was not on the list.
+  //
+  // A group already on the list keeps its items in the order they were read,
+  // and its new items go at the end of its own run — never at the end of the
+  // event, where they would attach to the last group opened, and never ahead
+  // of the ones read, which is the local-first order that has two apps
+  // rewriting the event against each other forever. Vector 18.
   const onList = new Set(parsed.entries.map((e) => e.id));
   for (const g of localGroups ?? []) {
     const newItems = (g.items ?? []).filter(
@@ -279,13 +354,31 @@ function mergeHalf(readTags, localGroups, baselineIds, { adoptAll = false } = {}
     const groupIsNew = !onList.has(g.id) && !claimed.has(g.id);
     if (!groupIsNew && newItems.length === 0) continue;
 
+    if (!groupIsNew && onList.has(g.id)) {
+      const at = owner.lastIndexOf(g.id);
+      if (at !== -1) {
+        out.splice(at + 1, 0, ...newItems.map((id) => ['i', id]));
+        owner.splice(at + 1, 0, ...newItems.map(() => g.id));
+        continue;
+      }
+    }
+
     const medium = g.medium ?? null;
     if (medium !== emittedMedium) {
-      if (medium !== null) out.push(['medium', medium]);
+      if (medium !== null) {
+        out.push(['medium', medium]);
+        owner.push(null);
+      }
       emittedMedium = medium;
     }
-    if (groupIsNew) out.push(['i', g.id]);
-    for (const id of newItems) out.push(['i', id]);
+    if (groupIsNew) {
+      out.push(['i', g.id]);
+      owner.push(g.id);
+    }
+    for (const id of newItems) {
+      out.push(['i', id]);
+      owner.push(g.id);
+    }
   }
 
   return out;
@@ -431,7 +524,13 @@ export function plan({
   //   publish a false statement about someone's privacy, and the next writer
   //   to believe it converges on the strength of it.
   const mayChange = userChose && !opaque;
-  const effective = stated && stated !== wanted && !mayChange ? stated : wanted;
+  // The list's own answer — stated, or inferred from a single populated half
+  // — outranks this writer's standing setting. Acting on the setting is one
+  // app silently overruling another; the apps ask instead, and following the
+  // list is the answer that publishes nothing surprising. A choice may still
+  // change it. Vector 13's second half.
+  const effective =
+    listMode && listMode !== wanted && !mayChange ? listMode : wanted;
 
   // The tag is carried forward once the list has one, and written for the
   // first time only when the user has actually chosen. A writer stamping its
@@ -475,7 +574,11 @@ export function plan({
   } else if (goingPrivate) {
     // public → private takes the WHOLE list, ours and theirs. It only ever
     // reduces exposure, and it is reversible by any app that can decrypt.
-    const moving = mergeHalf(inactiveReadTags, local, inactiveBaseline, {
+    // No local state on the moving side: `moving` is what the OTHER half
+    // holds. Merging `local` into an empty public half here appended our own
+    // groups a second time, under a second `medium` run — a byte change on
+    // every private-mode cycle, so the list never reached a fixed point.
+    const moving = mergeHalf(inactiveReadTags, [], inactiveBaseline, {
       adoptAll: true,
     });
     mergedActive = dedupeEntries(
@@ -565,6 +668,18 @@ export function plan({
   const unchanged =
     sameTags(publicTags, frame(readTags, carriedKinds, stated)) &&
     JSON.stringify(privateTags ?? readPrivate) === JSON.stringify(readPrivate);
+
+  // Writing the private half: a plaintext past the NIP-44 v2 cliff reads back
+  // as EMPTY on an older signer, not as an error. Refusing costs one favorite;
+  // publishing costs the whole list on that device. Vector 24.
+  if (
+    !unchanged &&
+    privateTags !== null &&
+    privateTags.some((t) => t[0] === 'i') &&
+    plaintextBytes(encodePlaintext(privateTags)) > PRIVATE_PLAINTEXT_MAX
+  ) {
+    return { publish: null, baselineIfLanded: base };
+  }
 
   const publish = unchanged ? null : { kind: KIND, tags: publicTags, content };
 
