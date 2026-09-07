@@ -174,14 +174,27 @@ export interface PlanResult {
 
 /** The parsed shape of one entry. Vectors 5, 6 and 7 read this. */
 export interface ParsedEntry {
+  /**
+   * The full NIP-73 identifier, which for an ITEM is NOT what position 1 says.
+   *
+   * An item entry is `['i', 'podcast:guid:<feedGuid>', '<itemGuid>']`, so its
+   * identifier is assembled: `podcast:item:guid:` plus position 2. Keeping the
+   * full form here is what leaves a baseline, a local group and `itemClaim`
+   * unchanged by the move — only the wire shape changed.
+   */
   id: string;
-  /** From the known-kinds table, never by splitting the string. */
+  /**
+   * From the known-kinds table, never by splitting the string — and read off
+   * the WHOLE entry, not the prefix alone. A three-element `podcast:guid:`
+   * tag is an item entry and its kind is `podcast:item:guid`, which is what
+   * the trailing `k` tags must say or `#k` discovery stops finding items.
+   */
   kind: string;
   /** The running `medium` value, or null when none preceded the entry. */
   medium: string | null;
   /**
-   * The BARE feed guid this item belongs to, read off position 2 of its own
-   * tag — not a `podcast:guid:` identifier, and not the entry above it.
+   * The BARE feed guid this item belongs to, read off position 1 of its own
+   * tag — the guid inside `podcast:guid:<feedGuid>`, not the entry above it.
    *
    * Null for a feed entry, for an artist, and for a legacy item that names no
    * feed and has no feed entry above it to borrow one from. An item guid alone
@@ -190,9 +203,11 @@ export interface ParsedEntry {
    */
   feed: string | null;
   /**
-   * True when this entry came from a two-element item tag and its feed was
-   * taken from the entry above it. A writer rewrites such a tag with the feed
-   * guid on the entry — the one-time migration. Vector 27.
+   * True when this entry came from a two-element `podcast:item:guid:` tag and
+   * its feed was taken from the entry above it. A writer rewrites such a tag
+   * as `['i', 'podcast:guid:<feedGuid>', '<itemGuid>']` — the one-time
+   * migration, and note that position 1 changes too, not only position 2.
+   * Vector 27.
    */
   legacy?: boolean;
   /** Always true for a feed or artist entry: being on the list IS the favorite. */
@@ -223,7 +238,14 @@ export interface FavoritesAdapter {
   /** Tag array in, structure out. Vectors 5, 6, 7. */
   parseTags(tags: string[][]): ParsedList;
 
-  /** The kind of an identifier, or null. Vector 6. */
+  /**
+   * The kind of an IDENTIFIER, or null. Vector 6.
+   *
+   * This is the string-level lookup, and it still matters: the legacy
+   * two-element form puts `podcast:item:guid:<itemGuid>` at position 1, and an
+   * item guid is routinely a permalink URL. It is not the whole answer for an
+   * entry — see `ParsedEntry.kind`.
+   */
   kindOf(identifier: string): string | null;
 
   /**

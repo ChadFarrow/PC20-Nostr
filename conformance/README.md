@@ -83,7 +83,7 @@ Numbering matches the spec exactly.
 | 3 | A merge that is not idempotent, so two apps never converge |
 | 4 | Dropping a tag, `k` value or identifier written by a newer app |
 | 5 | Items reattached to the wrong feed; an unknown medium defaulted to `podcast` |
-| 6 | `podcast:item:guid:https` — a `k` value no relay filter matches |
+| 6 | An entry kind read off the prefix alone, so `podcast:item:guid` never reaches the event; and `podcast:item:guid:https` — a `k` value no relay filter matches |
 | 7 | A reader that walks `i`/`k` in pairs, showing an empty library and no error |
 | 8 | A baseline ignored, so removals either never propagate or delete everything |
 | 9 | The resurrection loop: an entry another app deleted returning on every load |
@@ -138,13 +138,14 @@ breaking the reference on purpose and confirming the right one fails:
 | Hand the signer a plaintext with a literal `?` | **22** |
 | Read a non-array plaintext as an empty list | **23** |
 | Publish a private half past 60,000 bytes | **24** |
-| Rebuild `i` tags as `['i', id]` on emit, dropping the feed guid | **25, 27** |
-| Read an item's feed from the entry above it, ignoring position 2 | **5, 25, 26** |
+| Rebuild `i` tags as `['i', id]` on emit, dropping half the pair | **6, 25, 27** |
+| Read an item's feed from the entry above it, ignoring position 1 | **5, 25, 26** |
 | Drop the legacy path, so a two-element item names no feed | **4, 27** |
-| Republish a legacy item without filling in its feed guid | **27** |
-| Key an entry on its identifier alone rather than on the pair | 2, 3, 10, 11, 18, 19, **25, 26** |
+| Republish a legacy item without rewriting it | **27** |
+| Fill position 2 with a placeholder when the feed is unknown | **20** |
+| Key an entry on position 1 alone rather than on the pair | 2, 3, 10, 11, 18, 19, **25, 26** |
+| Derive an entry's `k` kind from its identifier prefix alone | **6** |
 | Write a feed entry for a feed you hold only to supply a feed guid | **25** |
-| Invent a feed guid for an item whose feed nobody knows | **20** |
 | Let an artist entry be an item of the entry above it | **28** |
 | Write a feed guid onto an artist entry | **28** |
 

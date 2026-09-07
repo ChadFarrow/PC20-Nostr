@@ -72,8 +72,31 @@ const feed = (id, medium, items = [], favorited = true) => ({
 /** The bare feed guid inside a `podcast:guid:` identifier. */
 const guidOf = (feedId) => feedId.slice('podcast:guid:'.length);
 
-/** An item `i` tag: the item's identifier, and the guid of its feed. */
-const item = (itemId, feedId) => ['i', itemId, guidOf(feedId)];
+/** The bare item guid inside a `podcast:item:guid:` identifier. */
+const itemGuidOf = (itemId) => itemId.slice('podcast:item:guid:'.length);
+
+/**
+ * An item `i` tag: the FEED's identifier at position 1, the item guid bare at
+ * position 2 — `<podcast:remoteItem>`'s order, required feedGuid then optional
+ * itemGuid.
+ */
+const item = (itemId, feedId) => ['i', feedId, itemGuidOf(itemId)];
+
+/**
+ * The full NIP-73 identifier an `i` tag names, whichever form it is in.
+ *
+ * A three-element `podcast:guid:` tag names an ITEM, so position 1 is not the
+ * answer. Every assertion below is written in identifiers, so this is what
+ * they look entries up by.
+ */
+const entryId = (tag) => {
+  if (tag?.[0] !== 'i') return undefined;
+  const g = tag[2];
+  if (typeof g === 'string' && g !== '' && tag[1].startsWith('podcast:guid:')) {
+    return 'podcast:item:guid:' + g;
+  }
+  return tag[1];
+};
 
 /**
  * The baseline claim for one item favorite. An item is the PAIR, so a claim on
@@ -83,14 +106,14 @@ const item = (itemId, feedId) => ['i', itemId, guidOf(feedId)];
 const claim = (itemId, feedId) => itemClaim(itemId, guidOf(feedId));
 const base = (pub = [], priv = []) => ({ public: pub, private: priv });
 
-/** Just the `i` values, in order. */
-const ids = (tags) => (tags ?? []).filter((t) => t[0] === 'i').map((t) => t[1]);
+/** Just the entry identifiers, in order. */
+const ids = (tags) => (tags ?? []).filter((t) => t[0] === 'i').map(entryId);
 
 /** Position of an identifier in a tag array, or -1. */
-const at = (tags, id) => (tags ?? []).findIndex((t) => t[0] === 'i' && t[1] === id);
+const at = (tags, id) => (tags ?? []).findIndex((t) => t[0] === 'i' && entryId(t) === id);
 
 /** The whole `i` tag for an identifier, or undefined. */
-const tagFor = (tags, id) => (tags ?? []).find((t) => t[0] === 'i' && t[1] === id);
+const tagFor = (tags, id) => (tags ?? []).find((t) => t[0] === 'i' && entryId(t) === id);
 
 /** Is this feed favorited? Its entry being on the list is the whole answer. */
 const feedFavorite = (tags, id) => parseTags(tags).favorited.get(id) ?? false;
@@ -306,6 +329,32 @@ test('6. A URL-shaped item guid does not corrupt its `k` tag', () => {
   const kinds = publish.tags.filter((t) => t[0] === 'k').map((t) => t[1]);
   assert.ok(kinds.includes('podcast:item:guid'));
   assert.ok(!kinds.some((k) => k.includes('https')), `bad k tag: ${kinds}`);
+
+  // THE ITEM ENTRY DECLARES A KIND ITS IDENTIFIER DOES NOT SAY. That `k` came
+  // off a tag whose position 1 reads `podcast:guid:`, because the item guid is
+  // at position 2 now. A writer that derives the kind from the prefix alone
+  // emits `podcast:guid` and nothing else, and `#k` discovery stops finding
+  // item favorites on every list whose items are all written this way.
+  assert.equal(
+    tagFor(publish.tags, urlItem)[1],
+    FEED_A,
+    'the item entry does not name its feed at position 1',
+  );
+
+  // The legacy two-element form is the one place a URL-shaped guid still
+  // reaches the kind table through position 1, so pin it there too.
+  const fromLegacy = plan({
+    read: ev([ALT, ['medium', 'podcast'], ['i', FEED_A], ['i', urlItem], K_FEED, K_ITEM]),
+    local: [feed(FEED_C, 'podcast', [], true)],
+    baseline: base(),
+    mode: 'public',
+  });
+  const legacyKinds = fromLegacy.publish.tags.filter((t) => t[0] === 'k').map((t) => t[1]);
+  assert.ok(legacyKinds.includes('podcast:item:guid'));
+  assert.ok(
+    !legacyKinds.some((k) => k.includes('https')),
+    `bad k tag: ${legacyKinds}`,
+  );
 });
 
 test('7. Both `k` layouts parse identically', () => {
@@ -1161,6 +1210,25 @@ test('25. A feed favorite and an item favorite are stated separately', () => {
     'two favorites, two tags',
   );
 
+  // AND THE TWO TAGS SHARE POSITION 1. That is what `<podcast:remoteItem>`
+  // does — `feedGuid` alone points at the feed, `feedGuid` plus `itemGuid`
+  // points at one item in it — so the element count is the whole difference
+  // between them on the wire. A reader that tells entries apart by position 1,
+  // or a dedupe keyed on it, folds the feed favorite together with every item
+  // favorite under that feed and one of them disappears.
+  assert.equal(
+    tagFor(both.publish.tags, FEED_A)[1],
+    tagFor(both.publish.tags, ITEM_A1)[1],
+    'a feed favorite and an item favorite of that feed differ at position 1',
+  );
+  assert.equal(tagFor(both.publish.tags, FEED_A).length, 2);
+  assert.equal(tagFor(both.publish.tags, ITEM_A1).length, 3);
+  assert.equal(
+    both.publish.tags.filter((t) => t[0] === 'i').length,
+    2,
+    'the feed favorite and its item favorite collapsed into one tag',
+  );
+
   // Favoriting the feed alone is the mirror case: one tag, and no item.
   const feedOnly = plan({
     read: ev([ALT, VIS_PUBLIC, K_FEED]),
@@ -1204,8 +1272,8 @@ test('25. A feed favorite and an item favorite are stated separately', () => {
     ALT,
     VIS_PUBLIC,
     ['medium', 'podcast'],
-    ['i', ITEM_A1, guidOf(FEED_A)],
-    ['i', ITEM_A1, guidOf(FEED_B)],
+    item(ITEM_A1, FEED_A),
+    item(ITEM_A1, FEED_B),
     K_ITEM,
   ]);
   const kept = plan({
@@ -1232,7 +1300,7 @@ test('25. A feed favorite and an item favorite are stated separately', () => {
   assert.ok(oneGone.publish);
   assert.deepEqual(
     oneGone.publish.tags.filter((t) => t[0] === 'i'),
-    [['i', ITEM_A1, guidOf(FEED_B)]],
+    [item(ITEM_A1, FEED_B)],
     'a claim on one copy removed the other, or removed neither',
   );
 });
@@ -1315,13 +1383,14 @@ test('27. An entry is carried whole, and no writer invents a feed guid', () => {
   // of its feed guid cannot be looked up by anyone, ever again.
   //
   // Position 3 belongs to nobody yet, which is why a tag carrying something
-  // there is the one to test.
+  // there is the one to test. Note that the element being carried sits past
+  // the item guid, not past the feed guid — the pair fills positions 1 and 2.
   const NEWER = 'written-by-a-writer-newer-than-this-one';
   const read = ev([
     ALT,
     ['medium', 'podcast'],
     ['i', FEED_A],
-    ['i', ITEM_A1, guidOf(FEED_A), NEWER],
+    [...item(ITEM_A1, FEED_A), NEWER],
     item(ITEM_B1, FEED_B),
     K_FEED,
     K_ITEM,
@@ -1336,8 +1405,8 @@ test('27. An entry is carried whole, and no writer invents a feed guid', () => {
   assert.ok(carrying.publish, 'adding a local favorite must produce a publish');
   assert.deepEqual(
     tagFor(carrying.publish.tags, ITEM_A1),
-    ['i', ITEM_A1, guidOf(FEED_A), NEWER],
-    'the feed guid and the element past it must come back byte-identical',
+    [...item(ITEM_A1, FEED_A), NEWER],
+    'the item guid and the element past it must come back byte-identical',
   );
   assert.deepEqual(tagFor(carrying.publish.tags, ITEM_B1), item(ITEM_B1, FEED_B));
   assert.deepEqual(tagFor(carrying.publish.tags, FEED_A), ['i', FEED_A]);

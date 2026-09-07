@@ -14,8 +14,15 @@ either codebase has agreed to.
 
 An item entry used to be `["i", "podcast:item:guid:…"]`, and the feed it came
 from was whatever feed entry sat above it. It is now
-`["i", "podcast:item:guid:…", "<feedGuid>"]`, and the entry above it means
+`["i", "podcast:guid:<feedGuid>", "<itemGuid>"]`, and the entry above it means
 nothing.
+
+**Note that the whole tag changes, not just an appended element.** Position 1
+becomes the FEED's identifier — the same string a feed favorite carries — and
+the item guid moves to position 2, bare. That is
+`<podcast:remoteItem feedGuid="…" itemGuid="…"/>` written as one tag: the
+required attribute first, the optional one second, and the element count is the
+only thing distinguishing a feed favorite from an item favorite.
 
 The reason is not tidiness. **An item guid is not an address.**
 [`<podcast:guid>`](https://podcastindex.org/namespace/1.0) is globally unique
@@ -26,7 +33,13 @@ demands a `feedid`, `feedurl` or `podcastguid` beside it and says in its own
 documentation that the item guid "may not be globally unique".
 
 So an item stripped of its feed guid is not mislabelled. It is unresolvable,
-by every app, forever.
+by every app, forever. The Podcast Index does not even attempt such a lookup:
+
+```
+GET /api/1.0/episodes/byguid?guid=cc59b81e-28a0-4e55-a457-54285c06830a
+{"status":"false", …, "description":"This call requires either a valid
+ `feedid`, `feedurl` or `podcastguid` argument. "}
+```
 
 Two things fall out of the format in exchange, and both are why the change is
 worth making rather than merely correct:
@@ -41,9 +54,10 @@ worth making rather than merely correct:
 
 ## The order is not a preference
 
-1. **Both apps stop rebuilding `i` tags, and both read position 2** — with the
-   legacy fallback. Until this is in both, neither may write position 2.
-2. **Either app writes position 2 on its items.** Any order, once stage 1 is
+1. **Both apps stop rebuilding `i` tags, and both read the three-element
+   form** — with the legacy fallback. Until this is in both, neither may write
+   the new form.
+2. **Either app writes the new form on its items.** Any order, once stage 1 is
    everywhere.
 3. **Either app stops writing placement feed entries.** Any order, once stage 2
    is everywhere in that app.
@@ -52,10 +66,16 @@ worth making rather than merely correct:
 ever published a marker, so that ordering protected a feature nobody had. This
 one protects live data, in two directions:
 
-- App A writes `["i", item, feedGuid]`. App B rebuilds it as `["i", item]` and
-  republishes. The feed guid is gone, and with it the only way anyone can ever
-  look that favorite up — silently, on someone else's device, with app B's
-  screen correct throughout.
+- App A writes `["i", "podcast:guid:F", "X"]`. App B does not recognise a
+  three-element entry, rebuilds what it thinks it read, and republishes. The
+  pair is gone, and with it the only way anyone can ever look that favorite
+  up — silently, on someone else's device, with app B's screen correct
+  throughout.
+- Worse than the old failure, and this is new: a reader still on stage 0 sees
+  `podcast:guid:F` at position 1 and reads the entry as a FEED favorite. It
+  does not lose the item, it silently converts it into a favorite of the whole
+  show. Stage 1 is what stops that, and it is why stage 1 must land in both
+  apps before either writes the new form.
 - App A stops writing placement feed entries, because its items no longer need
   them. App B still reads an item's feed from the entry above it, finds none,
   and shows a library of tracks with no albums. If B then rebuilds those items,
@@ -75,7 +95,7 @@ Both repos have this wired, which is most of the work already done.
 | boostmebitch | `npm run check:conformance` | `scripts/conformance.mjs` | `scripts/conformance-adapter.mjs` |
 
 Both find the suite at `../PC20-Nostr` or wherever `PC20_NOSTR_DIR` points, so
-pull this repo and run it. Expect **4, 5, 11, 19, 20, 25, 26 and 27 red** —
+pull this repo and run it. Expect **4, 5, 6, 11, 19, 20, 25, 26 and 27 red** —
 that is the correct result for an app that carries an item's feed by position,
 and it is the signal each stage below turns green.
 
@@ -83,7 +103,7 @@ Expect **28 red only on its last assertion**, which is originating an artist
 favorite. Neither app can do that and neither is wrong for it; see [What not to
 change](#what-not-to-change).
 
-## Stage 1: stop rebuilding `i` tags, and read position 2
+## Stage 1: stop rebuilding `i` tags, and read the three-element form
 
 Both apps parse the list into an ordered node list, and both are right to —
 `medium` is still positional, and both file headers say so at length. The defect
@@ -91,8 +111,25 @@ is narrower than that: **a node the app could PLACE is re-emitted from the model
 rather than from the tag.** A node it could not place is already carried whole,
 which is why the fix is small.
 
-An `i` tag is `["i", identifier, feedGuid]`. Position 2 is what gets dropped,
-along with anything a writer newer than either app parks behind it.
+An `i` tag is `["i", feedId, itemGuid]`, and the four shapes a reader must
+accept are:
+
+| tag | what it is |
+|---|---|
+| `["i","podcast:guid:F"]` | a feed favorite |
+| `["i","podcast:guid:F","X"]` | item `X` of feed `F` |
+| `["i","podcast:item:guid:X"]` | **legacy** item; feed from the entry above |
+| `["i","podcast:publisher:guid:P"]` | an artist; belongs to no feed |
+
+Position 2 is what gets dropped, along with anything a writer newer than either
+app parks behind it. **The element count is what separates rows 1 and 2**, so
+an app that branches on the identifier prefix alone reads an item favorite as a
+feed favorite and quietly turns one saved episode into a followed show.
+
+The kind an entry declares follows the same rule: a three-element
+`podcast:guid:` entry is `podcast:item:guid` in the trailing `k` tags, even
+though its identifier says otherwise. Read the prefix alone and
+`podcast:item:guid` stops appearing on the event at all.
 
 ### stablekraft-app
 
@@ -146,9 +183,10 @@ thing being fixed.
 
 ### The legacy fallback is mandatory, not a courtesy
 
-Reading position 2 is only half of stage 1. **A two-element item tag still takes
-its feed from the most recent feed entry above it**, exactly as it does today,
-and every list in production is full of them. Drop that path and you do not
+Reading the new form is only half of stage 1. **A two-element
+`podcast:item:guid:` tag still takes its feed from the most recent feed entry
+above it**, exactly as it does today, and every list in production is full of
+them. Drop that path and you do not
 lose a label — you make every item favorite already published unresolvable.
 
 An unreadable identifier between a feed entry and a two-element item must not
@@ -162,9 +200,13 @@ both apps can read one. That is the whole prerequisite, and it is worth landing
 on its own: it is also what lets a later revision put something at position 3,
 which nothing defines yet, without a second round of this.
 
-Vectors 4, 5, 19, 20 and 27 go green here. 11, 25 and 26 do not.
+Vectors 4, 5, 19 and 20 go green here. 6, 11, 25, 26 and 27 do not: each of
+those needs the app to WRITE the new form, which is stage 2. Vector 27 in
+particular has two halves — carrying an unknown element past the pair, which
+stage 1 fixes, and rewriting a legacy tag, which it does not — so it stays red
+until stage 2 even though half of it now passes.
 
-## Stage 2: write position 2, and claim the pair
+## Stage 2: write the new form, and claim the pair
 
 ### Every item you emit names its feed
 
@@ -172,11 +214,18 @@ There is no case where an item entry is written without one. The feed guid is
 already in hand — it is the group the item sits under in local state — so this
 is a one-line change at each of the four emit sites listed above.
 
-**Fill it in on entries you read, too.** A two-element item whose feed you
-resolved positionally is republished as three elements with that guid on it.
-Each list upgrades itself once, on the first publish after the reader ships, and
-the upgrade must be idempotent: reading the result back changes nothing.
+**Rewrite entries you read, too.** A legacy item whose feed you resolved
+positionally is republished as `["i", "podcast:guid:F", "X"]` — the whole tag,
+position 1 included, not an appended third element. Each list upgrades itself
+once, on the first publish after the reader ships, and the upgrade must be
+idempotent: reading the result back changes nothing.
 ([Vector 27](pc20-favorites.md#test-vectors).)
+
+**An item whose feed you could not resolve is the exception.** It has no guid
+to write, so it goes back exactly as it arrived, two elements. Do not fill
+position 2 with a placeholder — a wrong feed guid resolves to the wrong thing,
+which is worse than resolving to nothing.
+([Vector 20](pc20-favorites.md#test-vectors).)
 
 ### A baseline claim on an item is the PAIR
 
@@ -196,7 +245,7 @@ currently sits under on the list you just read, and write the paired form from
 then on. Doing nothing is also safe until two feeds on one user's list share an
 item guid, which is rare and silent, which is the problem.
 
-Vectors 11 and 25 go green here.
+Vectors 6, 11, 25 and 27 go green here.
 
 ## Stage 3: stop writing placement feed entries
 
@@ -247,12 +296,17 @@ rows that matter here:
 
 | break it this way | should fail |
 |---|---|
-| rebuild `i` tags as `['i', id]` on emit, dropping the feed guid | 25, 27 |
-| read an item's feed from the entry above it, ignoring position 2 | 5, 25, 26 |
+| rebuild `i` tags as `['i', id]` on emit, dropping half the pair | 6, 25, 27 |
+| read an item's feed from the entry above it, ignoring position 1 | 5, 25, 26 |
 | drop the legacy path, so a two-element item names no feed | 4, 27 |
-| republish a legacy item without filling in its feed guid | 27 |
-| key an entry on its identifier alone rather than on the pair | 2, 3, 10, 11, 18, 19, 25, 26 |
+| republish a legacy item without rewriting it | 27 |
+| fill position 2 with a placeholder when the feed is unknown | 20 |
+| key an entry on position 1 alone rather than on the pair | 2, 3, 10, 11, 18, 19, 25, 26 |
+| derive an entry's `k` kind from its prefix alone | 6 |
 | write a feed entry for a feed you hold only to supply a feed guid | 25 |
+
+Every row above was produced by breaking the reference implementation on
+purpose and recording what went red, not by reasoning about it.
 | invent a feed guid for an item whose feed nobody knows | 20 |
 
 A suite that goes green without those going red has not tested anything.

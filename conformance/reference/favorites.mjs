@@ -29,14 +29,34 @@ export const ALT = 'PC 2.0 Favorites';
 export const VISIBILITY = 'visibility';
 
 /**
- * Position 2 of an ITEM `i` tag: the guid of the feed the item belongs to.
+ * Position 1 of a feed favorite AND of an item favorite: the feed's
+ * `<podcast:guid>`, as the NIP-73 identifier `podcast:guid:<feedGuid>`.
  *
  * An item guid is unique inside its feed and is NOT globally unique, so it is
  * not an address on its own — the Podcast Index `/episodes/byguid` lookup
- * requires a feed identifier beside it. The pair is the address. Data
- * Structure, "One favorite, one tag".
+ * refuses the call outright without a `feedid`, `feedurl` or `podcastguid`
+ * beside it. The pair is the address, and it is written in the order
+ * `<podcast:remoteItem>` writes it: the required `feedGuid` first, then the
+ * optional `itemGuid`. Data Structure, "One favorite, one tag".
  */
 const FEED_PREFIX = 'podcast:guid:';
+
+/**
+ * The NIP-73 identifier kind for an item.
+ *
+ * This is the name an item carries INSIDE an implementation — in a local
+ * group, in a baseline, in `keyOf`. On the wire it is not at position 1 any
+ * more: a three-element `podcast:guid:` tag holds the item guid bare at
+ * position 2, and this prefix is what a reader puts back around it. The
+ * legacy two-element form is the one place it still appears on the wire.
+ */
+const ITEM_PREFIX = 'podcast:item:guid:';
+
+/** The bare item guid inside a `podcast:item:guid:` identifier. */
+export const itemGuidIn = (identifier) =>
+  typeof identifier === 'string' && identifier.startsWith(ITEM_PREFIX)
+    ? identifier.slice(ITEM_PREFIX.length)
+    : null;
 
 /** The bare feed guid inside a `podcast:guid:` identifier. */
 export const feedGuidOf = (identifier) =>
@@ -47,8 +67,15 @@ export const feedGuidOf = (identifier) =>
 /** The `podcast:guid:` identifier for a bare feed guid. */
 export const feedIdOf = (guid) => FEED_PREFIX + guid;
 
-/** The feed guid written on an item tag, or null when it carries none. */
-export function itemFeedOf(tag) {
+/**
+ * The item guid at position 2, or null when the tag carries none.
+ *
+ * Its PRESENCE is the whole distinction between a feed favorite and an item
+ * favorite, because both carry the same identifier at position 1.
+ * `<podcast:remoteItem>` draws the line in the same place: `feedGuid` alone
+ * points at the feed, `feedGuid` plus `itemGuid` points at one item in it.
+ */
+export function itemGuidOf(tag) {
   const g = tag?.[2];
   return typeof g === 'string' && g !== '' ? g : null;
 }
@@ -62,8 +89,15 @@ export function itemFeedOf(tag) {
  * guid is only unique within its feed. Deduping on the identifier alone would
  * merge two real favorites into one.
  *
- * Relay `#i` filters still match position 1 alone. That is a different job and
- * it is unaffected.
+ * Position 1 no longer separates them either. A feed favorite and an item
+ * favorite of that same feed carry the SAME string at position 1 — only the
+ * item's position 2 tells them apart — so an entry key that reads position 1
+ * alone folds a feed favorite together with every item favorite under it.
+ *
+ * Relay `#i` filters match position 1 alone, which is now the feed guid for
+ * both. A `#i` for a feed therefore returns the feed favorite and every item
+ * favorite from it, and a per-item `#i` on this kind is not available. See
+ * "What this format does not do".
  */
 export const keyOf = (entry) =>
   entry.feed === null || entry.feed === undefined
@@ -107,6 +141,23 @@ export function kindOf(identifier) {
 const isFeedKind = (k) => k === 'podcast:guid';
 
 /**
+ * The kind an ENTRY declares, which is not always the kind of its identifier.
+ *
+ * `podcast:guid:<feedGuid>` with an item guid beside it IS an item entry, so
+ * it declares `podcast:item:guid`. Reading the prefix alone would drop that
+ * kind off every list whose item favorites are all written the current way,
+ * and `#k` discovery would stop finding item favorites entirely.
+ *
+ * The legacy two-element `podcast:item:guid:<itemGuid>` form already carries
+ * its kind in the prefix, so it needs no special case here.
+ */
+export function kindOfTag(tag) {
+  const k = kindOf(tag?.[1]);
+  if (isFeedKind(k) && itemGuidOf(tag) !== null) return 'podcast:item:guid';
+  return k;
+}
+
+/**
  * A kind that is an entry in its own right and nests nothing.
  *
  * An artist. Favoriting one says "show me this artist's whole catalogue", and
@@ -131,22 +182,24 @@ const isStandaloneKind = (k) => k === 'podcast:publisher:guid';
  *
  *   - `medium` is a RUNNING value, applying to every entry after it. It is the
  *     only positional thing left in the format.
- *   - A feed `i` is a feed favorite. Its presence IS the favorite: nothing is
- *     on this list for structural reasons, so there is nothing to label.
- *   - An item `i` carries the guid of its feed at position 2. It does not
- *     depend on the entry above it, so sorting or rebuilding the array cannot
- *     move it to another feed.
+ *   - A `podcast:guid:` `i` with NOTHING at position 2 is a feed favorite.
+ *     Its presence IS the favorite: nothing is on this list for structural
+ *     reasons, so there is nothing to label.
+ *   - A `podcast:guid:` `i` WITH an item guid at position 2 is an item
+ *     favorite — the feed at position 1, the item at position 2, the order
+ *     `<podcast:remoteItem>` uses. It does not depend on the entry above it,
+ *     so sorting or rebuilding the array cannot move it to another feed.
  *   - An entry before any `medium` tag has an UNKNOWN medium — null here,
  *     never defaulted to 'podcast'.
  *   - `k` takes no part in anything and is never used to derive an entry's
  *     kind. Both `k` layouts therefore parse identically (vector 7).
  *   - An unparseable `i` is carried whole (rule 4).
  *
- * LEGACY: an item tag with only two elements predates position 2, and every
- * list published before this revision is full of them. Its feed comes from the
- * most recent feed entry above it, which is where the old format kept it.
- * Dropping that path does not merely lose a label — an item guid alone is not
- * an address, so it would make every published item favorite unresolvable.
+ * LEGACY: a two-element `podcast:item:guid:` tag predates all of this, and
+ * every list published before this revision is full of them. Its feed comes
+ * from the most recent feed entry above it, which is where the old format kept
+ * it. Dropping that path does not merely lose a label — an item guid alone is
+ * not an address, so it would make every published item favorite unresolvable.
  */
 export function parseTags(tags) {
   let medium = null;
@@ -182,22 +235,40 @@ export function parseTags(tags) {
       return;
     }
 
+    const itemGuid = itemGuidOf(tag);
+
     if (isFeedKind(kind)) {
-      openFeed = feedGuidOf(value);
-      entries.push({ id: value, kind, medium, index, feed: null, favorited: true });
+      if (itemGuid === null) {
+        // A feed favorite. It still opens a run for the legacy path below.
+        openFeed = feedGuidOf(value);
+        entries.push({ id: value, kind, medium, index, feed: null, favorited: true });
+      } else {
+        // An item favorite: this feed, that item. Note it does NOT open a
+        // legacy run — the feed is here because the ITEM needs it, and the
+        // user may never have favorited the feed at all.
+        entries.push({
+          id: ITEM_PREFIX + itemGuid,
+          kind: 'podcast:item:guid',
+          medium,
+          index,
+          feed: feedGuidOf(value),
+          legacy: false,
+        });
+      }
     } else if (isStandaloneKind(kind)) {
       // An artist. Always a favorite: nothing else puts one on the list, and
       // it belongs to no feed.
       entries.push({ id: value, kind, medium, index, feed: null, favorited: true });
     } else {
-      const inline = itemFeedOf(tag);
+      // A two-element `podcast:item:guid:` tag — legacy only. Its feed is
+      // whichever feed entry was last opened above it.
       entries.push({
         id: value,
         kind,
         medium,
         index,
-        feed: inline ?? openFeed,
-        legacy: inline === null,
+        feed: openFeed,
+        legacy: true,
       });
     }
   });
@@ -365,9 +436,21 @@ const keysOf = (localGroups) => {
   return out;
 };
 
-/** The tag a local item is written as. An item always names its feed. */
+/**
+ * The tag a local item is written as: the FEED at position 1, the item guid
+ * bare at position 2. `<podcast:remoteItem>`'s order, and its optionality —
+ * the required half names the feed, the optional half narrows it to one item.
+ *
+ * A null feed guid means a local group whose id is not a `podcast:guid:`
+ * identifier — a caller error, not a wire state — and it emits the legacy form
+ * rather than inventing a guid. An item READ off the wire that names no feed
+ * never reaches here at all: the pass above carries it whole and untouched,
+ * which is what vector 20 pins.
+ */
 const itemTag = (itemId, feedGuid) =>
-  feedGuid === null ? ['i', itemId] : ['i', itemId, feedGuid];
+  feedGuid === null
+    ? ['i', itemId]
+    : ['i', feedIdOf(feedGuid), itemGuidIn(itemId) ?? itemId];
 
 /**
  * Rule 3, over ONE half's tag array.
@@ -429,11 +512,12 @@ function mergeHalf(readTags, localGroups, baselineIds, { adoptAll = false } = {}
     if (decision.has(index)) {
       if (decision.get(index)) {
         const e = entryAt.get(index);
-        // THE MIGRATION, and it happens once per list. A legacy item tag knows
-        // its feed only from the entry above it; rewriting it with the feed
-        // guid on the entry is what makes it survive a reorder. Nothing else
-        // in this function rebuilds a tag, so a tag that is already
-        // self-addressing is pushed whole and rule 5 still sees no change.
+        // THE MIGRATION, and it happens once per list. A legacy item tag
+        // knows its feed only from the entry above it; rewriting it as
+        // `['i', podcast:guid:<feed>, <item>]` is what makes it survive a
+        // reorder. Nothing else in this function rebuilds a tag, so a tag
+        // that is already self-addressing is pushed whole and rule 5 still
+        // sees no change.
         if (e && e.legacy && e.feed !== null) out.push(itemTag(e.id, e.feed));
         else out.push(tag);
       }
@@ -509,7 +593,11 @@ function frame(entryTags, carried = [], visibility = null) {
   const kinds = [];
   for (const t of entryTags) {
     if (t[0] !== 'i') continue;
-    const k = kindOf(t[1]);
+    // `kindOfTag`, not `kindOf`: an item entry's identifier says
+    // `podcast:guid` and the entry is `podcast:item:guid`. Reading the prefix
+    // alone drops the item kind off the event, and `#k` discovery stops
+    // finding item favorites.
+    const k = kindOfTag(t);
     if (k && !kinds.includes(k)) kinds.push(k);
   }
   for (const k of carried) {

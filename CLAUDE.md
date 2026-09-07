@@ -228,10 +228,12 @@ and read the other one.
 ## Invariants a change must not quietly break
 
 - **An entry names its own feed; only `medium` is positional.** An item tag
-  is `["i", itemId, feedGuid]`, so sorting or rebuilding the array cannot
-  reattach it. `medium` is still a running value applying to every entry after
-  it, so a reorder costs a wrong label — which a Podcast Index lookup
-  corrects — rather than a wrong feed, which nothing corrected. The old rule
+  is `["i", "podcast:guid:<feedGuid>", "<itemGuid>"]` — `<podcast:remoteItem>`
+  as one tag, required `feedGuid` then optional `itemGuid` — so sorting or
+  rebuilding the array cannot reattach it. `medium` is still a running value
+  applying to every entry after it, so a reorder costs a wrong label — which a
+  Podcast Index lookup corrects — rather than a wrong feed, which nothing
+  corrected. The old rule
   was the reverse and it is the reason this one is written down.
 - **An item guid is not an address.** `<podcast:guid>` is globally unique by
   construction and outlives the feed URL; an item's `<guid>` is unique only
@@ -240,10 +242,23 @@ and read the other one.
   PAIR — dedupe or claim on the item guid alone and two items in two feeds
   fold into one — and a writer that rebuilds entries as `["i", id]` does not
   drop a label, it makes those favorites unresolvable by everyone forever.
+- **A feed favorite and an item favorite differ only in length.** Both carry
+  `podcast:guid:<feedGuid>` at position 1, exactly as `remoteItem` uses one
+  required attribute for both. Two things follow. A key, dedupe or lookup on
+  position 1 alone folds a feed favorite together with every item favorite
+  under it. And an entry's KIND comes from the whole entry, not the prefix: a
+  three-element `podcast:guid:` entry declares `podcast:item:guid`, or `#k`
+  discovery stops finding item favorites at all.
+- **Relays index position 1, which is now the feed guid for both.** So `#i`
+  for a feed returns the feed favorite and every item favorite from it
+  together, there is no per-item filter on these kinds, and publishing one
+  saved episode puts the show into that index. A kind:1 boost note still tags
+  the episode as `podcast:item:guid:<itemGuid>`, so a `#i` written for one
+  does not find the other — say so rather than letting it be discovered.
 - **One favorite, one tag.** A feed entry appears only when the user favorited
   the feed. Nothing is on the list for structural reasons, so there is no
   favorite-versus-placement question and no marker to answer it. A brief
-  revision of the spec had one at position 2; the feed guid took the slot,
+  revision of the spec had one at position 2; the item guid took the slot,
   because that was the value actually missing.
 - **Medium is a hint, never truth.** A Podcast Index lookup on the guid wins
   over the stored hint whenever they disagree.
@@ -294,11 +309,13 @@ and read the other one.
   that actually reached production on 2026-08-25.
 - **The feed-guid migration has shipped data behind it, unlike the marker.**
   Every list in production writes items as two elements. A reader must accept
-  both forms — three elements means the feed guid is at position 2, two means
-  it comes from the feed entry above, as before — and a writer fills it in on
-  its next publish. Both apps must read position 2 before either stops writing
-  the placement feed entries, or a reader still on the old rules loses every
-  item whose feed entry disappeared.
+  both forms — `["i","podcast:guid:F","X"]` is an item entry, while a
+  two-element `["i","podcast:item:guid:X"]` takes its feed from the entry
+  above, as before — and a writer rewrites the WHOLE tag on its next publish,
+  position 1 included. Both apps must read the three-element form before
+  either writes it: a reader still on the old rules does not merely lose such
+  an entry, it reads `podcast:guid:F` at position 1 and turns one saved
+  episode into a favorite of the whole show.
 - **Every kind here is self-assigned, not NIP-allocated**: 10333 for
   favorites, 3369 / 33369 / 23369 for playback events. Say so wherever it
   matters, and keep the collision cost stated: relay filters are

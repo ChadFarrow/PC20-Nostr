@@ -62,12 +62,15 @@ the Nostr side.
 | kind 10333 | list feed |
 |---|---|
 | `["i", "podcast:guid:X"]`, nothing under it | `<podcast:remoteItem feedGuid="X"/>` |
-| `["i", "podcast:item:guid:Y", "X"]` | `<podcast:remoteItem feedGuid="X" itemGuid="Y"/>` |
+| `["i", "podcast:guid:X", "Y"]` | `<podcast:remoteItem feedGuid="X" itemGuid="Y"/>` |
 | `["medium", "music"]`, running until the next one | `medium="music"` on each element |
 | nothing | `feedUrl`, `title` |
 
-Entries map one to one, so converting between the formats is bookkeeping on
-guids rather than translation. Everything below is about the bookkeeping.
+Entries map one to one, **including the order and the optionality**: the
+required `feedGuid` is position 1, the optional `itemGuid` is position 2, and
+an item entry is a `remoteItem` with one more attribute rather than a different
+kind of thing. Converting between the formats is bookkeeping on guids rather
+than translation. Everything below is about the bookkeeping.
 
 ## Position against repetition — and the event changed sides
 
@@ -76,9 +79,10 @@ crossed it.
 
 A `remoteItem` names its feed on the element itself and carries nothing by
 position. Kind 10333 used to name it by *position*: an item entry belonged to
-the feed entry above it. It now writes the feed guid on the item, at position 2
-of the `i` tag, which is the `remoteItem` shape in a tag array. Only `medium`
-is still positional.
+the feed entry above it. It now writes the feed guid at position 1 of the item's
+own `i` tag and the item guid at position 2 — the `remoteItem` shape in a tag
+array, attribute for attribute and in the same order. Only `medium` is still
+positional.
 
 The repetition is therefore no longer the list feed's alone, and the price
 below is now what kind 10333 pays too. The first real event published in this
@@ -127,10 +131,12 @@ event is no longer buying a cheaper answer to a question of its own making.
 
 **No fallback when a guid will not resolve.** The favorites spec considered a
 URL hint at position 2 of an `i` tag, so an entry the Podcast Index cannot
-resolve would be more than a guid and nothing. The slot went to the feed guid
-instead, and the trade is defensible for the same reason the namespace gives:
-`<podcast:guid>` is assigned once and outlives the feed URL, so a stored URL is
-stalest exactly when it is most needed. The namespace already spends an
+resolve would be more than a guid and nothing. The slot went to the item guid
+instead, which is not really a trade: without it an item favorite has no
+address at all. A URL would have been the weaker occupant anyway, for the
+reason the namespace itself gives — `<podcast:guid>` is assigned once and
+outlives the feed URL, so a stored URL is stalest exactly when it is most
+needed. The namespace already spends an
 attribute on the fallback, and says why —
 `feedUrl` is "beneficial ... for those cases as a fallback", and if both are
 present a capable app resolves `feedGuid` and uses it. `title` answers a

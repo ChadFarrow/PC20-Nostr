@@ -73,12 +73,10 @@ otherwise. An unattended payment has no message, so in practice it is empty.
 
 | Tag | Value | Required | Notes |
 | --- | --- | --- | --- |
-| `i` | `podcast:guid:<feed guid>` | yes | optional url hint as third element |
-| `k` | `podcast:guid` | yes | NIP-73 content id kind |
-| `i` | `podcast:item:guid:<item guid>` | no | present when the payment targets a track or episode |
-| `k` | `podcast:item:guid` | no | for music feeds the item is the track |
+| `i` | `podcast:guid:<feed guid>` | yes | a third element makes it an item — see below |
+| `k` | `podcast:guid` or `podcast:item:guid` | yes | derived from the whole `i` tag above, not from its prefix |
 | `i` | `podcast:publisher:guid:<guid>` | no | artist-level rollups |
-| `k` | `podcast:publisher:guid` | no | |
+| `k` | `podcast:publisher:guid` | no | with the artist `i` above |
 | `amount` | millisats, string | yes | what SETTLED — see below |
 | `action` | `stream` \| `auto` | yes | mirrors the TLV `action` field |
 | `start` | unix seconds | yes | wall clock, start of the interval |
@@ -91,6 +89,34 @@ otherwise. An unattended payment has no message, so in practice it is empty.
 | `p` | recipient pubkey | no | when a recipient's Nostr identity is known |
 | `bolt11` | invoice | no | omit for keysend |
 | `preimage` | payment preimage | no | omit when the rail returns none |
+
+**One `i` tag names the content, and the item guid rides on it.**
+
+```
+["i", "podcast:guid:<feedGuid>"]               the payment was for the feed
+["i", "podcast:guid:<feedGuid>", "<itemGuid>"] …for one item in that feed
+```
+
+This is `<podcast:remoteItem feedGuid="…" itemGuid="…"/>` written as one tag,
+and it is the same shape
+[kind 10333](pc20-favorites.md#one-favorite-one-tag) uses: the required
+`feedGuid` at position 1, the optional `itemGuid` at position 2, bare. **An
+item guid is not an address on its own** — it is unique only inside its feed,
+which is why the Podcast Index `/episodes/byguid` lookup refuses a call that
+carries no `feedid`, `feedurl` or `podcastguid` — so the pair travels together
+or the receipt names nothing anybody can resolve.
+
+Three consequences, and all three are places a writer goes wrong:
+
+- **The element count is the whole difference** between a feed-level and an
+  item-level receipt. Position 1 is byte-identical in both.
+- **The `k` value comes from the whole entry**, so a two-element tag declares
+  `podcast:guid` and a three-element one declares `podcast:item:guid` — one
+  `k`, not both. Read the prefix alone and `podcast:item:guid` never reaches
+  any event, and `#k` discovery stops finding item-level receipts entirely.
+- **Relays index position 1 only**, which is the feed guid either way. A `#i`
+  for a feed returns its item receipts too, and there is no filter that
+  returns one item's. Filtering by item means reading position 2.
 
 **`amount` is what settled, never what was owed.** The two differ more often
 than they look like they should: a value block splits one payment across
@@ -122,17 +148,22 @@ thing standing between a general-purpose client and an empty box. A receipt
 is machine data that will nonetheless be looked at by people debugging why
 their sats are not arriving.
 
-**Derive an entry's kind from the identifier, not from an adjacent tag.** The
-kind is already the identifier's prefix. Pairing each `i` with a `k` is the
-layout NIP-73 itself shows and is fine at this scale — a receipt carries at
-most three identifiers — but a reader that walks `i`/`k` in pairs will fail on
-a writer that emits one `k` per distinct kind at the end, which is what
+**Derive an entry's kind from the entry, not from an adjacent tag and not
+from the prefix alone.** Pairing each `i` with a `k` is the layout NIP-73
+itself shows and is fine at this scale — a receipt carries at most two
+identifiers — but a reader that walks `i`/`k` in pairs will fail on a writer
+that emits one `k` per distinct kind at the end, which is what
 [pc20-favorites.md](pc20-favorites.md) requires for a list where the pairing
-cost 11 KB of a 36 KB event. Accept both layouts. Use a known-kinds table
-rather than splitting the string: item guids are routinely permalink URLs, so
-"everything before the last colon" on
-`podcast:item:guid:https://example.com/ep/42` yields `podcast:item:guid:https`,
-a `k` value no relay filter will ever match.
+cost 11 KB of a 36 KB event. Accept both layouts.
+
+The kind is *not* simply the identifier's prefix. A `podcast:guid:` tag with
+an item guid at position 2 is an item entry and declares `podcast:item:guid`.
+Where a prefix lookup does apply, use a known-kinds table rather than splitting
+the string: item guids are routinely permalink URLs, so "everything before the
+last colon" on `podcast:item:guid:https://example.com/ep/42` yields
+`podcast:item:guid:https`, a `k` value no relay filter will ever match. Item
+guids sit at position 2 and are never scanned, but a `d` tag built from one is
+(see [kind 33369](#kind-33369-value-playback-summary)).
 
 **`start` and `end` describe an interval, not a moment.** Without them a
 consumer cannot distinguish a retried publish from a second payment, which
@@ -155,9 +186,8 @@ saying they disagree. Capture them with the payment.
   "kind": 3369,
   "content": "",
   "tags": [
-    ["i", "podcast:guid:c90e609a-df1e-596a-bd5e-57bcc8aad6cc"],
-    ["k", "podcast:guid"],
-    ["i", "podcast:item:guid:d98d189b-dc7b-45b1-8720-d4b98690f31f"],
+    ["i", "podcast:guid:c90e609a-df1e-596a-bd5e-57bcc8aad6cc",
+          "d98d189b-dc7b-45b1-8720-d4b98690f31f"],
     ["k", "podcast:item:guid"],
     ["amount", "30000"],
     ["action", "auto"],
@@ -191,10 +221,37 @@ section is mostly its consequences.
 app wrote them.** It is not "what this app paid" and it is not a global total
 across everyone.
 
-`.d` is the full NIP-73 id being summarized, for example
-`podcast:item:guid:d98d189b-dc7b-45b1-8720-d4b98690f31f`. Use the id verbatim
-rather than a bare guid, or feed-level, item-level and publisher-level
-summaries collide in one namespace.
+**`.d` is the whole address of the thing being summarized, not one guid of
+it.**
+
+| summary of | `d` |
+|---|---|
+| a feed | `podcast:guid:<feedGuid>` |
+| an item | `podcast:guid:<feedGuid>:<itemGuid>` |
+| an artist | `podcast:publisher:guid:<publisherGuid>` |
+
+Two rules are doing separate work here, and dropping either one collides
+summaries that are not the same thing.
+
+**Keep the kind prefix**, rather than writing a bare guid, or feed-level,
+item-level and publisher-level summaries collide in one namespace.
+
+**Keep BOTH guids on an item summary.** An item's `<guid>` is unique only
+inside its feed — the Podcast Index refuses an `/episodes/byguid` call that
+carries no feed identifier for exactly this reason — so a `d` of
+`podcast:item:guid:<itemGuid>` is not an address. Two feeds that reuse an item
+guid, which costs a publisher nothing and happens, would share one addressable
+event: their totals add together, each writer computes a different number from
+the receipts it can see, and they overwrite each other forever. Nothing in the
+event says which feed it is about. An earlier revision of this document
+specified exactly that `d`, and it was wrong.
+
+**Split the item form at the FIRST colon after the prefix.** A
+`<podcast:guid>` is a UUIDv5 and never contains a colon; an item guid
+routinely does, because item guids are often permalink URLs. So
+`podcast:guid:<36 chars>:<anything>` parses left to right and "everything
+before the last colon" — the mistake this document already warns about for `k`
+values — silently truncates the item guid instead.
 
 This is what removes the collision rather than managing it. Addressable events
 are keyed by `(pubkey, kind, d)`, so two people never collide — different
@@ -274,8 +331,8 @@ same reasons.
 
 | Tag | Value | Required |
 | --- | --- | --- |
-| `d` | NIP-73 id being summarized | yes |
-| `i`, `k` | as in `3369` | yes |
+| `d` | the whole address being summarized — see [Scope](#scope-the-author-not-the-app) | yes |
+| `i`, `k` | as in `3369`, and they must agree with `d` | yes |
 | `amount` | total millisats over the author's receipts | yes |
 | `count` | number of receipts aggregated | yes |
 | `alt` | human-readable summary | yes |
@@ -291,8 +348,9 @@ contradict.
   "kind": 33369,
   "content": "",
   "tags": [
-    ["d", "podcast:item:guid:d98d189b-dc7b-45b1-8720-d4b98690f31f"],
-    ["i", "podcast:item:guid:d98d189b-dc7b-45b1-8720-d4b98690f31f"],
+    ["d", "podcast:guid:c90e609a-df1e-596a-bd5e-57bcc8aad6cc:d98d189b-dc7b-45b1-8720-d4b98690f31f"],
+    ["i", "podcast:guid:c90e609a-df1e-596a-bd5e-57bcc8aad6cc",
+          "d98d189b-dc7b-45b1-8720-d4b98690f31f"],
     ["k", "podcast:item:guid"],
     ["amount", "1420000"],
     ["count", "84"],
@@ -449,9 +507,25 @@ absent passes against an implementation that still leaks the pubkey, which is
 the whole failure.
 
 **4. The identifiers follow the payment, not the playhead.** Accrue against
-one track, advance playback to a second, then settle. The receipt's `i` tags
-name the first track. This is the vector that catches re-deriving identifiers
-at publish time, and it cannot fire on a show with a single value block.
+one track, advance playback to a second, then settle. The receipt's `i` tag
+names the first track — both halves of it, the feed guid at position 1 and the
+item guid at position 2. This is the vector that catches re-deriving
+identifiers at publish time, and it cannot fire on a show with a single value
+block.
+
+**4b. An item-level receipt names its feed, and declares the item kind.** One
+`i` tag, three elements, feed guid then item guid. Assert the `k` value is
+`podcast:item:guid` even though position 1 reads `podcast:guid` — a writer that
+derives the kind from the prefix passes every other assertion here and emits
+`podcast:guid`, which breaks `#k` discovery and nothing visible.
+
+**4c. Two feeds sharing an item guid produce two summaries.** Publish receipts
+for item guid `X` under feed `F1` and the same `X` under feed `F2`, then build
+`33369`s. There must be **two** addressable events with different `d` values,
+each totalling only its own receipts. A `d` of `podcast:item:guid:X` gives one
+event whose amount is the sum of both, computed differently by each writer and
+overwritten on every pass, with nothing in the event naming a feed. This is the
+vector that kills the `d` an earlier revision of this document specified.
 
 **5. A reader accepts both `k` layouts.** A receipt with `k` paired after each
 `i` and one with a single trailing `k` per distinct kind parse to the same
@@ -504,6 +578,18 @@ value it could not read either.
   many people that was — never the real audience, since a listener who has not
   opted in leaves nothing behind at all. Treat both numbers as a lower bound
   and do not present either as reach.
+- **No per-item relay filter.** Relays index `i` at position 1, and position 1
+  is the feed guid on a feed-level and an item-level receipt alike. A `#i` for
+  a feed guid returns both together, and no filter returns one item's receipts.
+  Selecting by item means fetching the feed's receipts and reading position 2 —
+  which is the price of putting the pair in one tag, and it is paid the same
+  way by [kind 10333](pc20-favorites.md).
+- **An item is addressed differently here than in a kind:1 note.** A boost note
+  tags the episode as `["i", "podcast:item:guid:<itemGuid>"]`, which is NIP-73's
+  own convention and is what the shipped apps write. These kinds and kind 10333
+  put the feed at position 1 instead, so a `#i` filter written for one does not
+  find the other, and nothing on either event signals the difference. Read the
+  kind before you read the tag.
 - **No retraction.** A receipt published in error stays published: there is no
   tombstone, and `5`-kind deletion is a request rather than a guarantee.
   Summaries inherit this and make it sharper — they are monotonic, so an
