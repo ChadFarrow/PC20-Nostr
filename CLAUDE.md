@@ -49,6 +49,15 @@ A **reference repo with four parts**, none of which is an application.
    `comparisons/` (why each shipped copy won), `analysis/` (the scripts
    behind every number). See `catalog/README.md`.
 
+One page sits outside those four. `pc20-favorites-marker-adoption.md` says what
+`stablekraft-app` and `boostmebitch` each have to change to adopt the
+feed-favorite marker, read at `4722dd8` and `938f90d`. It is the only page here
+that tells another repo what to do, and it is a **plan, not an extraction** —
+no line of it has run in either app. It is therefore the page that rots
+fastest: every line number in it is a claim about a file this repo does not
+own. Re-read before trusting it, correct it or delete it, and never let it
+imply either app agreed to any of it.
+
 The catalog's purpose is to hand one working feature to someone who wants it.
 It is **not** a de-duplication project: the five sites share no git history,
 and the only real overlap — DoerfelVerse and Project StableKraft — is 6

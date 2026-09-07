@@ -317,7 +317,8 @@ model would not". A well-formed `podcast:guid:` is placed, so it is re-rendered
 with the writer that erased it seeing a list that looks correct.
 
 So the prerequisite is not a caution about some future writer. It is work in
-two repos, and it comes first.
+two repos, and it comes first. What each one has to change, file by file, is in
+[pc20-favorites-marker-adoption.md](pc20-favorites-marker-adoption.md).
 
 That is also the one thing about the sequencing that is heavier than it looks,
 because the rest of it is lighter than the private half's. `content` had to be
@@ -357,6 +358,13 @@ the publisher feed**, not here. So the entry stands alone:
   so position 3 has no question to answer there. Emit the tag bare.
 - Its kind still belongs in the trailing `k` tags, or `#k` discovery misses
   every artist favorite on every list.
+
+**Carrying one is mandatory; offering the feature is not.** The same split as
+the private half. An app with no artist favorites in its UI still meets an
+artist entry on a shared list, and it must place it correctly — carried, in
+position, opening nothing — or it re-parents another app's tracks. What it need
+not do is let anyone create one. Neither existing app can today, and neither is
+wrong for that.
 
 An album is an ordinary feed entry — `podcast:guid:` with `medium` set to a
 music value — and a track is an ordinary item entry. **Everything in [Saying
@@ -994,9 +1002,11 @@ has no parent, opens no group, and the track still parses with the ALBUM as its
 parent. Republish and it comes back in place and bare. Pin the bare part from
 the app that HOLDS the artist as well as one carrying it — that is where a
 writer reaches for a marker, and there is no question for one to answer, since
-an artist entry cannot mean "placed here for something below". Pin origination
-too, `k` tag included, or `#k` discovery misses every artist favorite ever
-published. Three well-formed wrong answers, and each was somebody's: the artist
+an artist entry cannot mean "placed here for something below". Everything to
+here is mandatory for every app, whether or not it offers artist favorites.
+The last part is not: origination, `k` tag included, is what an app that DOES
+offer them owes — without the `k`, `#k` discovery misses every artist favorite
+it ever publishes. Three well-formed wrong answers, and each was somebody's: the artist
 opens a group and the track becomes the artist's, the artist becomes a track of
 the album, or the artist closes the group and the track becomes an orphan.
 
