@@ -295,22 +295,42 @@ in one publish, silently, and the result looks exactly like nobody having
 favorited any of those shows. Carrying the whole tag was already the rule; it
 now has data behind it that a reader can see.
 
-**Status: nothing implements this yet, and neither implementation was read for
-it.** The clones were not reachable from the environment this section was
-written in, so no commit is recorded and nothing here claims what either app
-does with position 3 today. That matters for exactly one question — whether
-they rebuild `i` tags — and it is the question above. Check it before shipping
-a marker: the failure is silent on the far side, and the writer that caused it
-sees a list that looks correct.
+**Status: nothing implements this, and BOTH existing writers would destroy a
+marker today.** Read at `stablekraft-app@4722dd8`
+(`lib/nostr/favorites-single-list.ts`) and `boostmebitch@938f90d`
+(`lib/nostr/favorites-list.ts`). Each parses the list into an ordered node
+list, and each re-emits a node it could place as a bare two-element tag:
+`tagsFromNodes` pushes `['i', feed]` and `['i', id]` per group, `tagsFromList`
+pushes `['i', showId(...)]` and `['i', itemId(...)]`. boostmebitch states it as
+an invariant in its file header — "An `i` tag is bare — `['i',
+'<identifier>']`, two elements."
 
-The sequencing is lighter than the private half's, though, and for a reason
-worth naming. `content` had to be carried by everyone *before* anyone could
-write into it, because a writer following this document to the letter
-republished `""` and destroyed what it found. A marker needs no such round:
-carrying the whole tag is already rule 4, and a writer that honours it
-preserves markers it has never heard of without being told. The one that does
-not, does not fail loudly either — which is why the check comes first and not
-after.
+Only a tag they could NOT place survives whole. Both call that a loose node and
+copy the array as it arrived, and stablekraft's comment on it says the intent
+outright: a third element "survives a round trip; re-rendering it from our own
+model would not". A well-formed `podcast:guid:` is placed, so it is re-rendered
+— and a marker on it is gone on the first publish after the read, silently,
+with the writer that erased it seeing a list that looks correct.
+
+So the prerequisite is not a caution about some future writer. It is work in
+two repos, and it comes first.
+
+That is also the one thing about the sequencing that is heavier than it looks,
+because the rest of it is lighter than the private half's. `content` had to be
+carried by everyone *before* anyone could write into it, since a writer
+following this document to the letter republished `""` and destroyed what it
+found. A marker needs no such round once the rebuilding stops: carrying the
+whole tag is already rule 4, and a writer that honours it preserves markers it
+has never heard of without being told.
+
+**Half of the local state already exists in one app.** `stablekraft-app`
+carries `favorited` on its group model, sets it true when the feed itself is a
+favorite, and its own comment records why it goes no further: "Not expressible
+on the wire ... meaningful on the way OUT and always false on the way back IN."
+That is the field this section gives a wire format to. It is a boolean, though,
+and this section needs three values — `false` on the way back in is the
+`unknown` case answered as "not favorited", which is the guess that deletes a
+favorite no other app will restate.
 
 ### Medium is a hint, not a source of truth
 
