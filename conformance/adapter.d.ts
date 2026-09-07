@@ -2,7 +2,7 @@
  * The contract `vectors.test.mjs` drives.
  *
  * Two pure functions do the work, and a handful of small ones beside them.
- * Everything the 24 vectors need is expressible through them, and keeping them
+ * Everything the 28 vectors need is expressible through them, and keeping them
  * pure is what lets the suite run with no relay, no signer, no clock and no
  * network — so a failure is always your merge and never your test environment.
  *
@@ -22,14 +22,31 @@ export interface FavoritesEvent {
   content: string;
 }
 
-/** One favorited feed and the items favorited under it. */
+/** One feed on this device, and the items favorited under it. */
 export interface LocalGroup {
-  /** A `podcast:guid:…` or `podcast:publisher:guid:…` identifier. */
+  /**
+   * A `podcast:guid:…` feed, or a `podcast:publisher:guid:…` artist.
+   *
+   * An artist nests nothing: it is emitted bare, takes no marker, and its
+   * `items` are not this format's to place. Vector 28.
+   */
   id: string;
   /** The medium hint, or null when the feed never declared one. */
   medium: string | null;
   /** `podcast:item:guid:…` identifiers belonging to this feed. */
   items: string[];
+  /**
+   * Has the user favorited the FEED, as opposed to the group being here only
+   * so the items under it can name a parent?
+   *
+   * THREE values, not two. `null` — the default, and what an app with no
+   * notion of feed-favorite markers passes — means this device does not know,
+   * which is the honest answer for a group adopted off the wire with nothing
+   * on it. Collapse it into either boolean and the next publish states
+   * something the user never said: `true` manufactures a favorite, `false`
+   * deletes one no other app will restate. Vectors 25, 26, 27.
+   */
+  favorited?: boolean | null;
 }
 
 /**
@@ -46,6 +63,17 @@ export interface Baseline {
   public: string[];
   private: string[];
 }
+
+/**
+ * A feed favorite is a CLAIM OF ITS OWN, beside the entry's.
+ *
+ * The reference writes it into the same per-half array as `fav:<identifier>`;
+ * how you store it is yours, as long as it is a separate answer. Your device
+ * may be the reason a group is on the list without being the reason it is
+ * marked `fav`, and the other way round — so a baseline holding only
+ * identifiers can express neither removal. Vector 26.
+ */
+export type FavoriteClaim = `fav:${string}`;
 
 export interface PlanInput {
   /**
@@ -148,13 +176,32 @@ export interface ParsedEntry {
   medium: string | null;
   /** The feed group this item belongs to, or null for a feed entry. */
   parent: string | null;
+  /** Position 3 as read: 'fav', 'placement', or null for anything else. */
+  marker?: 'fav' | 'placement' | null;
+  /**
+   * Resolved for a feed entry: is this FEED favorited?
+   *
+   * Resolved per feed rather than per group — one feed may open two groups and
+   * they need not agree — with a statement outranking silence and `fav`
+   * outranking `placement`. `null` where no copy says and the group has items:
+   * unknowable, and answering `true` there invents favorites the user never
+   * made. Vector 25.
+   */
+  favorited?: boolean | null;
   /** Position in the tag array. Order is semantic; keep it. */
   index: number;
 }
 
 export interface ParsedList {
   entries: ParsedEntry[];
-  groups: Array<{ id: string; medium: string | null; items: string[] }>;
+  groups: Array<{
+    id: string;
+    medium: string | null;
+    items: string[];
+    marker?: 'fav' | 'placement' | null;
+    /** The per-FEED answer, so every group of one feed carries the same one. */
+    favorited?: boolean | null;
+  }>;
   /** `k` values as read. Never used to derive an entry's kind. */
   kinds: string[];
   /** Tags and identifiers no writer here understands. Carried, not parsed. */

@@ -37,14 +37,14 @@ depend on either.
 **[pc20-favorites.md](pc20-favorites.md)** syncs a user's favorites between
 apps over Nostr, as one replaceable event at kind 10333. Two apps ship it.
 
-Adding it to a third? Run the spec's 24 test vectors against your own code:
+Adding it to a third? Run the spec's 28 test vectors against your own code:
 
 ```bash
 node --test conformance/vectors.test.mjs
 ```
 
 No dependencies and no build step — point the adapter at your merge and the
-same 24 run against it. → **[conformance/](conformance/)**. Both existing apps
+same 28 run against it. → **[conformance/](conformance/)**. Both existing apps
 found their defects by shipping instead; one of them logged fifteen, and the
 worst passed every check the other fourteen added.
 
@@ -60,6 +60,12 @@ timestamped listening history, and "share my boosts" is not consent for it.
 favorites spec beside the format Podcasting 2.0 already has for the same
 payload: a `musicL` feed of `<podcast:remoteItem>`s. Spec against spec, no
 proposal, and it prices what each side pays for its choice.
+
+**[pc20-favorites-marker-adoption.md](pc20-favorites-marker-adoption.md)** is
+what the two shipping apps each have to change before a show favorite and an
+episode favorite can be two answers. Both rebuild `i` tags from their own
+model today, which erases the marker that says which — so the first stage is
+work in both repos, and it comes before either may write one.
 
 ## Working on this repo
 
