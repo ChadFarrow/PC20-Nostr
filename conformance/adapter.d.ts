@@ -2,7 +2,7 @@
  * The contract `vectors.test.mjs` drives.
  *
  * Two pure functions do the work, and a handful of small ones beside them.
- * Everything the 27 vectors need is expressible through them, and keeping them
+ * Everything the 28 vectors need is expressible through them, and keeping them
  * pure is what lets the suite run with no relay, no signer, no clock and no
  * network — so a failure is always your merge and never your test environment.
  *
@@ -24,7 +24,12 @@ export interface FavoritesEvent {
 
 /** One feed on this device, and the items favorited under it. */
 export interface LocalGroup {
-  /** A `podcast:guid:…` or `podcast:publisher:guid:…` identifier. */
+  /**
+   * A `podcast:guid:…` feed, or a `podcast:publisher:guid:…` artist.
+   *
+   * An artist nests nothing: it is emitted bare, takes no marker, and its
+   * `items` are not this format's to place. Vector 28.
+   */
   id: string;
   /** The medium hint, or null when the feed never declared one. */
   medium: string | null;

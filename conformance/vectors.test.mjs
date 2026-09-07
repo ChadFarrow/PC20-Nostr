@@ -1,10 +1,10 @@
 /**
- * The 27 test vectors of ../pc20-favorites.md, executable.
+ * The 28 test vectors of ../pc20-favorites.md, executable.
  *
  * The spec states them as behaviors "so they can be written against any test
  * runner". This is that, for one runner, driven through the pure functions
  * described in ./adapter.d.ts. Point ADAPTER at your own implementation and
- * the same 27 run against it.
+ * the same 28 run against it.
  *
  * Two ways to point it. Edit the import below, or leave this file alone and
  * set `PC20_FAVORITES_ADAPTER` to the path of your shim — which is what lets
@@ -1288,4 +1288,92 @@ test('27. A marker is carried whole, and never invented for an entry you carry',
   );
   assert.equal(feedFavorite(carrying.publish.tags, FEED_A), null, 'still unknowable');
   assert.deepEqual(tagFor(carrying.publish.tags, FEED_C), ['i', FEED_C, '', 'fav']);
+});
+
+test('28. An artist entry is a favorite that opens nothing', () => {
+  // Music has three levels — artist, album, track — and the list carries only
+  // two of them positionally. Favoriting an artist says "show me their whole
+  // catalogue", and the catalogue is named in the publisher feed, not here. So
+  // the entry stands alone: it opens no group, closes none, and is never an
+  // item of the group above it.
+  const ARTIST = 'podcast:publisher:guid:0e8f6a1b-2c3d-4e5f-8a9b-0c1d2e3f4a5b';
+  const tags = [
+    ALT,
+    ['medium', 'music'],
+    ['i', FEED_A],
+    ['i', ARTIST],
+    ['i', ITEM_A1],
+    K_FEED,
+    K_ITEM,
+  ];
+
+  const parsed = parseTags(tags);
+  const by = (id) => parsed.entries.find((e) => e.id === id);
+  assert.ok(by(ARTIST), 'an artist entry is an entry, not junk');
+  assert.equal(by(ARTIST).parent, null, 'an artist has no parent');
+  assert.equal(
+    by(ITEM_A1).parent,
+    FEED_A,
+    'the artist re-parented the track after it — a track belongs to its ALBUM',
+  );
+  assert.ok(
+    !parsed.groups.some((g) => g.id === ARTIST),
+    'an artist opened a group; nothing in this format nests under one',
+  );
+  assert.equal(by(ARTIST).favorited, true, 'nothing but a favorite puts an artist here');
+
+  // Carried in place by a writer changing something else, and BARE. A marker
+  // states whether a feed is favorited as opposed to merely placed; an artist
+  // is never merely placed, so there is no question for position 3 to answer.
+  const carried = plan({
+    read: ev(tags),
+    local: [feed(FEED_A, 'music', [ITEM_A1], true)],
+    baseline: base([FEED_A, ITEM_A1]),
+    mode: 'public',
+  });
+  assert.ok(carried.publish, 'favoriting the album is a change and must publish');
+  assert.deepEqual(tagFor(carried.publish.tags, ARTIST), ['i', ARTIST]);
+  const after = parseTags(carried.publish.tags);
+  assert.equal(
+    after.entries.find((e) => e.id === ITEM_A1).parent,
+    FEED_A,
+    'the track lost its album across a republish',
+  );
+  assert.ok(
+    at(carried.publish.tags, FEED_A) < at(carried.publish.tags, ARTIST) &&
+      at(carried.publish.tags, ARTIST) < at(carried.publish.tags, ITEM_A1),
+    'the artist moved; entries read keep their position',
+  );
+
+  // The same, from the app that HOLDS the artist — which is where a writer
+  // would reach for a marker, because it has an answer and somewhere to put it.
+  // There is still no question: an artist entry cannot mean "placed here for
+  // something below", so `fav` on one states nothing and costs bytes on every
+  // republish forever.
+  const held = plan({
+    read: ev(tags),
+    local: [feed(FEED_A, 'music', [ITEM_A1, ITEM_A2], true), feed(ARTIST, 'music', [], true)],
+    baseline: base([FEED_A, ITEM_A1, ARTIST, 'fav:' + FEED_A]),
+    mode: 'public',
+  });
+  assert.ok(held.publish, 'adding a track is a change');
+  assert.deepEqual(
+    tagFor(held.publish.tags, ARTIST),
+    ['i', ARTIST],
+    'a marker was written onto an artist entry',
+  );
+
+  // And a device can originate one.
+  const own = plan({
+    read: ev([]),
+    local: [feed(ARTIST, 'music')],
+    baseline: base(),
+    mode: 'public',
+  });
+  assert.ok(own.publish, 'favoriting an artist must publish');
+  assert.deepEqual(tagFor(own.publish.tags, ARTIST), ['i', ARTIST]);
+  assert.ok(
+    own.publish.tags.some((t) => t[0] === 'k' && t[1] === 'podcast:publisher:guid'),
+    'the kind must reach the `k` tags, or `#k` discovery misses it',
+  );
 });

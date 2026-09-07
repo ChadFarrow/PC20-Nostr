@@ -1,6 +1,6 @@
 # Conformance suite
 
-The 27 test vectors of [`../pc20-favorites.md`](../pc20-favorites.md), as code
+The 28 test vectors of [`../pc20-favorites.md`](../pc20-favorites.md), as code
 you can run against your own implementation.
 
 The spec states them as behaviors "so they can be written against any test
@@ -42,7 +42,7 @@ work:
 
 | | |
 |---|---|
-| `parseTags(tags)` | Tag array in, structure out. Vectors 5, 6, 7, 19, 20, 25. |
+| `parseTags(tags)` | Tag array in, structure out. Vectors 5, 6, 7, 19, 20, 25, 28. |
 | `plan({read, local, baseline, mode})` | One publish cycle, decided but not sent. Everything else. |
 | `encodePlaintext` / `decodePlaintext` / `seal` | The bytes on either side of the signer. Vectors 22, 23, 24. |
 
@@ -103,6 +103,7 @@ Numbering matches the spec exactly.
 | 25 | A show favorite and an episode favorite collapsed into one bit; 114 placement groups read as favorites |
 | 26 | Unfavoriting a show taking its saved episode with it, or the removal left unsaid and reappearing |
 | 27 | Entries rebuilt as `['i', id]`, erasing every marker; a marker invented for a group you only carry |
+| 28 | An artist entry made a group, a track, or a group-closer — each one re-parents somebody's tracks |
 
 ## The suite is mutation-tested
 
@@ -143,6 +144,10 @@ breaking the reference on purpose and confirming the right one fails:
 | Stamp your own answer on a group you only carry | 8, **27** |
 | Never claim a feed favorite in the baseline | **25** |
 | Keep the first copy's marker when folding two halves | **25** |
+| Let an artist entry open a feed group | **28** |
+| Let an artist entry be an item of the group above | **28** |
+| Let an artist entry close the open group | **28** |
+| Write a marker onto an artist entry | **28** |
 
 The first two rows are not hypothetical. They are the two defects that reached
 production on 2026-08-25, and they are why this directory exists.
@@ -150,7 +155,7 @@ production on 2026-08-25, and they are why this directory exists.
 ## `reference/`
 
 An **authored** implementation — it has never served traffic. It exists so the
-27 assertions have something to run against, and as a worked example to read
+28 assertions have something to run against, and as a worked example to read
 beside the spec. It is not a recommendation and not an extraction.
 
 For code a real site runs, see

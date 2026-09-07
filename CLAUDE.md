@@ -36,11 +36,11 @@ A **reference repo with four parts**, none of which is an application.
    `claude/new-relay-type-draft-6osmum`. Read its privacy section first.
    Per-track receipts under a listener's own key are a public timestamped
    listening history, and "share my boosts" is not consent for that.
-3. **The conformance suite.** `conformance/` — the favorites spec's 27 test
+3. **The conformance suite.** `conformance/` — the favorites spec's 28 test
    vectors, executable. `node --test conformance/vectors.test.mjs` (name the
    file, not the directory: `node --test conformance/` fails to resolve on
    Node 22). Zero dependencies, no build step. An implementer points the
-   adapter at their own merge and runs the same 27. The reference under
+   adapter at their own merge and runs the same 28. The reference under
    `conformance/reference/` is **authored** — it has never served traffic, and
    it is there so the assertions have something to run against.
 4. **The catalog.** `catalog/` — working features from ChadFarrow's
@@ -268,7 +268,7 @@ and read the other one.
   implementer learns the expensive way.
 - **A vector that no mutation can kill is not a vector.** Before adding one,
   break the reference on purpose and confirm yours is what fails.
-  `conformance/README.md` carries the matrix; every one of the 27 is killed by
+  `conformance/README.md` carries the matrix; every one of the 28 is killed by
   at least one mutation, and the first two rows of that table are the defects
   that actually reached production on 2026-08-25.
 - **Every kind here is self-assigned, not NIP-allocated**: 10333 for

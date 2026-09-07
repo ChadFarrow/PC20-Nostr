@@ -1,7 +1,7 @@
 /**
  * AUTHORED. This file has never served traffic.
  *
- * It exists so `../vectors.test.mjs` has something to run against — 27
+ * It exists so `../vectors.test.mjs` has something to run against — 28
  * assertions nobody has watched go green are prose in a new costume. It is a
  * worked example of the rules in `../../pc20-favorites.md`, not a
  * recommendation and not an extraction. If you want code a real site runs,
@@ -76,7 +76,23 @@ export function kindOf(identifier) {
   return null;
 }
 
-const isFeedKind = (k) => k === 'podcast:guid' || k === 'podcast:publisher:guid';
+const isFeedKind = (k) => k === 'podcast:guid';
+
+/**
+ * A kind that is an entry in its own right and nests nothing.
+ *
+ * An artist. Favoriting one says "show me this artist's whole catalogue", and
+ * the catalogue comes from resolving the publisher feed — the albums under it
+ * are named there, not on this list. So it opens no group, closes none, and is
+ * never an item of the group above it. Data Structure, "An artist is a
+ * favorite that opens nothing".
+ *
+ * This USED to be a feed kind here, which made a track after an artist entry
+ * parse with the artist as its parent. Both shipped writers place it as a
+ * loose entry instead, so the reference was the outlier and the two answers
+ * disagreed about which album a track came from. Vector 28.
+ */
+const isStandaloneKind = (k) => k === 'podcast:publisher:guid';
 
 // ---------------------------------------------------------------------------
 // Parsing
@@ -146,6 +162,11 @@ export function parseTags(tags) {
         parent: null,
         marker: group.marker,
       });
+    } else if (isStandaloneKind(kind)) {
+      // No parent, and it leaves the open group OPEN — the items after it still
+      // belong to the album above. Always a favorite: nothing else puts an
+      // artist on the list, so there is no marker to read and none to write.
+      entries.push({ id: value, kind, medium, index, parent: null, favorited: true });
     } else {
       if (group) group.items.push(value);
       entries.push({
@@ -427,7 +448,11 @@ function mergeHalf(
   // it to the end of the event instead re-parents it to whichever group was
   // opened last — well-formed, and wrong. Vector 18.
   const ownerOf = new Map(); // tag index -> group id
-  for (const e of parsed.entries) ownerOf.set(e.index, e.parent ?? e.id);
+  for (const e of parsed.entries) {
+    // A standalone entry owns nothing and belongs to nothing, so it is not a
+    // splice target for anybody's new items.
+    ownerOf.set(e.index, isStandaloneKind(e.kind) ? null : (e.parent ?? e.id));
+  }
 
   const out = [];
   const owner = []; // parallel to `out`
@@ -459,7 +484,10 @@ function mergeHalf(
     if (decision.has(index)) {
       if (decision.get(index)) {
         const parsedEntry = parsed.entries.find((e) => e.index === index);
-        if (parsedEntry && parsedEntry.parent === null) {
+        // Feed entries only. An artist entry is unconditionally a favorite, so
+        // there is nothing for a marker to say and writing one would state an
+        // answer to a question nobody asked.
+        if (parsedEntry && parsedEntry.parent === null && isFeedKind(parsedEntry.kind)) {
           const wire = markerOf(tag);
           const want = markerFor(tag[1], wire);
           // Byte-identical unless the marker actually changed, so rule 5 still
@@ -493,6 +521,16 @@ function mergeHalf(
     if (!groupIsNew && newItems.length === 0) continue;
     // A group with nothing to place and no favorite on it is not an entry.
     if (groupIsNew && newItems.length === 0 && (g.favorited ?? null) === false) continue;
+
+    // An artist. It nests nothing, so it is emitted bare and never marked, and
+    // any items a caller hung under it are not this format's to place.
+    if (isStandaloneKind(kindOf(g.id))) {
+      if (groupIsNew) {
+        out.push(['i', g.id]);
+        owner.push(null);
+      }
+      continue;
+    }
 
     if (!groupIsNew && onList.has(g.id)) {
       const at = owner.lastIndexOf(g.id);

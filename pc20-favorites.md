@@ -152,6 +152,10 @@ which breaks `#k` discovery without breaking anything visible.
 - **Nothing past the identifier takes part in grouping.** The hint at position
   2 and the marker at position 3 are read off the entry they sit on; they open
   nothing, close nothing, and re-parent nothing.
+- **An artist entry opens nothing.** `podcast:publisher:guid:…` is an entry in
+  its own right: it starts no group, closes none, and is never an item of the
+  group above it. See [An artist is a favorite that opens
+  nothing](#an-artist-is-a-favorite-that-opens-nothing).
 
 Tag order is therefore load-bearing, and this is the easiest thing in the
 format to break by accident. An item's parent feed and its medium are both
@@ -331,6 +335,47 @@ That is the field this section gives a wire format to. It is a boolean, though,
 and this section needs three values — `false` on the way back in is the
 `unknown` case answered as "not favorited", which is the guess that deletes a
 favorite no other app will restate.
+
+### An artist is a favorite that opens nothing
+
+Music has three levels — artist, album, track — and this list carries two of
+them by position. The third does not need carrying. **Favoriting an artist
+means "show me this artist's whole catalogue", and the catalogue is named in
+the publisher feed**, not here. So the entry stands alone:
+
+```json
+["i", "podcast:publisher:guid:<publisherGuid>"]
+```
+
+- It **opens no group.** Nothing in this format nests under an artist.
+- It **closes no group.** A track after it still belongs to the album above
+  it. Letting it close one re-parents every entry that follows, which is the
+  same damage [rule 4](#4-carry-what-you-cant-read) forbids for an entry you
+  cannot read at all.
+- It is **never an item** of the group above it. An artist is not a track.
+- It takes **no marker.** Nothing but a favorite puts an artist on this list,
+  so position 3 has no question to answer there. Emit the tag bare.
+- Its kind still belongs in the trailing `k` tags, or `#k` discovery misses
+  every artist favorite on every list.
+
+An album is an ordinary feed entry — `podcast:guid:` with `medium` set to a
+music value — and a track is an ordinary item entry. **Everything in [Saying
+whether a feed is favorited](#saying-whether-a-feed-is-favorited) applies to
+albums and tracks unchanged**, and the numbers behind it were measured on
+music in the first place: 114 of 196 groups existed only to place a track, and
+46 of one user's 94 album favorites could not be published at all. `medium`
+takes no part in the marker.
+
+**This is written down because the three answers disagreed.** The document had
+said nothing about publisher guids at all. Read on 2026-09-07:
+`stablekraft-app@4722dd8` (`lib/nostr/pc20-identifiers.ts`,
+`favorites-single-list.ts`) and `boostmebitch@938f90d`
+(`lib/nostr/favorites-list.ts`) both place a publisher entry as a loose entry —
+carried whole, opening nothing — and stablekraft pins it in a test. This
+repository's own reference implementation treated it as a feed that opens a
+group, so a track after an artist entry parsed with the **artist** as its
+parent in one reader and the **album** as its parent in the other two. The apps
+were right; the reference was changed. ([Vector 28](#test-vectors).)
 
 ### Medium is a hint, not a source of truth
 
@@ -942,6 +987,18 @@ shows. Then the inverse, which is the 114 one level up: a writer that DOES
 know about markers may not stamp its own answer onto a group it is merely
 carrying. It does not know, `fav` invents a favorite, `placement` deletes one
 no other app will restate, and the absent marker is the only honest output.
+
+**28. An artist entry is a favorite that opens nothing.** Read a list with a
+`podcast:publisher:guid` entry between an album entry and a track: the artist
+has no parent, opens no group, and the track still parses with the ALBUM as its
+parent. Republish and it comes back in place and bare. Pin the bare part from
+the app that HOLDS the artist as well as one carrying it — that is where a
+writer reaches for a marker, and there is no question for one to answer, since
+an artist entry cannot mean "placed here for something below". Pin origination
+too, `k` tag included, or `#k` discovery misses every artist favorite ever
+published. Three well-formed wrong answers, and each was somebody's: the artist
+opens a group and the track becomes the artist's, the artist becomes a track of
+the album, or the artist closes the group and the track becomes an orphan.
 
 ## Open questions / not yet resolved
 

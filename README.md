@@ -37,14 +37,14 @@ depend on either.
 **[pc20-favorites.md](pc20-favorites.md)** syncs a user's favorites between
 apps over Nostr, as one replaceable event at kind 10333. Two apps ship it.
 
-Adding it to a third? Run the spec's 27 test vectors against your own code:
+Adding it to a third? Run the spec's 28 test vectors against your own code:
 
 ```bash
 node --test conformance/vectors.test.mjs
 ```
 
 No dependencies and no build step — point the adapter at your merge and the
-same 27 run against it. → **[conformance/](conformance/)**. Both existing apps
+same 28 run against it. → **[conformance/](conformance/)**. Both existing apps
 found their defects by shipping instead; one of them logged fifteen, and the
 worst passed every check the other fourteen added.
 
