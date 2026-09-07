@@ -177,17 +177,21 @@ export interface ParsedEntry {
   /**
    * The full NIP-73 identifier, which for an ITEM is NOT what position 1 says.
    *
-   * An item entry is `['i', 'podcast:guid:<feedGuid>', '<itemGuid>']`, so its
-   * identifier is assembled: `podcast:item:guid:` plus position 2. Keeping the
-   * full form here is what leaves a baseline, a local group and `itemClaim`
-   * unchanged by the move — only the wire shape changed.
+   * An item entry is
+   * `['i', 'podcast:guid:<feedGuid>', 'podcast:item:guid:<itemGuid>']`, so an
+   * item's identifier is position 2 and a feed's is position 1. Both positions
+   * hold a full identifier, prefix included, so a baseline, a local group and
+   * `itemClaim` are unchanged by the move — only the tag shape changed.
    */
   id: string;
   /**
    * From the known-kinds table, never by splitting the string — and read off
-   * the WHOLE entry, not the prefix alone. A three-element `podcast:guid:`
-   * tag is an item entry and its kind is `podcast:item:guid`, which is what
-   * the trailing `k` tags must say or `#k` discovery stops finding items.
+   * the entry's LAST identifier: position 2 when there is one, position 1
+   * otherwise. So a three-element `podcast:guid:` tag is an item entry and its
+   * kind is `podcast:item:guid`, which is what the trailing `k` tags must say
+   * or `#k` discovery stops finding items. A position 2 whose kind is not
+   * `podcast:item:guid` makes the whole tag unreadable — carry it, do not read
+   * it as a feed favorite.
    */
   kind: string;
   /** The running `medium` value, or null when none preceded the entry. */
@@ -205,9 +209,9 @@ export interface ParsedEntry {
   /**
    * True when this entry came from a two-element `podcast:item:guid:` tag and
    * its feed was taken from the entry above it. A writer rewrites such a tag
-   * as `['i', 'podcast:guid:<feedGuid>', '<itemGuid>']` — the one-time
-   * migration, and note that position 1 changes too, not only position 2.
-   * Vector 27.
+   * as `['i', 'podcast:guid:<feedGuid>', 'podcast:item:guid:<itemGuid>']` —
+   * the one-time migration, and note the identifier MOVES from position 1 to
+   * position 2 rather than a third element being appended. Vector 27.
    */
   legacy?: boolean;
   /** Always true for a feed or artist entry: being on the list IS the favorite. */

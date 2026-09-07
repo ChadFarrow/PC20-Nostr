@@ -72,15 +72,12 @@ const feed = (id, medium, items = [], favorited = true) => ({
 /** The bare feed guid inside a `podcast:guid:` identifier. */
 const guidOf = (feedId) => feedId.slice('podcast:guid:'.length);
 
-/** The bare item guid inside a `podcast:item:guid:` identifier. */
-const itemGuidOf = (itemId) => itemId.slice('podcast:item:guid:'.length);
-
 /**
- * An item `i` tag: the FEED's identifier at position 1, the item guid bare at
- * position 2 — `<podcast:remoteItem>`'s order, required feedGuid then optional
- * itemGuid.
+ * An item `i` tag: the FEED's identifier at position 1, the ITEM's identifier
+ * at position 2 — `<podcast:remoteItem>`'s order, required feedGuid then
+ * optional itemGuid, both written as full NIP-73 identifiers.
  */
-const item = (itemId, feedId) => ['i', feedId, itemGuidOf(itemId)];
+const item = (itemId, feedId) => ['i', feedId, itemId];
 
 /**
  * The full NIP-73 identifier an `i` tag names, whichever form it is in.
@@ -92,9 +89,7 @@ const item = (itemId, feedId) => ['i', feedId, itemGuidOf(itemId)];
 const entryId = (tag) => {
   if (tag?.[0] !== 'i') return undefined;
   const g = tag[2];
-  if (typeof g === 'string' && g !== '' && tag[1].startsWith('podcast:guid:')) {
-    return 'podcast:item:guid:' + g;
-  }
+  if (typeof g === 'string' && g.startsWith('podcast:item:guid:')) return g;
   return tag[1];
 };
 
@@ -266,6 +261,44 @@ test('4. An unrecognized tag or identifier kind survives', () => {
     entry.feed,
     guidOf(FEED_A),
     'an unparseable entry ended the legacy run and stranded the item',
+  );
+
+  // AND RULE 4 REACHES INSIDE THE TAG. A feed identifier with something at
+  // position 2 that this writer cannot read is NOT a feed favorite. Reading it
+  // as one turns a newer writer's entry into a followed show — the same class
+  // of silent conversion the migration exists to prevent, arriving from the
+  // other direction. Carry it whole, and do not open a legacy run on it.
+  const FUTURE = ['i', FEED_B, 'future:thing:abc'];
+  const withFuture = parseTags([
+    ['medium', 'podcast'],
+    ['i', FEED_A],
+    FUTURE,
+    ['i', ITEM_A2], // legacy: takes its feed from FEED_A, not from FEED_B
+  ]);
+  assert.equal(
+    withFuture.favorited.get(FEED_B) ?? false,
+    false,
+    'an entry with an unreadable position 2 was read as a feed favorite',
+  );
+  assert.ok(
+    withFuture.foreign.some((f) => JSON.stringify(f.tag) === JSON.stringify(FUTURE)),
+    'an entry with an unreadable position 2 was not carried',
+  );
+  assert.equal(
+    withFuture.entries.find((e) => e.id === ITEM_A2).feed,
+    guidOf(FEED_A),
+    'an unreadable position 2 opened a legacy run and stole the item',
+  );
+
+  const carried = plan({
+    read: ev([ALT, ['medium', 'podcast'], ['i', FEED_A], FUTURE, K_FEED]),
+    local: [feed(FEED_C, 'podcast', [], true)],
+    baseline: base(),
+    mode: 'public',
+  });
+  assert.ok(
+    JSON.stringify(carried.publish.tags).includes('future:thing:abc'),
+    'an entry with an unreadable position 2 was dropped on republish',
   );
 });
 

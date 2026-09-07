@@ -14,15 +14,17 @@ either codebase has agreed to.
 
 An item entry used to be `["i", "podcast:item:guid:…"]`, and the feed it came
 from was whatever feed entry sat above it. It is now
-`["i", "podcast:guid:<feedGuid>", "<itemGuid>"]`, and the entry above it means
-nothing.
+`["i", "podcast:guid:<feedGuid>", "podcast:item:guid:<itemGuid>"]`, and the
+entry above it means nothing.
 
-**Note that the whole tag changes, not just an appended element.** Position 1
-becomes the FEED's identifier — the same string a feed favorite carries — and
-the item guid moves to position 2, bare. That is
+**Note that the identifier MOVES rather than an element being appended.**
+Position 1 becomes the FEED's identifier — the same string a feed favorite
+carries — and the item's identifier goes to position 2, prefix and all. That is
 `<podcast:remoteItem feedGuid="…" itemGuid="…"/>` written as one tag: the
 required attribute first, the optional one second, and the element count is the
-only thing distinguishing a feed favorite from an item favorite.
+only thing distinguishing a feed favorite from an item favorite. The one place
+it departs from the namespace is that both positions carry the NIP-73 prefix,
+where a `remoteItem` attribute holds a bare guid.
 
 The reason is not tidiness. **An item guid is not an address.**
 [`<podcast:guid>`](https://podcastindex.org/namespace/1.0) is globally unique
@@ -66,11 +68,11 @@ worth making rather than merely correct:
 ever published a marker, so that ordering protected a feature nobody had. This
 one protects live data, in two directions:
 
-- App A writes `["i", "podcast:guid:F", "X"]`. App B does not recognise a
-  three-element entry, rebuilds what it thinks it read, and republishes. The
-  pair is gone, and with it the only way anyone can ever look that favorite
-  up — silently, on someone else's device, with app B's screen correct
-  throughout.
+- App A writes `["i", "podcast:guid:F", "podcast:item:guid:X"]`. App B does
+  not recognise a three-element entry, rebuilds what it thinks it read, and
+  republishes. The pair is gone, and with it the only way anyone can ever look
+  that favorite up — silently, on someone else's device, with app B's screen
+  correct throughout.
 - Worse than the old failure, and this is new: a reader still on stage 0 sees
   `podcast:guid:F` at position 1 and reads the entry as a FEED favorite. It
   does not lose the item, it silently converts it into a favorite of the whole
@@ -111,25 +113,31 @@ is narrower than that: **a node the app could PLACE is re-emitted from the model
 rather than from the tag.** A node it could not place is already carried whole,
 which is why the fix is small.
 
-An `i` tag is `["i", feedId, itemGuid]`, and the four shapes a reader must
+An `i` tag is `["i", feedId, itemId]`, and the four shapes a reader must
 accept are:
 
 | tag | what it is |
 |---|---|
 | `["i","podcast:guid:F"]` | a feed favorite |
-| `["i","podcast:guid:F","X"]` | item `X` of feed `F` |
+| `["i","podcast:guid:F","podcast:item:guid:X"]` | item `X` of feed `F` |
 | `["i","podcast:item:guid:X"]` | **legacy** item; feed from the entry above |
 | `["i","podcast:publisher:guid:P"]` | an artist; belongs to no feed |
 
 Position 2 is what gets dropped, along with anything a writer newer than either
 app parks behind it. **The element count is what separates rows 1 and 2**, so
-an app that branches on the identifier prefix alone reads an item favorite as a
-feed favorite and quietly turns one saved episode into a followed show.
+an app that branches on position 1 alone reads an item favorite as a feed
+favorite and quietly turns one saved episode into a followed show.
 
-The kind an entry declares follows the same rule: a three-element
-`podcast:guid:` entry is `podcast:item:guid` in the trailing `k` tags, even
-though its identifier says otherwise. Read the prefix alone and
-`podcast:item:guid` stops appearing on the event at all.
+The kind an entry declares follows the same rule: it is the kind of the entry's
+LAST identifier, so a three-element `podcast:guid:` entry is
+`podcast:item:guid` in the trailing `k` tags even though position 1 says
+otherwise. Read position 1 alone and `podcast:item:guid` stops appearing on the
+event at all.
+
+**A position 2 you do not recognise is not row 1.** Only
+`podcast:item:guid:` is defined there today, and an app that ignores what it
+cannot read republishes such an entry as a favorite of the whole feed. Carry
+the tag whole instead.
 
 ### stablekraft-app
 
@@ -215,16 +223,17 @@ already in hand — it is the group the item sits under in local state — so th
 is a one-line change at each of the four emit sites listed above.
 
 **Rewrite entries you read, too.** A legacy item whose feed you resolved
-positionally is republished as `["i", "podcast:guid:F", "X"]` — the whole tag,
-position 1 included, not an appended third element. Each list upgrades itself
-once, on the first publish after the reader ships, and the upgrade must be
-idempotent: reading the result back changes nothing.
+positionally is republished as
+`["i", "podcast:guid:F", "podcast:item:guid:X"]` — the whole tag, with the
+identifier moved to position 2, not an appended third element. Each list
+upgrades itself once, on the first publish after the reader ships, and the
+upgrade must be idempotent: reading the result back changes nothing.
 ([Vector 27](pc20-favorites.md#test-vectors).)
 
-**An item whose feed you could not resolve is the exception.** It has no guid
-to write, so it goes back exactly as it arrived, two elements. Do not fill
-position 2 with a placeholder — a wrong feed guid resolves to the wrong thing,
-which is worse than resolving to nothing.
+**An item whose feed you could not resolve is the exception.** There is no
+feed identifier to write at position 1, so it goes back exactly as it arrived,
+two elements. Do not invent a placeholder feed guid — a wrong one resolves to
+the wrong thing, which is worse than resolving to nothing.
 ([Vector 20](pc20-favorites.md#test-vectors).)
 
 ### A baseline claim on an item is the PAIR
@@ -300,9 +309,10 @@ rows that matter here:
 | read an item's feed from the entry above it, ignoring position 1 | 5, 25, 26 |
 | drop the legacy path, so a two-element item names no feed | 4, 27 |
 | republish a legacy item without rewriting it | 27 |
-| fill position 2 with a placeholder when the feed is unknown | 20 |
+| invent a feed guid for an item whose feed nobody knows | 20 |
 | key an entry on position 1 alone rather than on the pair | 2, 3, 10, 11, 18, 19, 25, 26 |
-| derive an entry's `k` kind from its prefix alone | 6 |
+| derive an entry's `k` kind from position 1 alone | 6 |
+| read an unrecognised position 2 as a feed favorite | 4 |
 | write a feed entry for a feed you hold only to supply a feed guid | 25 |
 
 Every row above was produced by breaking the reference implementation on

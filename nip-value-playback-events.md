@@ -93,15 +93,19 @@ otherwise. An unattended payment has no message, so in practice it is empty.
 **One `i` tag names the content, and the item guid rides on it.**
 
 ```
-["i", "podcast:guid:<feedGuid>"]               the payment was for the feed
-["i", "podcast:guid:<feedGuid>", "<itemGuid>"] …for one item in that feed
+["i", "podcast:guid:<feedGuid>"]
+      the payment was for the feed
+
+["i", "podcast:guid:<feedGuid>", "podcast:item:guid:<itemGuid>"]
+      …for one item in that feed
 ```
 
 This is `<podcast:remoteItem feedGuid="…" itemGuid="…"/>` written as one tag,
 and it is the same shape
 [kind 10333](pc20-favorites.md#one-favorite-one-tag) uses: the required
-`feedGuid` at position 1, the optional `itemGuid` at position 2, bare. **An
-item guid is not an address on its own** — it is unique only inside its feed,
+`feedGuid` at position 1, the optional `itemGuid` at position 2, each as a full
+NIP-73 identifier rather than a bare guid. **An item guid is not an address on
+its own** — it is unique only inside its feed,
 which is why the Podcast Index `/episodes/byguid` lookup refuses a call that
 carries no `feedid`, `feedurl` or `podcastguid` — so the pair travels together
 or the receipt names nothing anybody can resolve.
@@ -110,10 +114,14 @@ Three consequences, and all three are places a writer goes wrong:
 
 - **The element count is the whole difference** between a feed-level and an
   item-level receipt. Position 1 is byte-identical in both.
-- **The `k` value comes from the whole entry**, so a two-element tag declares
-  `podcast:guid` and a three-element one declares `podcast:item:guid` — one
-  `k`, not both. Read the prefix alone and `podcast:item:guid` never reaches
-  any event, and `#k` discovery stops finding item-level receipts entirely.
+- **The `k` value is the kind of the entry's LAST identifier**, so a
+  two-element tag declares `podcast:guid` and a three-element one declares
+  `podcast:item:guid` — one `k`, not both. Read position 1 alone and
+  `podcast:item:guid` never reaches any event, and `#k` discovery stops finding
+  item-level receipts entirely.
+- **A position 2 you cannot read is not a feed-level receipt.** Only
+  `podcast:item:guid:` is defined there. An app that ignores what it does not
+  recognise reports a newer writer's receipt as a payment to the whole feed.
 - **Relays index position 1 only**, which is the feed guid either way. A `#i`
   for a feed returns its item receipts too, and there is no filter that
   returns one item's. Filtering by item means reading position 2.
@@ -156,14 +164,14 @@ that emits one `k` per distinct kind at the end, which is what
 [pc20-favorites.md](pc20-favorites.md) requires for a list where the pairing
 cost 11 KB of a 36 KB event. Accept both layouts.
 
-The kind is *not* simply the identifier's prefix. A `podcast:guid:` tag with
-an item guid at position 2 is an item entry and declares `podcast:item:guid`.
-Where a prefix lookup does apply, use a known-kinds table rather than splitting
-the string: item guids are routinely permalink URLs, so "everything before the
-last colon" on `podcast:item:guid:https://example.com/ep/42` yields
-`podcast:item:guid:https`, a `k` value no relay filter will ever match. Item
-guids sit at position 2 and are never scanned, but a `d` tag built from one is
-(see [kind 33369](#kind-33369-value-playback-summary)).
+The kind is *not* simply position 1's prefix. A `podcast:guid:` tag with an
+item identifier at position 2 is an item entry and declares
+`podcast:item:guid`. Use a known-kinds table rather than splitting the string,
+at both positions: item guids are routinely permalink URLs, so "everything
+before the last colon" on `podcast:item:guid:https://example.com/ep/42` yields
+`podcast:item:guid:https`, a `k` value no relay filter will ever match. The
+same string reaches a `d` tag (see
+[kind 33369](#kind-33369-value-playback-summary)).
 
 **`start` and `end` describe an interval, not a moment.** Without them a
 consumer cannot distinguish a retried publish from a second payment, which
@@ -187,7 +195,7 @@ saying they disagree. Capture them with the payment.
   "content": "",
   "tags": [
     ["i", "podcast:guid:c90e609a-df1e-596a-bd5e-57bcc8aad6cc",
-          "d98d189b-dc7b-45b1-8720-d4b98690f31f"],
+          "podcast:item:guid:d98d189b-dc7b-45b1-8720-d4b98690f31f"],
     ["k", "podcast:item:guid"],
     ["amount", "30000"],
     ["action", "auto"],
@@ -224,19 +232,29 @@ across everyone.
 **`.d` is the whole address of the thing being summarized, not one guid of
 it.**
 
-| summary of | `d` |
-|---|---|
-| a feed | `podcast:guid:<feedGuid>` |
-| an item | `podcast:guid:<feedGuid>:<itemGuid>` |
-| an artist | `podcast:publisher:guid:<publisherGuid>` |
+**`d` is the `i` tag's elements joined with a colon**, in order, nothing
+added and nothing stripped:
 
-Two rules are doing separate work here, and dropping either one collides
+| summary of | `i` | `d` |
+|---|---|---|
+| a feed | `["i", F]` | `F` |
+| an item | `["i", F, X]` | `F + ":" + X` |
+| an artist | `["i", P]` | `P` |
+
+where `F` is `podcast:guid:<feedGuid>`, `X` is
+`podcast:item:guid:<itemGuid>`, and `P` is
+`podcast:publisher:guid:<publisherGuid>`. Building `d` this way rather than
+composing it from parsed fields is what makes it impossible for `d` and the
+`i` tag to disagree about what is being summarized.
+
+Two properties are doing separate work here, and dropping either one collides
 summaries that are not the same thing.
 
-**Keep the kind prefix**, rather than writing a bare guid, or feed-level,
-item-level and publisher-level summaries collide in one namespace.
+**Every element keeps its kind prefix**, rather than being written as a bare
+guid, or feed-level, item-level and publisher-level summaries collide in one
+namespace.
 
-**Keep BOTH guids on an item summary.** An item's `<guid>` is unique only
+**An item summary keeps BOTH identifiers.** An item's `<guid>` is unique only
 inside its feed — the Podcast Index refuses an `/episodes/byguid` call that
 carries no feed identifier for exactly this reason — so a `d` of
 `podcast:item:guid:<itemGuid>` is not an address. Two feeds that reuse an item
@@ -246,12 +264,12 @@ the receipts it can see, and they overwrite each other forever. Nothing in the
 event says which feed it is about. An earlier revision of this document
 specified exactly that `d`, and it was wrong.
 
-**Split the item form at the FIRST colon after the prefix.** A
-`<podcast:guid>` is a UUIDv5 and never contains a colon; an item guid
-routinely does, because item guids are often permalink URLs. So
-`podcast:guid:<36 chars>:<anything>` parses left to right and "everything
-before the last colon" — the mistake this document already warns about for `k`
-values — silently truncates the item guid instead.
+**To split one, cut at the FIRST colon after `podcast:guid:`.** A
+`<podcast:guid>` is a UUIDv5 and never contains a colon, so the left side ends
+there and everything after it is the item identifier — including its own
+colons, which item guids routinely have because they are often permalink URLs.
+"Everything before the last colon", the mistake this document already warns
+about for `k` values, truncates the item guid instead.
 
 This is what removes the collision rather than managing it. Addressable events
 are keyed by `(pubkey, kind, d)`, so two people never collide — different
@@ -348,9 +366,9 @@ contradict.
   "kind": 33369,
   "content": "",
   "tags": [
-    ["d", "podcast:guid:c90e609a-df1e-596a-bd5e-57bcc8aad6cc:d98d189b-dc7b-45b1-8720-d4b98690f31f"],
+    ["d", "podcast:guid:c90e609a-df1e-596a-bd5e-57bcc8aad6cc:podcast:item:guid:d98d189b-dc7b-45b1-8720-d4b98690f31f"],
     ["i", "podcast:guid:c90e609a-df1e-596a-bd5e-57bcc8aad6cc",
-          "d98d189b-dc7b-45b1-8720-d4b98690f31f"],
+          "podcast:item:guid:d98d189b-dc7b-45b1-8720-d4b98690f31f"],
     ["k", "podcast:item:guid"],
     ["amount", "1420000"],
     ["count", "84"],
@@ -514,10 +532,12 @@ identifiers at publish time, and it cannot fire on a show with a single value
 block.
 
 **4b. An item-level receipt names its feed, and declares the item kind.** One
-`i` tag, three elements, feed guid then item guid. Assert the `k` value is
-`podcast:item:guid` even though position 1 reads `podcast:guid` — a writer that
-derives the kind from the prefix passes every other assertion here and emits
-`podcast:guid`, which breaks `#k` discovery and nothing visible.
+`i` tag, three elements, the feed's identifier then the item's. Assert the `k`
+value is `podcast:item:guid` even though position 1 reads `podcast:guid` — a
+writer that derives the kind from position 1 passes every other assertion here
+and emits `podcast:guid`, which breaks `#k` discovery and nothing visible. Pin
+that `d` is the two elements joined with a colon, so `d` and the `i` tag cannot
+disagree.
 
 **4c. Two feeds sharing an item guid produce two summaries.** Publish receipts
 for item guid `X` under feed `F1` and the same `X` under feed `F2`, then build

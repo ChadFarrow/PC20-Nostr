@@ -54,14 +54,14 @@ distinct kind, at the end**, not one per entry.
     ["medium", "podcast"],
     ["i", "podcast:guid:917393e3-1b1e-5cef-ace4-edaa54e1f810"],
     ["i", "podcast:guid:bfd4d7c4-eec0-5f6b-90b0-c1eae84b2392",
-          "cc59b81e-28a0-4e55-a457-54285c06830a"],
+          "podcast:item:guid:cc59b81e-28a0-4e55-a457-54285c06830a"],
 
     ["medium", "music"],
     ["i", "podcast:guid:9b0a2a1e-7c3d-53f8-b6a4-2f1c8d0e5b77"],
     ["i", "podcast:guid:4c1f8e2b-0d6a-5a91-8e35-7b9c2d4f6a10",
-          "d2b7f014-3a58-4c6e-9f21-8ad5c3e70b46"],
+          "podcast:item:guid:d2b7f014-3a58-4c6e-9f21-8ad5c3e70b46"],
     ["i", "podcast:guid:4c1f8e2b-0d6a-5a91-8e35-7b9c2d4f6a10",
-          "e8c04a97-165b-4d2f-a730-5c9e1b8f2a41"],
+          "podcast:item:guid:e8c04a97-165b-4d2f-a730-5c9e1b8f2a41"],
     ["i", "podcast:publisher:guid:7f2e9c11-4b83-5e07-9d62-3a1f5c8b0e94"],
 
     ["k", "podcast:guid"],
@@ -89,16 +89,18 @@ Every `i` tag on this list is a thing the user chose. Nothing is here for
 structural reasons, so a reader never has to work out whether an entry is a
 favorite or scaffolding — it is on the list, so it is a favorite.
 
-An `i` tag is `["i", feedId, itemGuid]`, and this document counts those
-positions from zero: the tag name is at position 0, the NIP-73 identifier at
-**position 1**, and on an item entry the BARE guid of that item at **position
-2**. Nothing is defined past it.
+An `i` tag is `["i", feedId, itemId]`, and this document counts those
+positions from zero: the tag name is at position 0, the feed's NIP-73
+identifier at **position 1**, and on an item entry the item's NIP-73
+identifier at **position 2**. Both positions hold a full identifier, prefix
+included. Nothing is defined past position 2.
 
 - **A feed entry is `["i", "podcast:guid:<feedGuid>"]`.** Two elements. The
   user favorited that feed. It says nothing about any item.
-- **An item entry is `["i", "podcast:guid:<feedGuid>", "<itemGuid>"]`.**
+- **An item entry is
+  `["i", "podcast:guid:<feedGuid>", "podcast:item:guid:<itemGuid>"]`.**
   Three elements. Position 1 is the FEED, exactly as on a feed entry; position
-  2 is the item's own `<guid>`, bare.
+  2 is the item.
 - **An artist entry is `["i", "podcast:publisher:guid:<guid>"]`.** Two
   elements. It belongs to no feed. See [An artist is a favorite that belongs to
   no feed](#an-artist-is-a-favorite-that-belongs-to-no-feed).
@@ -123,17 +125,31 @@ difference between a feed favorite and an item favorite** — their position 1 i
 byte-for-byte the same string. That is not a coincidence to work around, it is
 the same statement `remoteItem` makes with a present-or-absent attribute.
 
-Two things follow for a reader, and both are load-bearing:
+**One thing this format does NOT copy from `remoteItem`: position 2 carries
+the `podcast:item:guid:` prefix.** The attribute holds a bare `<guid>`; this
+tag holds a full NIP-73 identifier, for about 18 bytes an entry — roughly 4 KB
+on a list of 227 items. What that buys is a tag whose two halves each say what
+they are, which is the same reason position 1 is not a bare feed guid either.
+A converter to and from a list feed strips or adds the prefix, and that is the
+whole of the difference.
+
+Three things follow for a reader, and all three are load-bearing:
 
 - **Tell them apart by length, never by position 1.** A dedupe, a baseline or
   a lookup keyed on position 1 alone folds a feed favorite together with every
   item favorite under that feed, and one of them disappears. ([Vector
   25](#test-vectors).)
-- **An entry's kind comes from the whole entry, not from the prefix.** A
+- **An entry's kind comes from the whole entry, not from position 1.** A
   three-element `podcast:guid:` entry declares `podcast:item:guid` in the
-  trailing `k` tags, even though its identifier says `podcast:guid`. Read the
-  prefix alone and `podcast:item:guid` never reaches the event, so `#k`
-  discovery stops finding item favorites. ([Vector 6](#test-vectors).)
+  trailing `k` tags, even though position 1 says `podcast:guid`. Read position
+  1 alone and `podcast:item:guid` never reaches the event, so `#k` discovery
+  stops finding item favorites. ([Vector 6](#test-vectors).)
+- **A position 2 you cannot read makes the entry unreadable, not a feed
+  favorite.** Nothing but `podcast:item:guid:` is defined there today. If a
+  later revision puts another kind of identifier at position 2, an app that
+  ignores what it does not recognise silently republishes that entry as a
+  favorite of the whole feed. Carry the tag whole instead. ([Vector
+  4](#test-vectors).)
 
 **A note on names, because three of them mean one thing.** `<podcast:guid>`,
 `remoteItem`'s `feedGuid`, and the Podcast Index `podcastguid` parameter are
@@ -183,10 +199,10 @@ Two consequences follow, and both are load-bearing:
 ```json
 ["i", "podcast:guid:<feedGuid>"]
 
-["i", "podcast:guid:<feedGuid>", "<itemGuid>"]
+["i", "podcast:guid:<feedGuid>", "podcast:item:guid:<itemGuid>"]
 
 ["i", "podcast:guid:<feedGuid>"],
-["i", "podcast:guid:<feedGuid>", "<itemGuid>"]
+["i", "podcast:guid:<feedGuid>", "podcast:item:guid:<itemGuid>"]
 ```
 
 They favorited the feed and saved no items. They saved one item from a feed
@@ -256,20 +272,22 @@ above. Both shipped writers do this today. So:
   | tag | what it is |
   |---|---|
   | `["i","podcast:guid:F"]` | a feed favorite |
-  | `["i","podcast:guid:F","X"]` | item `X` of feed `F` |
+  | `["i","podcast:guid:F","podcast:item:guid:X"]` | item `X` of feed `F` |
   | `["i","podcast:item:guid:X"]` | **legacy** item; feed from the entry above |
   | `["i","podcast:publisher:guid:P"]` | an artist; belongs to no feed |
 
-  Nothing is ambiguous between them, and nothing else is defined. Dropping the
-  legacy row does not lose a label, it makes every item favorite in production
-  unresolvable.
+  Nothing is ambiguous between them, and nothing else is defined — an
+  unrecognised position 2 is an unreadable entry, carried whole, not a fifth
+  row you may guess at. Dropping the legacy row does not lose a label, it makes
+  every item favorite in production unresolvable.
 - **A writer rewrites a legacy tag on its next publish**, using the feed it
   just read positionally. Note that this replaces the WHOLE tag, position 1
   included — the identifier becomes the feed's. Each list upgrades itself once,
   and after that its items survive a reorder. ([Vector 27](#test-vectors).)
-- **A three-element `podcast:item:guid:` tag is not a form.** A draft of this
-  document put the item at position 1 and the feed at position 2. Nothing ever
-  published it, so there is nothing to read and no path to write for it.
+- **Two shapes from drafts of this document are not forms.** One put the item
+  at position 1 and the feed at position 2; another kept position 2 but wrote
+  the item guid there bare, with no prefix. Nothing ever published either, so
+  there is nothing to read and no path to write for them.
 
 This is not the same situation as the marker that used to live at position 2.
 Nothing had ever published a marker, so moving that slot moved nothing. Items
@@ -287,13 +305,13 @@ entry has just said. On the first real event published in this format that
 cost 423 `k` tags carrying two distinct values — about 11 KB of a 36 KB event,
 28% of it, on a list of 196 feeds and 227 items.
 
-**Derive it from the whole entry, not from the prefix alone.** Position 1 is
+**Derive it from the whole entry, not from position 1 alone.** Position 1 is
 `podcast:guid:` on a feed favorite and on an item favorite alike, so a writer
-that reads only the prefix emits `podcast:guid` for both, and
+that reads only position 1 emits `podcast:guid` for both, and
 `podcast:item:guid` never reaches the event at all. `#k` discovery then misses
-every item favorite on every list. The rule is one line: a `podcast:guid:`
-entry with an item guid at position 2 is kind `podcast:item:guid`. ([Vector
-6](#test-vectors).)
+every item favorite on every list. The rule is one line: **an entry's kind is
+the kind of its last identifier** — position 2 when there is one, position 1
+otherwise. ([Vector 6](#test-vectors).)
 
 An earlier revision of this document paired a `k` with every `i`, so **a
 reader must accept both forms**: ignore `k` entirely when parsing entries and
@@ -305,13 +323,13 @@ Trailing `k` tags are safe because `k` takes no part in anything else. A `k`
 landing mid-list is inert, but emit them at the end anyway so nothing invites a
 parser to treat them as delimiters.
 
-For the part that IS a prefix lookup, use a known-kinds table rather than
-scanning the string. Item guids are routinely permalink URLs, so "everything
-before the last colon" on `podcast:item:guid:https://example.com/ep/42` yields
-`podcast:item:guid:https` — a `k` value no relay filter will ever match, which
-breaks `#k` discovery without breaking anything visible. A URL-shaped item guid
-sits at position 2 now and is never scanned, but the legacy two-element form
-puts one back at position 1, and every list in production is full of them.
+Use a known-kinds table rather than scanning the string. Item guids are
+routinely permalink URLs, so "everything before the last colon" on
+`podcast:item:guid:https://example.com/ep/42` yields `podcast:item:guid:https`
+— a `k` value no relay filter will ever match, which breaks `#k` discovery
+without breaking anything visible. This applies at position 2 as much as at
+position 1: both hold a prefixed identifier, and a URL-shaped item guid is the
+value most likely to be there.
 
 ### An artist is a favorite that belongs to no feed
 
@@ -324,9 +342,9 @@ the publisher feed**, not here. So the entry stands alone:
 ["i", "podcast:publisher:guid:<publisherGuid>"]
 ```
 
-- It **belongs to no feed.** There is no item guid to put at position 2, and
-  nothing above it is a feed of which an artist could be an item. Emit it bare,
-  two elements, exactly like a feed favorite.
+- It **belongs to no feed.** There is no item identifier to put at position 2,
+  and nothing above it is a feed of which an artist could be an item. Emit it
+  bare, two elements, exactly like a feed favorite.
 - It is **never an item** of the entry above it. An artist is not a track.
 - Nothing on this list belongs to an artist either. An album entry is a feed
   favorite in its own right and names no artist.
@@ -739,7 +757,7 @@ each other indefinitely.
   else. Resolving them is the only way to reach a title, artwork or a feed
   URL, so a feed that 404s and was never indexed leaves a reader with a guid
   and nothing to render. NIP-73 has an optional URL hint at position 2 for
-  exactly this, and this format puts the item guid there instead.
+  exactly this, and this format puts the item's identifier there instead.
 
   That is a deliberate trade, and it is not close: without position 2 an item
   favorite has no address at all, while without a URL hint it merely renders
@@ -753,8 +771,9 @@ each other indefinitely.
   still somebody's favorite.
 - **A generic NIP-73 consumer shows the wrong thing for an item favorite.** It
   resolves position 1, which on an item entry is the feed, so it renders the
-  show where one episode was meant, and reads the item guid at position 2 as a
-  URL. This format cannot fix that in somebody else's client afterwards. The
+  show where one episode was meant, and reads the item's identifier at position
+  2 as a URL. This format cannot fix that in somebody else's client afterwards.
+  The
   alternative was to put the item guid at position 1, which resolves correctly
   in such a client and costs the ability to tell a feed favorite from an item
   favorite by anything the namespace already defines.
@@ -815,21 +834,27 @@ neither converging.
 **4. An unrecognized tag or identifier kind survives.** A `k` naming a kind
 you never emit, an `i` whose prefix is not in your table, a tag type you have
 no meaning for — all of them belong to a writer newer than you, and must be
-carried through untouched.
+carried through untouched. Pin two places this reaches inside a tag. An
+unreadable entry between a feed entry and a legacy item must not end the
+legacy run, or that item is stranded with no feed at all. And a `podcast:guid:`
+entry whose **position 2** you cannot read is not a feed favorite: carry it
+whole, because reading it as one turns a newer writer's entry into a followed
+show.
 
 **5. Placement.** An item entry names its own feed, so shuffling the tag array
 moves nothing: parse the same entries in two orders and each item keeps the
 same feed guid. `medium` is the exception and is still a running value, and an
 entry with no `medium` tag above it reads as unknown rather than `podcast`.
 
-**6. An item entry declares a kind its identifier does not say, and a
-URL-shaped item guid does not corrupt it.** The kind comes from the whole
-entry, so `["i","podcast:guid:F","X"]` yields `podcast:item:guid` even though
-its identifier reads `podcast:guid`. And it comes from a table rather than
-from splitting a string, so the legacy
-`["i","podcast:item:guid:https://example.com/ep/42"]` yields
-`podcast:item:guid` and never `podcast:item:guid:https`. Pin both, from one
-list — a writer that reads the prefix alone passes the second on its own.
+**6. An item entry declares a kind position 1 does not say, and a URL-shaped
+item guid does not corrupt it.** The kind is the kind of the entry's LAST
+identifier, so `["i","podcast:guid:F","podcast:item:guid:X"]` yields
+`podcast:item:guid` even though position 1 reads `podcast:guid`. And it comes
+from a table rather than from splitting a string, so an item guid of
+`https://example.com/ep/42` yields `podcast:item:guid` and never
+`podcast:item:guid:https` — at position 2, and at position 1 in the legacy
+form. Pin both, from one list: a writer that reads position 1 alone passes the
+string half on its own.
 
 **7. Both `k` layouts parse identically.** One `k` per distinct kind and a
 `k` paired with every `i` describe the same list; a reader that treats them
@@ -1027,9 +1052,10 @@ every item of half its address, so nobody can look those favorites up again.
 Pin an item carrying an element at position 3 that this writer has no meaning
 for: it comes back byte-identical. Then pin the MIGRATION in the same fixture:
 a legacy `["i","podcast:item:guid:X"]` takes its feed from the entry above it,
-a writer republishes it as `["i","podcast:guid:F","X"]` — the WHOLE tag, not
-just an appended element — and reading the result back changes nothing. A
-migration that is not idempotent republishes on every load forever.
+a writer republishes it as `["i","podcast:guid:F","podcast:item:guid:X"]` —
+the WHOLE tag, not just an appended element — and reading the result back
+changes nothing. A migration that is not idempotent republishes on every load
+forever.
 
 **28. An artist entry is a favorite that belongs to no feed.** Read a list with
 a `podcast:publisher:guid` entry between an album entry and a track: the artist
