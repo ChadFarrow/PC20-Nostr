@@ -276,15 +276,27 @@ and read the other one.
 
 ## Invariants a change must not quietly break
 
-- **An entry names its own feed; only `medium` is positional.** An item tag
-  is `["i", "podcast:guid:<feedGuid>", "podcast:item:guid:<itemGuid>"]` —
+- **An entry names its own feed; only `medium` MEANS anything positionally.**
+  An item tag is
+  `["i", "podcast:guid:<feedGuid>", "podcast:item:guid:<itemGuid>"]` —
   `<podcast:remoteItem>` as one tag, required `feedGuid` then optional
   `itemGuid`, both as full NIP-73 identifiers — so sorting or rebuilding the
-  array cannot reattach it. `medium` is still a running value
-  applying to every entry after it, so a reorder costs a wrong label — which a
+  array cannot reattach it. `medium` is still a running value applying to every
+  entry after it, so a reorder costs a wrong label — which a
   Podcast Index lookup corrects — rather than a wrong feed, which nothing
-  corrected. The old rule
-  was the reverse and it is the reason this one is written down.
+  corrected. The old rule was the reverse and it is the reason this one is
+  written down.
+- **Order is prescribed, not preserved, and only the rule above makes that
+  possible.** Each `medium` run is emitted in four bands: items naming no feed,
+  then artists, then albums and podcasts, then items grouped by the feed they
+  name. Read order stands inside a band and a new entry goes at the end of its
+  band. The earlier rule was "keep what you read, append yours", whose failure
+  mode needs two apps imposing DIFFERENT orders — one order in the document
+  converges even against a writer that does not sort, because that writer keeps
+  what it read. Two exceptions carry the whole risk: an item naming no feed
+  goes in band 0, because banding it in behind an album silently hands it that
+  album's guid; and a run holding a tag you cannot classify is emitted in wire
+  order, because a tag with no kind has no band.
 - **An item guid is not an address.** `<podcast:guid>` is globally unique by
   construction and outlives the feed URL; an item's `<guid>` is unique only
   inside its feed, which is why `/episodes/byguid` demands a feed identifier

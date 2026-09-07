@@ -57,12 +57,12 @@ distinct kind, at the end**, not one per entry.
           "podcast:item:guid:cc59b81e-28a0-4e55-a457-54285c06830a"],
 
     ["medium", "music"],
+    ["i", "podcast:publisher:guid:7f2e9c11-4b83-5e07-9d62-3a1f5c8b0e94"],
     ["i", "podcast:guid:9b0a2a1e-7c3d-53f8-b6a4-2f1c8d0e5b77"],
     ["i", "podcast:guid:4c1f8e2b-0d6a-5a91-8e35-7b9c2d4f6a10",
           "podcast:item:guid:d2b7f014-3a58-4c6e-9f21-8ad5c3e70b46"],
     ["i", "podcast:guid:4c1f8e2b-0d6a-5a91-8e35-7b9c2d4f6a10",
           "podcast:item:guid:e8c04a97-165b-4d2f-a730-5c9e1b8f2a41"],
-    ["i", "podcast:publisher:guid:7f2e9c11-4b83-5e07-9d62-3a1f5c8b0e94"],
 
     ["k", "podcast:guid"],
     ["k", "podcast:item:guid"],
@@ -224,7 +224,10 @@ Read the third case again and note what makes it two tags rather than one:
 `feedGuid` with `itemGuid` is one item in it. Two statements, two tags, one
 shared position 1.
 
-### Tag order carries nothing but medium
+### Tag order
+
+Only `medium` carries meaning, and that is what frees the rest of the order to
+be prescribed.
 
 **An entry names its own feed, so no reader has to reconstruct it from
 position.** This is the rule the format's first revision got wrong and paid
@@ -233,20 +236,71 @@ any client that sorted, deduped, or rebuilt the tag array silently reattached
 every item to the wrong feed, and nothing else in the format recovered the
 association.
 
-**`medium` is still positional, and is now the only thing that is.** It is a
-running value: it applies to every entry after it until the next `medium` tag.
+**`medium` is still positional, and is now the only thing that MEANS
+anything.** It is a running value: it applies to every entry after it until the
+next `medium` tag.
 
-- Keep same-medium entries contiguous, and add a new entry at the end of its
-  own medium run rather than at the end of the event. Splitting a run in two is
-  well-formed and wasteful. ([Vector 18](#test-vectors).)
 - **An entry before any `medium` tag has an UNKNOWN medium.** Do not default it
   to `podcast` or to anything else. A writer whose feed never declared
   `<podcast:medium>` has nowhere else to put it, and inventing a
   `["medium", "unknown"]` tag writes a value no reader has been told about.
 - A resolved lookup beats the stored medium anyway ([Medium is a
-  hint](#medium-is-a-hint-not-a-source-of-truth)), so reordering the array now
+  hint](#medium-is-a-hint-not-a-source-of-truth)), so reordering the array
   costs a wrong label that corrects itself, rather than a wrong feed that
   nothing corrects.
+
+#### Where every tag goes
+
+| tag | position |
+|---|---|
+| `alt` | **first, exactly once**, and regenerated rather than carried |
+| `visibility` | not positional. Put it next to `alt` |
+| `medium` | opens a run and applies until the next one. Keep same-medium entries contiguous |
+| `i` | inside its run, by band — below |
+| `k` | **at the end**, one per distinct kind. Order among them is unspecified |
+
+**Inside one `medium` run, entries are emitted in four bands.**
+
+| band | what | order inside it |
+|---|---|---|
+| 0 | items that name **no** feed | as read, untouched |
+| 1 | artists — `podcast:publisher:guid` | as read; a new one at the end |
+| 2 | albums and podcasts — a two-element `podcast:guid:` | as read; a new one at the end |
+| 3 | episodes and songs | grouped by the feed they name, groups in order of first appearance; a new item joins its feed's group |
+
+([Vector 18](#test-vectors).)
+
+**Prescribing the order is what makes it converge; preserving it never did.**
+An earlier revision said "entries you read keep their position, yours append",
+because two apps imposing their own orders rewrite the event at each other
+forever — which the two shipped implementations did, in production, for three
+weeks. That failure needs two DIFFERENT orders. One order in this document
+removes it: preserving only converges if every writer preserves, while a
+prescribed order converges even against a writer that does not sort, because
+that writer keeps what it read.
+
+The three sub-rules are all still live:
+
+- **Do not put your own entries ahead of the ones you read**, and do not append
+  to the end of the event — that opens a second run for a medium that already
+  has one. A new entry goes at the end of its **band**, inside its run.
+- **Band 0 is not cosmetic.** A legacy `["i", "podcast:item:guid:<itemGuid>"]`
+  takes its feed from the most recent feed entry above it. Move every feed
+  entry above every item and such an entry resolves to the last album in band
+  2 — a wrong feed, worse than the nothing it had. Ahead of band 2 there is no
+  feed entry to mistake for its parent; an artist is never a feed, so band 1
+  beside it is harmless. A resolvable legacy item never lands here, because the
+  same publish rewrites it. ([Vector 20](#test-vectors).)
+- **A run holding a tag you cannot classify is emitted as read.** [Rule
+  4](#4-carry-what-you-cant-read) carries an unparseable `i` or an unknown tag
+  type untouched, and a tag with no kind has no band. Rather than invent a
+  place for it, leave that whole run in wire order. ([Vector
+  4](#test-vectors).)
+
+**Banding is safe only because an entry names its own feed.** Under the first
+revision, moving a track away from the album above it destroyed the
+association. Sorting is available now for exactly the reason this section
+opens with.
 
 **A duplicate feed entry is well-formed.** Two writers each stated the same
 favorite. Fold it or carry it; either is conforming, and neither can move an
@@ -254,11 +308,12 @@ item, because no item depends on it. ([Vector 19](#test-vectors).)
 
 **An item whose feed nobody knows is still somebody's favorite.** A legacy
 `["i", "podcast:item:guid:<itemGuid>"]` tag with no feed entry above it cannot
-be resolved by you or by anyone. Carry it in place, in the form it arrived in,
-render what you can, and do not delete it. Do not invent a feed guid for it
-either — a wrong feed guid resolves to the wrong thing, which is worse than
-resolving to nothing, and a placeholder guid is an invented one. ([Vector
-20](#test-vectors).)
+be resolved by you or by anyone. Carry it in the form it arrived in, render
+what you can, and do not delete it. Do not invent a feed guid for it either — a
+wrong feed guid resolves to the wrong thing, which is worse than resolving to
+nothing, and a placeholder guid is an invented one. Emit it in **band 0**,
+ahead of every feed entry in its run, or the band order hands it whichever
+album ends up last. ([Vector 20](#test-vectors).)
 
 ### Reading a list written before this revision
 
@@ -410,7 +465,7 @@ Multi-letter on purpose: relays index single-letter tags, so an `["v", …]`
 would let a `#v=private` filter enumerate the pubkeys that keep a private
 list. Nothing else about it is positional — put it next to `alt` and treat it,
 like `k`, as taking no part in
-[ordering](#tag-order-carries-nothing-but-medium).
+[ordering](#tag-order).
 
 **Why a tag, when the encryption already says it.** Almost. "Whichever half
 holds entries is the mode" answers correctly for every list that has entries,
@@ -483,7 +538,7 @@ to stop on the strength of one device's setting.
 
 The private half is a tag array, stringified, encrypted to the author's own
 key with NIP-44, and put in `content`. The
-[medium rules](#tag-order-carries-nothing-but-medium)
+[medium rules](#tag-order)
 apply inside it unchanged. Four rules govern the bytes, and each one is a
 defect an implementation shipped before it was written down here.
 
@@ -658,15 +713,15 @@ someone else's data while looking correct:
 - **Match on the whole key.** An entry you hold, an entry your baseline claims,
   and an entry on the wire are the same entry only when the feed guid matches
   too. Comparing item guids alone deletes the wrong favorite.
-- **Entries you read keep their position; yours append.** Imposing your own
-  order on every republish makes two apps reorder the event against each
-  other forever, each publish locally reasonable, the only symptom being that
-  it never stops. A new entry goes at the end of its own **medium run** — not
-  at the end of the event, which splits a run in two, and not ahead of what you
-  read, which is the local-first order. The two existing implementations
-  disagreed on exactly this for the format's first three weeks, and the event
-  was rewritten back and forth in production the whole time. Getting it wrong
-  now costs churn and contiguity; it used to cost an item its feed.
+- **Emit each medium run in [band order](#tag-order): artists, albums and
+  podcasts, then episodes and songs grouped by feed.** Inside a band the read
+  order stands and a new entry goes at the end of that band — not ahead of what
+  you read, which is the local-first order, and not at the end of the event,
+  which splits a medium run in two. The two existing implementations disagreed
+  on ordering for the format's first three weeks and the event was rewritten
+  back and forth in production the whole time; a prescribed order is what ends
+  that, because the loop needs two apps imposing DIFFERENT orders. Getting it
+  wrong now costs churn and contiguity; it used to cost an item its feed.
   ([Vector 18](#test-vectors).)
 
 ### 4. Carry what you can't read
@@ -817,9 +872,9 @@ runner.
 **1. A foreign entry survives your republish.** Read a list containing a feed
 your app cannot resolve and an item of it, publish, and both must come
 back byte-identical, in the same relative position, under the same medium.
-Your own new feed lands at the end of its medium run — which need not be the
-end of the event. This is the vector that catches a writer built from local
-state alone, which is the natural way to write one.
+Your own new feed lands at the end of its own band, inside its medium run —
+which need not be the end of the event. This is the vector that catches a
+writer built from local state alone, which is the natural way to write one.
 
 **2. An empty list is distinguishable from a read that never happened.** A
 relay answering "I have nothing" and a relay that never answered must produce
@@ -834,7 +889,10 @@ neither converging.
 **4. An unrecognized tag or identifier kind survives.** A `k` naming a kind
 you never emit, an `i` whose prefix is not in your table, a tag type you have
 no meaning for — all of them belong to a writer newer than you, and must be
-carried through untouched. Pin two places this reaches inside a tag. An
+carried through untouched. Pin that a medium run holding one comes back in wire
+order rather than banded: a tag with no kind has no band, and inventing a place
+for it is how a carried tag ends up somewhere that changes what it means. Pin
+two more places this reaches inside a tag. An
 unreadable entry between a feed entry and a legacy item must not end the
 legacy run, or that item is stranded with no feed at all. And a `podcast:guid:`
 entry whose **position 2** you cannot read is not a feed favorite: carry it
@@ -971,15 +1029,18 @@ believe it converges on the strength of it. Pin the control in the same
 fixture — the same writer, the same list, but `content` it CAN decode — or an
 implementation that never restates the mode at all passes.
 
-**18. Entries keep their wire order, and a new one lands in its own medium
-run.** Read a list with two medium runs, hold the first run's items in a
-different order plus one new item, and publish: what was read keeps its order,
-the new entry follows it at the end of that run, and the run is not split in
-two. Two well-formed wrong answers: local order first, and the other app
-imposes its order back forever; appended to the end of the event, and a second
-`medium` run opens for a medium that already had one. A third used to exist and
-cannot now — appending once re-parented the new item to whatever feed was last
-opened.
+**18. A run is emitted in band order, and a new entry joins its own band.**
+Read a list with two medium runs, hold the first run's items in a different
+order plus one new item, and publish: the run is not split in two and the new
+entry does not lead. Then pin the bands from a run that arrives interleaved and
+holds one of each level, with a new artist, a new album and a new track: out
+come artists, then albums, then tracks grouped by the album they name, each new
+entry at the end of its own band. Two well-formed wrong answers: local order
+first, and the other app imposes its order back forever; appended to the end of
+the event, and a second `medium` run opens for a medium that already had one. A
+third looks right until a list holds more than one level — appending at the end
+of the RUN rather than the band. And pin idempotence on the banded output, or
+the sort itself becomes the thing that never stops.
 
 **19. The same feed twice on the wire loses no item.** Read a list with two
 entries for one feed and an item after each. Fold the duplicate or carry it;
@@ -988,15 +1049,19 @@ Under the old grouping this was the dangerous case: each copy opened a group,
 and a writer that modelled groups by guid met the second one already taken and
 dropped the item beneath it.
 
-**20. An item that names no feed is carried, in place, and never deleted.**
-Parse it with a null feed — do not borrow one from an unrelated entry and do
-not invent one, because a wrong feed guid resolves to the wrong thing and a
-missing one resolves to nothing. A placeholder guid is an invented one, and a
-writer that always fills position 2 writes placeholders. Republish and the tag
-is still there, in position and still in its two-element legacy form, because
-there was nothing to rewrite it with. This is what an item written before this
-revision looks like when no feed entry precedes it, and it is unresolvable by
-anyone, which is not the same as junk.
+**20. An item that names no feed is carried, never deleted, and never given
+one by being moved.** Parse it with a null feed — do not borrow one from an
+unrelated entry and do not invent one, because a wrong feed guid resolves to
+the wrong thing and a missing one resolves to nothing. A placeholder guid is an
+invented one, and a writer that always fills position 2 writes placeholders.
+Republish and the tag is still there, still in its two-element legacy form,
+because there was nothing to rewrite it with. Then **re-parse your own output
+and assert the feed is still null**, from a fixture where the orphan shares a
+run with albums: the tag is byte-identical either way, so a writer that banded
+it in beside the other tracks passes everything else while having handed it
+whichever album landed last. That is the assertion band 0 exists for. This is
+what an item written before this revision looks like when no feed entry
+precedes it, and it is unresolvable by anyone, which is not the same as junk.
 
 **21. Exactly one `alt`, ours, first.** Read a list whose `alt` carries some
 other label, publish a change, and the event's first tag is
@@ -1086,9 +1151,10 @@ discovery misses every artist favorite it ever publishes.
   that mimics the tag array, stringified and encrypted with
   [NIP-44](https://github.com/nostr-protocol/nips/blob/master/44.md) to the
   author's own key. The
-  [medium rules](#tag-order-carries-nothing-but-medium) apply inside that
-  array unchanged, because it is a tag array: `medium` still runs, and an item
-  still names its own feed. The two halves are two lists with two orderings,
+  [tag order rules](#tag-order) apply inside that array unchanged, because it
+  is a tag array: `medium` still runs, the bands still apply per run, and an
+  item still names its own feed. The two halves are two lists with two
+  orderings,
   and no entry is in both. A user's list is all public or all
   private — **never split per entry**, which an earlier revision of this
   document allowed and which is settled in [The list is public or

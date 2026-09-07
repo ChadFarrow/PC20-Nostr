@@ -300,6 +300,35 @@ test('4. An unrecognized tag or identifier kind survives', () => {
     JSON.stringify(carried.publish.tags).includes('future:thing:abc'),
     'an entry with an unreadable position 2 was dropped on republish',
   );
+
+  // AND A RUN HOLDING ONE IS EMITTED AS READ. Band order sorts entries by
+  // level, and a tag with no level has no band. Rather than invent a place for
+  // it — which is how a carried tag gets moved somewhere that changes what it
+  // means — the whole run keeps its wire order. It degrades to the old
+  // behaviour, and a writer that cannot sort still preserves what a writer
+  // that can wrote.
+  const ARTIST_4 = 'podcast:publisher:guid:0e8f6a1b-2c3d-4e5f-8a9b-0c1d2e3f4a5b';
+  const unsortable = plan({
+    read: ev([
+      ALT,
+      ['medium', 'podcast'],
+      item(ITEM_A1, FEED_A), // a track ahead of its album, which banding moves
+      ['i', FEED_A],
+      ['i', 'future:thing:abc'], // no band
+      ['i', ARTIST_4],
+      K_FEED,
+      K_ITEM,
+    ]),
+    local: [feed(FEED_C, 'music', [], true)], // a change, in another run
+    baseline: base(),
+    mode: 'public',
+  });
+  assert.ok(unsortable.publish);
+  assert.deepEqual(
+    ids(unsortable.publish.tags).slice(0, 4),
+    [ITEM_A1, FEED_A, 'future:thing:abc', ARTIST_4],
+    'a run holding an unclassifiable tag was reordered anyway',
+  );
 });
 
 test('5. Placement', () => {
@@ -917,7 +946,7 @@ test('17. A writer that cannot read a half may not restate the mode', () => {
   );
 });
 
-test('18. Entries keep their wire order, and a new one lands in its own medium run', () => {
+test('18. A run is emitted in band order, and a new entry joins its own band', () => {
   // The writer holds one feed's items in a DIFFERENT order from the wire, plus
   // one new item for it. Two ways to get this wrong, and each is well-formed:
   //
@@ -928,6 +957,8 @@ test('18. Entries keep their wire order, and a new one lands in its own medium r
   // A third way used to exist and is now impossible: appending to the end of
   // the event once re-parented the new item to whatever feed was last opened.
   // The item names its own feed, so misplacing it costs contiguity, not data.
+  // That is also what lets the run be SORTED at all rather than merely
+  // preserved.
   const read = ev([
     ALT,
     ['medium', 'podcast'],
@@ -967,6 +998,77 @@ test('18. Entries keep their wire order, and a new one lands in its own medium r
     1,
     'the podcast run was split in two',
   );
+
+  // BAND ORDER, on a run that arrives interleaved and holds one of each level.
+  // Artists, then albums, then tracks grouped by the album they name. Inside a
+  // band the read order stands and a new entry lands at the end of THAT band —
+  // not at the end of the run, which is the answer that looks right until a
+  // list has more than one level in it.
+  const ARTIST = 'podcast:publisher:guid:0e8f6a1b-2c3d-4e5f-8a9b-0c1d2e3f4a5b';
+  const ARTIST2 = 'podcast:publisher:guid:1f9e7b2c-3d4e-5f60-8a9b-0c1d2e3f4a5c';
+  const ITEM_B2 = 'podcast:item:guid:bbbbbbbb-1111-0000-0000-000000000002';
+
+  const interleaved = ev([
+    ALT,
+    ['medium', 'music'],
+    item(ITEM_A1, FEED_A), // a track, above the album it names
+    ['i', FEED_A],
+    ['i', ARTIST],
+    item(ITEM_B1, FEED_B),
+    ['i', FEED_B],
+    item(ITEM_A2, FEED_A), // the same album's second track, far from the first
+    K_FEED,
+    K_ITEM,
+    ['k', 'podcast:publisher:guid'],
+  ]);
+
+  const banded = plan({
+    read: interleaved,
+    local: [
+      feed(FEED_A, 'music', [ITEM_A1, ITEM_A2]),
+      feed(FEED_B, 'music', [ITEM_B1, ITEM_B2]), // ITEM_B2 is new
+      feed(FEED_C, 'music', [], true), // a new album
+      feed(ARTIST, 'music', [], true),
+      feed(ARTIST2, 'music', [], true), // a new artist
+    ],
+    baseline: base([
+      FEED_A, claim(ITEM_A1, FEED_A), claim(ITEM_A2, FEED_A),
+      FEED_B, claim(ITEM_B1, FEED_B), ARTIST,
+    ]),
+    mode: 'public',
+  });
+
+  assert.ok(banded.publish, 'three new favorites must produce a publish');
+  assert.deepEqual(
+    ids(banded.publish.tags),
+    [
+      ARTIST, ARTIST2,           // band 1: read order, the new one last
+      FEED_A, FEED_B, FEED_C,    // band 2: read order, the new one last
+      ITEM_A1, ITEM_A2,          // band 3: grouped by album, first appearance
+      ITEM_B1, ITEM_B2,          //          and the new track joins its album
+    ],
+    'the run was not emitted as artists, then albums, then tracks by album',
+  );
+  assert.equal(
+    banded.publish.tags.filter((t) => t[0] === 'medium').length,
+    1,
+    'banding split the medium run',
+  );
+
+  // And it is idempotent: reading the banded output back changes nothing.
+  const again = plan({
+    read: banded.publish,
+    local: [
+      feed(FEED_A, 'music', [ITEM_A1, ITEM_A2]),
+      feed(FEED_B, 'music', [ITEM_B1, ITEM_B2]),
+      feed(FEED_C, 'music', [], true),
+      feed(ARTIST, 'music', [], true),
+      feed(ARTIST2, 'music', [], true),
+    ],
+    baseline: banded.baselineIfLanded,
+    mode: 'public',
+  });
+  assert.equal(again.publish, null, 'banding is not idempotent, so it never stops');
 });
 
 test('19. The same feed twice on the wire loses no item', () => {
@@ -1065,6 +1167,65 @@ test('20. An item that names no feed is carried, in place, and never deleted', (
     tagFor(publish.tags, ORPHAN),
     ['i', ORPHAN],
     'a feed guid was invented for an item whose feed nobody knows',
+  );
+
+  // AND RE-PARSING THE OUTPUT STILL GIVES IT NO FEED. This is the assertion
+  // that band order makes necessary: the tag itself is unchanged either way,
+  // so a writer that sorted the orphan in beside the other tracks passes every
+  // check above while having handed it whatever album now sits last. A wrong
+  // feed guid resolves to the wrong thing, which is worse than the nothing it
+  // had. So an item naming no feed is emitted ahead of every feed entry in its
+  // run.
+  assert.equal(
+    parseTags(publish.tags).entries.find((e) => e.id === ORPHAN).feed,
+    null,
+    'the orphan was moved behind a feed entry and inherited its guid',
+  );
+  assert.ok(
+    at(publish.tags, ORPHAN) < at(publish.tags, FEED_A),
+    'the orphan was not emitted ahead of the feed entries in its run',
+  );
+
+  // The orphan above sits before any `medium` tag, in a run that holds no feed
+  // entry at all — so nothing there could have been mistaken for its parent.
+  // The dangerous case is an orphan INSIDE a run that also holds albums, which
+  // is where band order would sweep it in behind them and hand it whichever
+  // one landed last. It is only an orphan because no feed entry precedes it,
+  // so the emitted run has to keep it that way.
+  const INSIDE = 'podcast:item:guid:00000000-9999-0000-0000-000000000002';
+  const together = [
+    ALT,
+    ['medium', 'podcast'],
+    ['i', INSIDE], // first in the run, so it names no feed
+    ['i', FEED_A],
+    item(ITEM_A1, FEED_A),
+    ['i', FEED_B],
+    K_FEED,
+    K_ITEM,
+  ];
+  assert.equal(
+    parseTags(together).entries.find((e) => e.id === INSIDE).feed,
+    null,
+    'the fixture is wrong: this item is not an orphan',
+  );
+
+  const moved = plan({
+    read: ev(together),
+    local: [feed(FEED_A, 'podcast', [ITEM_A1]), feed(FEED_C, 'podcast')],
+    baseline: base([FEED_A, claim(ITEM_A1, FEED_A)]),
+    mode: 'public',
+  });
+  assert.ok(moved.publish);
+  assert.deepEqual(tagFor(moved.publish.tags, INSIDE), ['i', INSIDE]);
+  assert.equal(
+    parseTags(moved.publish.tags).entries.find((e) => e.id === INSIDE).feed,
+    null,
+    'band order swept the orphan behind an album and gave it that guid',
+  );
+  assert.ok(
+    at(moved.publish.tags, INSIDE) < at(moved.publish.tags, FEED_A) &&
+      at(moved.publish.tags, INSIDE) < at(moved.publish.tags, FEED_B),
+    'the orphan was not emitted ahead of every feed entry in its run',
   );
 });
 
@@ -1530,9 +1691,14 @@ test('28. An artist entry is a favorite that belongs to no feed', () => {
     guidOf(FEED_A),
     'the track lost its feed across a republish',
   );
+  // AND IT LANDS IN THE ARTIST BAND, ahead of the album it was read after.
+  // This is the band order doing its job on a list that arrived interleaved:
+  // artists, then albums, then tracks. The artist can move because it belongs
+  // to no feed and nothing on the list belongs to it — under the old format,
+  // moving an entry past a feed entry re-parented every item behind it.
   assert.ok(
-    at(out.tags, FEED_A) < at(out.tags, ARTIST) && at(out.tags, ARTIST) < at(out.tags, ITEM_A1),
-    'the artist moved; entries read keep their position',
+    at(out.tags, ARTIST) < at(out.tags, FEED_A) && at(out.tags, FEED_A) < at(out.tags, ITEM_A1),
+    'the run was not emitted in band order: artists, albums, then tracks',
   );
 
   // The same, from the app that HOLDS the artist — which is where a writer

@@ -408,6 +408,32 @@ accumulate.
 
 A publisher MAY emit both `23369` and `3369` for the same payment — the
 ephemeral one for immediate display, the regular one for the durable record.
+The two are the same event but for the kind:
+
+```json
+{
+  "kind": 23369,
+  "content": "",
+  "tags": [
+    ["i", "podcast:guid:c90e609a-df1e-596a-bd5e-57bcc8aad6cc",
+          "podcast:item:guid:d98d189b-dc7b-45b1-8720-d4b98690f31f"],
+    ["k", "podcast:item:guid"],
+    ["amount", "30000"],
+    ["action", "auto"],
+    ["start", "1740000000"],
+    ["end", "1740000180"],
+    ["position", "412"],
+    ["session", "0f3a9c21"],
+    ["app", "MSP 2.0"],
+    ["alt", "30 sats streamed to Copenhagen Time (value playback receipt)"]
+  ]
+}
+```
+
+There is no `d` tag: `23369` is ephemeral and regular, not addressable, so
+emitting both for one payment produces two events rather than one replacing the
+other. That is the point — the durable record is not supposed to be reachable
+by a live dashboard's filter.
 
 **Do not treat an empty read as evidence a relay refused it.** Not storing an
 ephemeral event is the correct behavior, so a relay that accepts the write and

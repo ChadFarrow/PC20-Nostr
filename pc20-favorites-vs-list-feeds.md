@@ -45,6 +45,65 @@ appears in `<podcast:podroll>`, `<podcast:valueTimeSplit>` and
 rather than inventing one, `remoteItem` on the RSS side and NIP-73's `i` on
 the Nostr side.
 
+## The same four favorites, in both formats
+
+One user: a podcast they follow, one episode of a podcast they do not, an
+artist, and one track from an album they do not follow. The kind 10333 event
+below is what `conformance/reference/favorites.mjs` emits for that state — not
+hand-written — and the list feed beside it carries the same four references.
+
+```json
+{
+  "kind": 10333,
+  "content": "",
+  "tags": [
+    ["alt","PC 2.0 Favorites"],
+    ["medium","podcast"],
+    ["i","podcast:guid:917393e3-1b1e-5cef-ace4-edaa54e1f810"],
+    ["i","podcast:guid:bfd4d7c4-eec0-5f6b-90b0-c1eae84b2392",
+         "podcast:item:guid:cc59b81e-28a0-4e55-a457-54285c06830a"],
+    ["medium","music"],
+    ["i","podcast:publisher:guid:7f2e9c11-4b83-5e07-9d62-3a1f5c8b0e94"],
+    ["i","podcast:guid:4c1f8e2b-0d6a-5a91-8e35-7b9c2d4f6a10",
+         "podcast:item:guid:d2b7f014-3a58-4c6e-9f21-8ad5c3e70b46"],
+    ["k","podcast:guid"],
+    ["k","podcast:item:guid"],
+    ["k","podcast:publisher:guid"]
+  ]
+}
+```
+
+```xml
+<channel>
+  <title>My favorites</title>
+  <podcast:medium>mixed</podcast:medium>
+  <podcast:remoteItem feedGuid="917393e3-1b1e-5cef-ace4-edaa54e1f810"
+                      medium="podcast"/>
+  <podcast:remoteItem feedGuid="bfd4d7c4-eec0-5f6b-90b0-c1eae84b2392"
+                      itemGuid="cc59b81e-28a0-4e55-a457-54285c06830a"
+                      medium="podcast"/>
+  <podcast:remoteItem feedGuid="4c1f8e2b-0d6a-5a91-8e35-7b9c2d4f6a10"
+                      itemGuid="d2b7f014-3a58-4c6e-9f21-8ad5c3e70b46"
+                      medium="music"/>
+</channel>
+```
+
+Read them side by side and the differences are the whole comparison.
+
+- **Four favorites, three elements.** The artist has no `remoteItem` form: a
+  publisher is not a feed you point at with `feedGuid`, so the fourth favorite
+  has nowhere to go. That asymmetry is one-way — every `remoteItem` maps to an
+  `i` tag, but not every `i` tag maps back.
+- **`medium` is per element on the RSS side and per RUN on the Nostr side.**
+  The channel gets `mixed`; the tags get one `["medium", …]` opening each run.
+  Same information, paid for once per entry against once per group.
+- **The list feed needs a `<title>` and can hold a `feedUrl`.** The event has
+  neither and cannot get them: an entry is guids and nothing else.
+- **The event's order is bands, the feed's order is play order.** Neither
+  survives conversion, and the section below is about why.
+- **The channel is a document at a URL; the event is one per pubkey.** There is
+  no `d` tag, so a second favorites list is not expressible at all.
+
 ## The two at a glance
 
 | | kind 10333 | list feed |
@@ -53,7 +112,7 @@ the Nostr side.
 | addressed by | the user's pubkey | the feed URL, plus `<podcast:guid>` |
 | writers | any app the user signs into | whoever can write the file |
 | how many | exactly one per pubkey — no `d` tag | as many feeds as you publish |
-| order means | which feed an item belongs to | the order to play them in |
+| order means | a level: artists, feeds, then items | the order to play them in |
 | named | no title, no artwork | a channel, so both |
 | ceiling | relay limits, about 128 KB | whatever the host serves |
 
@@ -171,15 +230,20 @@ encrypts half a channel to its author.
 Document order in a list feed is the order to play the tracks in. Somebody
 chose it.
 
-Order in kind 10333 is structural. It carries which feed an item belongs to,
-which is why the spec forbids sorting, deduplicating or rebuilding the tag
-array — doing that reattaches every item to the wrong feed. The order that
-results is a record of merge history: entries you read keep their position and
-yours append. No one chose it.
+Order in kind 10333 is a **shape**, not a sequence. Each `medium` run is
+emitted in bands — artists, then albums and podcasts, then items grouped by the
+feed they name — so the order says what level an entry is at and nothing about
+what to play when. Somebody chose that too, but they chose a filing order.
+
+It used to be worse. Order carried which feed an item belonged to, so sorting
+or rebuilding the array reattached every item to the wrong feed, and the
+resulting order was a record of merge history that nobody chose. An entry names
+its own feed now, which is what made a deliberate order available at all.
 
 So a list feed generated from a 10333 event has a play order that means
-nothing, and a 10333 event built from a playlist throws the play order away on
-the first merge by another app.
+nothing, and a 10333 event built from a playlist throws the play order away —
+on the first merge by another app, and on the first republish by any app that
+bands its runs.
 
 ## Identity and sharing
 

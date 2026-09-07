@@ -578,6 +578,106 @@ function mergeHalf(readTags, localGroups, baselineIds, { adoptAll = false } = {}
     appendInRun(g.medium ?? null, fresh);
   }
 
+  // Pass 3: put each run in band order. `appendInRun` only kept a medium run
+  // from being split in two; this is what decides where inside it an entry
+  // sits, for read and local entries alike.
+  return orderRun(out);
+}
+
+/**
+ * The four bands of one `medium` run, in emit order.
+ *
+ *   0  an item that names NO feed
+ *   1  artists
+ *   2  albums and podcasts
+ *   3  items, grouped by the feed they name
+ *
+ * BAND 0 IS NOT COSMETIC. A legacy `["i","podcast:item:guid:X"]` takes its
+ * feed from the most recent feed entry above it. Put every feed entry above
+ * every item and such an entry resolves to the LAST album in band 2 — a wrong
+ * feed, which is worse than none, and worse than what it had. Ahead of band 2
+ * there is no feed entry to mistake for its parent; an artist is never a feed,
+ * so band 1 beside it is harmless. Vector 20.
+ *
+ * A resolvable legacy item never reaches band 0: the same publish rewrites it,
+ * so it arrives in band 3 already naming its feed.
+ */
+const bandOf = (e) => {
+  if (e.kind === 'podcast:publisher:guid') return 1;
+  if (e.kind === 'podcast:item:guid') return e.feed === null ? 0 : 3;
+  return 2; // a feed favorite
+};
+
+/**
+ * Emit order inside each `medium` run. Data Structure, "Tag order".
+ *
+ * Applied ONCE, to the whole merged half, rather than threaded through the two
+ * merge passes. That is what makes an entry land in the same place whether it
+ * came off the wire or out of local state — two passes each doing half the job
+ * is how two writers' orders drift apart.
+ *
+ * Order is prescribed rather than preserved, and the difference matters. The
+ * old rule was "keep what you read, append yours", whose failure mode was two
+ * apps imposing DIFFERENT orders and rewriting the event at each other. One
+ * order in the document converges; "preserve what you read" only converges if
+ * every writer preserves. This is available at all only because an entry names
+ * its own feed — under the old format, moving a track away from its album
+ * destroyed the association.
+ *
+ * WITHIN a band the read order is kept and new entries land at the end, so no
+ * existing list is reshuffled. Band 3 groups by feed, groups in order of first
+ * appearance, so an album's tracks stay together.
+ *
+ * A RUN HOLDING A TAG THIS WRITER CANNOT CLASSIFY IS EMITTED AS READ. Rule 4
+ * carries an unparseable `i` or an unknown tag type untouched, and vector 4
+ * pins that such a tag between a feed entry and a legacy item must not end the
+ * run. Rather than invent a place for something with no band, leave the run
+ * alone: it degrades to the old behaviour, and a writer that cannot sort still
+ * preserves what a writer that can wrote.
+ */
+function orderRun(tags) {
+  const parsed = parseTags(tags);
+  const entryAt = new Map(parsed.entries.map((e) => [e.index, e]));
+  const foreignAt = new Set(parsed.foreign.map((f) => f.index));
+
+  // Split into runs: each `medium` tag opens one, and anything before the
+  // first opens a headless run whose entries have an unknown medium.
+  const runs = [];
+  let current = { header: null, idx: [] };
+  (tags ?? []).forEach((tag, index) => {
+    if (tag[0] === 'medium') {
+      runs.push(current);
+      current = { header: tag, idx: [] };
+      return;
+    }
+    current.idx.push(index);
+  });
+  runs.push(current);
+
+  const out = [];
+  for (const run of runs) {
+    if (run.header) out.push(run.header);
+    if (run.idx.length === 0) continue;
+
+    if (run.idx.some((i) => foreignAt.has(i) || !entryAt.has(i))) {
+      for (const i of run.idx) out.push(tags[i]);
+      continue;
+    }
+
+    const bands = [[], [], [], []];
+    for (const i of run.idx) bands[bandOf(entryAt.get(i))].push(i);
+
+    // Band 3 groups by feed, groups in order of first appearance.
+    const groups = new Map();
+    for (const i of bands[3]) {
+      const feed = entryAt.get(i).feed;
+      if (!groups.has(feed)) groups.set(feed, []);
+      groups.get(feed).push(i);
+    }
+    bands[3] = [...groups.values()].flat();
+
+    for (const band of bands) for (const i of band) out.push(tags[i]);
+  }
   return out;
 }
 

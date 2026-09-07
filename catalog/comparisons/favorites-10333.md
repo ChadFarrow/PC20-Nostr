@@ -107,10 +107,16 @@ it, boostmebitch keeps wire order and appends local-only items:
 
 Imposing local order on every republish means the two apps reorder the event
 at each other forever. Each publish is locally reasonable; the only symptom
-is that it never stops. Because [tag order is
-semantic](../../pc20-favorites.md#grouping-rules), this is not cosmetic
-churn — it is a rewrite of the meaningful part of the event, on every cycle.
-The spec now says which order (vector 18), and both apps keep it.
+is that it never stops. At the time it was worse than churn: tag order was
+semantic — it carried which feed an item belonged to — so each cycle rewrote
+the meaningful part of the event.
+
+Both apps keep one order now (vector 18). Two things have changed under them
+since, and neither is reflected in the code read at the SHAs above: an entry
+names its own feed, so order carries no meaning left to corrupt; and the spec
+prescribes the order rather than asking each writer to preserve what it read —
+[Tag order](../../pc20-favorites.md#tag-order), four bands per `medium` run.
+Whether either app emits the bands is unverified here.
 
 **2. The append pass and resurrection. FIXED in stablekraft-app#236.** boostmebitch
 filters local groups absent from the wire against the baseline — `fresh =

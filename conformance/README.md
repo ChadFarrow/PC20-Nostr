@@ -95,9 +95,9 @@ Numbering matches the spec exactly.
 | 15 | A list stuck with entries in both halves: tidied away, or converged into a duplicated `i` tag |
 | 16 | An empty list with no mode to infer — the favorite guessed into the wrong half |
 | 17 | A list declared public while the entries in it stayed encrypted |
-| 18 | Two apps reordering entries at each other forever; a new entry splitting a medium run in two |
+| 18 | Two apps reordering entries at each other forever; a new entry splitting a medium run in two, or landing at the end of the run instead of its band |
 | 19 | A duplicate feed entry folded in a way that loses an item, or loses the favorite |
-| 20 | An item naming no feed deleted as junk, or handed a feed guid nobody knows |
+| 20 | An item naming no feed deleted as junk, handed a feed guid nobody knows, or banded in behind an album and given that album's |
 | 21 | A foreign `alt` carried beside ours, or ours not first |
 | 22 | A literal `?` in the plaintext, breaking every private publish through a NIP-55 signer |
 | 23 | A non-array plaintext read as "empty", so the next republish erases it |
@@ -132,6 +132,11 @@ breaking the reference on purpose and confirming the right one fails:
 | Re-encode an opaque private half as an empty array | **17** |
 | Append a known group's new items to the end of the event | **18** |
 | Put local items ahead of the ones read | **18** |
+| Emit band 3 before band 2 | 1, 2, 10, **18**, 28 |
+| Append a new entry at the end of the run instead of its band | **18**, 28 |
+| Skip the by-feed grouping inside band 3 | **18** |
+| Put an item that names no feed in band 3 | **20** |
+| Band a run that holds a tag you cannot classify | **4** |
 | Skip a duplicate feed group | **19** |
 | Drop an item that has no group above it | **20** |
 | Carry the `alt` you read | **21** |
