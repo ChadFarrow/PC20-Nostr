@@ -1,7 +1,7 @@
 /**
  * AUTHORED. This file has never served traffic.
  *
- * It exists so `../vectors.test.mjs` has something to run against — 24
+ * It exists so `../vectors.test.mjs` has something to run against — 27
  * assertions nobody has watched go green are prose in a new costume. It is a
  * worked example of the rules in `../../pc20-favorites.md`, not a
  * recommendation and not an extraction. If you want code a real site runs,
@@ -27,6 +27,31 @@ export const ALT = 'PC 2.0 Favorites';
  *  relays index single-letter tags, and `#v=private` would enumerate the
  *  pubkeys that keep one. */
 export const VISIBILITY = 'visibility';
+
+/**
+ * Position 3 of a feed `i` tag: whether the user favorited the FEED itself, as
+ * opposed to the group merely being open so an item below it can name a parent.
+ *
+ * Position 2 is left to NIP-73's URL hint and written as '' when there is
+ * none. Putting the marker there would hand a generic NIP-73 consumer the
+ * string 'fav' where it expects a URL. Data Structure, "Saying whether a feed
+ * is favorited".
+ */
+export const FAV = 'fav';
+export const PLACEMENT = 'placement';
+
+/** The marker on a tag, or null when it states nothing this writer knows. */
+export function markerOf(tag) {
+  const m = tag?.[3];
+  return m === FAV || m === PLACEMENT ? m : null;
+}
+
+/** A feed `i` tag carrying a marker, keeping whatever hint was at position 2. */
+const feedTag = (id, marker, hint = '') =>
+  marker === null ? ['i', id] : ['i', id, hint ?? '', marker];
+
+/** Baseline claims are per-thing, and a feed favorite is its own thing. */
+export const FAV_CLAIM = 'fav:';
 
 /**
  * The known-kinds table. Data Structure, "Derive the kind from a known-kinds
@@ -70,6 +95,10 @@ const isFeedKind = (k) => k === 'podcast:guid' || k === 'podcast:publisher:guid'
  *     kind. Both `k` layouts therefore parse identically (vector 7).
  *   - An unparseable `i` is carried and does NOT close the open group
  *     (rule 4), or everything after it re-parents.
+ *   - Position 3 of a feed `i` says whether the FEED is favorited. It takes no
+ *     part in grouping, and it is resolved PER FEED rather than per group,
+ *     because a feed may open two groups (vector 19) and the favorite is a
+ *     property of the feed.
  */
 export function parseTags(tags) {
   let medium = null;
@@ -107,9 +136,16 @@ export function parseTags(tags) {
     }
 
     if (isFeedKind(kind)) {
-      group = { id: value, kind, medium, index, items: [] };
+      group = { id: value, kind, medium, index, items: [], marker: markerOf(tag) };
       groups.push(group);
-      entries.push({ id: value, kind, medium, index, parent: null });
+      entries.push({
+        id: value,
+        kind,
+        medium,
+        index,
+        parent: null,
+        marker: group.marker,
+      });
     } else {
       if (group) group.items.push(value);
       entries.push({
@@ -122,7 +158,44 @@ export function parseTags(tags) {
     }
   });
 
-  return { entries, groups, kinds, foreign };
+  // Is the FEED favorited? Ranked, because one feed may open two groups and
+  // the two need not agree — the favorite is a property of the feed, not of
+  // whichever group happens to carry the marker.
+  //
+  //   `fav`         the user favorited it. Outranks everything: `placement`
+  //                 means "I only needed a parent here", never "the user does
+  //                 not want this feed".
+  //   `placement`   they did not. A STATEMENT, so it outranks silence: the
+  //                 marker was written by a writer that knew, and a bare group
+  //                 beside it by one that did not.
+  //   itemless      unmarked, nothing under it — nothing else would have put
+  //                 it there, so it is a favorite. The reading that held for
+  //                 this format's whole life before the marker.
+  //   with items    unmarked and unknowable. NOT a favorite and not "no":
+  //                 answering either invents something the user never said,
+  //                 and 114 of one real list's 196 groups are in this state.
+  const RANK = { [FAV]: 3, [PLACEMENT]: 2, itemless: 1, unknown: 0 };
+  const ANSWER = { 3: true, 2: false, 1: true, 0: null };
+  const rank = new Map();
+  for (const g of groups) {
+    const r =
+      g.marker === FAV
+        ? RANK[FAV]
+        : g.marker === PLACEMENT
+          ? RANK[PLACEMENT]
+          : g.items.length === 0
+            ? RANK.itemless
+            : RANK.unknown;
+    rank.set(g.id, Math.max(rank.get(g.id) ?? 0, r));
+  }
+  const favorited = new Map();
+  for (const [id, r] of rank) favorited.set(id, ANSWER[r]);
+  for (const g of groups) g.favorited = favorited.get(g.id) ?? null;
+  for (const e of entries) {
+    if (e.parent === null && favorited.has(e.id)) e.favorited = favorited.get(e.id) ?? null;
+  }
+
+  return { entries, groups, kinds, foreign, favorited };
 }
 
 /** Whole event in, structure plus the raw halves out. */
@@ -235,12 +308,27 @@ export function decodePrivate(content) {
  * pins it in one direction; the tag makes the other direction reachable too.
  */
 function dedupeEntries(tags) {
+  // The surviving copy takes the strongest marker any copy carried. Collapsing
+  // two entries into one collapses their answers too, and taking whichever
+  // came first would drop a feed favorite on the strength of the order the two
+  // halves happened to be concatenated in.
+  const best = new Map();
+  for (const tag of tags ?? []) {
+    if (tag[0] !== 'i') continue;
+    const m = markerOf(tag);
+    if (m === FAV || (m === PLACEMENT && best.get(tag[1]) !== FAV)) best.set(tag[1], m);
+  }
   const seen = new Set();
   const out = [];
   for (const tag of tags ?? []) {
     if (tag[0] === 'i') {
       if (seen.has(tag[1])) continue;
       seen.add(tag[1]);
+      const want = best.get(tag[1]) ?? null;
+      if (want !== null && markerOf(tag) !== want) {
+        out.push(feedTag(tag[1], want, tag[2] ?? ''));
+        continue;
+      }
     }
     out.push(tag);
   }
@@ -271,12 +359,52 @@ const idsOf = (localGroups) => {
  * `adoptAll` is the public → private whole-list move: every entry travels,
  * including ones this device neither holds nor claims (Open questions, "The
  * choice belongs to the LIST"). It only ever reduces exposure.
+ *
+ * `carryMarkers` turns off marker restatement for a pass whose job is only to
+ * move another half's tags across. That pass is given `local: []`, so every
+ * entry in it would look like one this device no longer holds, and a `fav`
+ * claim left in the baseline would silently downgrade another app's feed
+ * favorite in the middle of a privacy change.
  */
-function mergeHalf(readTags, localGroups, baselineIds, { adoptAll = false } = {}) {
+function mergeHalf(
+  readTags,
+  localGroups,
+  baselineIds,
+  { adoptAll = false, carryMarkers = false } = {},
+) {
   const held = idsOf(localGroups);
   const claimed = new Set(baselineIds ?? []);
+  // Three values, not two. `undefined` is "this device is not holding the
+  // feed at all"; `null` is "holding it, with nothing to say about the feed
+  // itself" — which is what an app that adopted an unmarked group off the wire
+  // knows. Collapsing either into `false` is how 114 placement groups become
+  // 114 feed favorites the user never made, one publish later.
+  const localFav = new Map();
+  for (const g of localGroups ?? []) localFav.set(g.id, g.favorited ?? null);
 
   const keep = (id) => adoptAll || held.has(id) || !claimed.has(id);
+
+  /**
+   * The marker to emit for a feed entry, given what the wire says.
+   *
+   * Favoriting is an ADDITION and needs nothing but local state. Unfavoriting
+   * is a REMOVAL and goes through the baseline exactly as dropping an entry
+   * does — otherwise this app's "I only opened this group to place a track"
+   * overwrites another app's "the user favorited this show", that app restates
+   * it on its next cycle, and the two rewrite the event at each other forever.
+   */
+  const markerFor = (id, wire) => {
+    if (carryMarkers) return wire;
+    const mine = localFav.has(id) ? localFav.get(id) : undefined;
+    if (mine === true) return FAV;
+    // A `fav` this baseline claims, no longer asserted locally, is the user
+    // unfavoriting the show here. It holds even when the group itself survives
+    // to place somebody else's items — which is the whole point of the marker.
+    if (wire === FAV && claimed.has(FAV_CLAIM + id)) return PLACEMENT;
+    if (wire === FAV) return FAV; // another app's claim; we have nothing to beat it
+    if (mine === false) return PLACEMENT;
+    return wire;
+  };
 
   // Pass 1: decide each entry, keeping read order and position.
   const parsed = parseTags(readTags);
@@ -330,7 +458,17 @@ function mergeHalf(readTags, localGroups, baselineIds, { adoptAll = false } = {}
     }
     if (decision.has(index)) {
       if (decision.get(index)) {
-        out.push(tag);
+        const parsedEntry = parsed.entries.find((e) => e.index === index);
+        if (parsedEntry && parsedEntry.parent === null) {
+          const wire = markerOf(tag);
+          const want = markerFor(tag[1], wire);
+          // Byte-identical unless the marker actually changed, so rule 5 still
+          // sees an unchanged list as unchanged — and any hint sitting at
+          // position 2 survives, because it is read off the tag, not invented.
+          out.push(want === wire ? tag : feedTag(tag[1], want, tag[2] ?? ''));
+        } else {
+          out.push(tag);
+        }
         owner.push(ownerOf.get(index) ?? null);
       }
       return;
@@ -353,6 +491,8 @@ function mergeHalf(readTags, localGroups, baselineIds, { adoptAll = false } = {}
     );
     const groupIsNew = !onList.has(g.id) && !claimed.has(g.id);
     if (!groupIsNew && newItems.length === 0) continue;
+    // A group with nothing to place and no favorite on it is not an entry.
+    if (groupIsNew && newItems.length === 0 && (g.favorited ?? null) === false) continue;
 
     if (!groupIsNew && onList.has(g.id)) {
       const at = owner.lastIndexOf(g.id);
@@ -372,7 +512,7 @@ function mergeHalf(readTags, localGroups, baselineIds, { adoptAll = false } = {}
       emittedMedium = medium;
     }
     if (groupIsNew) {
-      out.push(['i', g.id]);
+      out.push(feedTag(g.id, markerFor(g.id, null)));
       owner.push(g.id);
     }
     for (const id of newItems) {
@@ -580,6 +720,7 @@ export function plan({
     // every private-mode cycle, so the list never reached a fixed point.
     const moving = mergeHalf(inactiveReadTags, [], inactiveBaseline, {
       adoptAll: true,
+      carryMarkers: true,
     });
     mergedActive = dedupeEntries(
       mergeHalf([...activeReadTags, ...moving], local, activeBaseline, {
@@ -599,6 +740,7 @@ export function plan({
     // those once, where they belong.
     const moving = mergeHalf(inactiveReadTags, [], inactiveBaseline, {
       adoptAll: true,
+      carryMarkers: true,
     });
     mergedActive = dedupeEntries(
       mergeHalf([...activeReadTags, ...moving], local, activeBaseline, {
@@ -688,10 +830,30 @@ export function plan({
   // and we claim every entry in it, another writer's included; nothing backs
   // the claim next cycle, so rule 3's "in your baseline, absent locally" row
   // fires on the whole half at once.
-  const activeClaims = (goingPrivate ? privateTags ?? [] : publicTags)
+  const activeTags = goingPrivate ? privateTags ?? [] : publicTags;
+  const heldLocally = idsOf(local);
+  const entryClaims = activeTags
     .filter((t) => t[0] === 'i')
     .map((t) => t[1])
-    .filter((id) => idsOf(local).has(id) || activeBaseline.includes(id));
+    .filter((id) => heldLocally.has(id) || activeBaseline.includes(id));
+
+  // A FEED FAVORITE IS ITS OWN CLAIM. The entry and the marker are two
+  // different assertions now — a group can be on the list because this device
+  // placed a track under it while another app is the one saying the show is
+  // favorited — and a baseline that records only the identifier reads the next
+  // cycle's `placement` as "mine, and I removed it" against the wrong thing.
+  const favoritedLocally = new Set(
+    (local ?? []).filter((g) => (g.favorited ?? null) === true).map((g) => g.id),
+  );
+  const favClaims = activeTags
+    .filter((t) => t[0] === 'i' && markerOf(t) === FAV)
+    .map((t) => FAV_CLAIM + t[1])
+    .filter(
+      (c) =>
+        favoritedLocally.has(c.slice(FAV_CLAIM.length)) || activeBaseline.includes(c),
+    );
+
+  const activeClaims = [...entryClaims, ...favClaims];
 
   const carriedInactive = inactiveBaseline.filter(
     (id) => !activeClaims.includes(id),

@@ -103,15 +103,21 @@ both for that one reason.
 
 **A feed group is not always a favorite.** In kind 10333 the only way to say
 where an item came from is to open a group for its feed, so a group appears
-whether or not the user favorited the feed — 114 of those 196. A reader
-cannot tell the two apart, an app that guesses invents favorites the user
-never made, and unfavoriting a feed while one of its tracks stays favorited
-cannot be expressed at all. A `remoteItem` carries its parent inline, so an
-item reference needs no group, and a reference with no `itemGuid` is
-unambiguously the feed. The question has no analogue there.
+whether or not the user favorited the feed — 114 of those 196. A `remoteItem`
+carries its parent inline, so an item reference needs no group, and a
+reference with no `itemGuid` is unambiguously the feed. The question does not
+arise there at all.
+
+Kind 10333 now answers it, but it had to add something to do so: a marker at
+position 3 of the feed `i` tag, `fav` or `placement`, and a rule for reading
+the entries written before it existed. That is a few bytes per group rather
+than a repeated identifier — cheaper than the repetition priced above — and it
+is still a rule a third implementer has to get right, where the list feed's
+answer falls out of the shape. The list feed pays identifiers to make the
+question impossible; the event pays a marker to make it answerable.
 
 **No fallback when a guid will not resolve.** The favorites spec ends on the
-unresolved use for the third element of an `i` tag: a URL hint, so an entry
+unresolved use for position 2 of an `i` tag: a URL hint, so an entry
 the Podcast Index cannot resolve is more than a guid and nothing. The
 namespace already spends an attribute on exactly that, and says why —
 `feedUrl` is "beneficial ... for those cases as a fallback", and if both are
@@ -185,9 +191,11 @@ Facts a bridge has to respect. Each is already argued in the favorites spec;
 they are collected here because a converter is where all three get broken at
 once.
 
-- **A group with items under it is not a feed favorite.** Emitting one as a
-  feed-level `remoteItem` manufactures a favorite the user never made. On the
-  list measured above that is 114 of them.
+- **A group with items under it is not a feed favorite unless it says so.**
+  Read position 3 of the feed `i`: `fav` converts to a feed-level
+  `remoteItem`, `placement` does not, and an unmarked group with items is
+  UNKNOWABLE — leave it out. Emitting those manufactures favorites the user
+  never made, and on the list measured above that is 114 of them.
 - **An entry above the first `medium` tag has an unknown medium.** Leave the
   `medium` attribute off. Filling it in turns an absence into a claim, and no
   other app has a reason to correct it.
