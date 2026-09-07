@@ -109,17 +109,19 @@ reference with no `itemGuid` is unambiguously the feed. The question does not
 arise there at all.
 
 Kind 10333 now answers it, but it had to add something to do so: a marker at
-position 3 of the feed `i` tag, `fav` or `placement`, and a rule for reading
+position 2 of the feed `i` tag, `fav` or `placement`, and a rule for reading
 the entries written before it existed. That is a few bytes per group rather
 than a repeated identifier — cheaper than the repetition priced above — and it
 is still a rule a third implementer has to get right, where the list feed's
 answer falls out of the shape. The list feed pays identifiers to make the
 question impossible; the event pays a marker to make it answerable.
 
-**No fallback when a guid will not resolve.** The favorites spec ends on the
-unresolved use for position 2 of an `i` tag: a URL hint, so an entry
-the Podcast Index cannot resolve is more than a guid and nothing. The
-namespace already spends an attribute on exactly that, and says why —
+**No fallback when a guid will not resolve.** The favorites spec considered a
+URL hint at position 2 of an `i` tag, so an entry the Podcast Index cannot
+resolve would be more than a guid and nothing, and then dropped the slot and
+gave the position to the marker: the guid resolves for every entry either live
+app has published. The namespace already spends an attribute on exactly that,
+and says why —
 `feedUrl` is "beneficial ... for those cases as a fallback", and if both are
 present a capable app resolves `feedGuid` and uses it. `title` answers a
 second version of the same problem: it lets an app draw the list before any
@@ -192,7 +194,7 @@ they are collected here because a converter is where all three get broken at
 once.
 
 - **A group with items under it is not a feed favorite unless it says so.**
-  Read position 3 of the feed `i`: `fav` converts to a feed-level
+  Read position 2 of the feed `i`: `fav` converts to a feed-level
   `remoteItem`, `placement` does not, and an unmarked group with items is
   UNKNOWABLE — leave it out. Emitting those manufactures favorites the user
   never made, and on the list measured above that is 114 of them.

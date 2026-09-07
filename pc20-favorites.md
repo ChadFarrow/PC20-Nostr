@@ -52,11 +52,11 @@ distinct kind, at the end**, not one per entry.
     ["visibility", "public"],
 
     ["medium", "podcast"],
-    ["i", "podcast:guid:<feedGuid>", "", "fav"],
+    ["i", "podcast:guid:<feedGuid>", "fav"],
     ["i", "podcast:item:guid:<itemGuid>"],
 
     ["medium", "music"],
-    ["i", "podcast:guid:<feedGuid>", "", "placement"],
+    ["i", "podcast:guid:<feedGuid>", "placement"],
     ["i", "podcast:item:guid:<itemGuid>"],
 
     ["k", "podcast:guid"],
@@ -72,9 +72,9 @@ example shows. It is not a constant: it is the one free slot in the event, and
 found there byte for byte. Copying the `""` above into a writer is how another
 app's data gets deleted.
 
-An `i` tag is `["i", identifier, hint, marker]`, and this document counts those
-positions from zero: the identifier is at **position 1**, NIP-73's URL hint at
-**position 2**, and the feed-favorite marker at **position 3**. The marker says
+An `i` tag is `["i", identifier, marker]`, and this document counts those
+positions from zero: the identifier is at **position 1** and the feed-favorite
+marker at **position 2**. Nothing is defined past it. The marker says
 whether the user favorited the FEED, as opposed to the group being open only so
 the item under it can name a parent — see [Saying whether a feed is
 favorited](#saying-whether-a-feed-is-favorited). The show above is favorited;
@@ -149,9 +149,9 @@ which breaks `#k` discovery without breaking anything visible.
   ([Vector 19](#test-vectors).) The two copies need not agree about the feed
   either: resolve the marker **per feed**, not per group, because the favorite
   is a property of the feed and not of the group that happens to carry it.
-- **Nothing past the identifier takes part in grouping.** The hint at position
-  2 and the marker at position 3 are read off the entry they sit on; they open
-  nothing, close nothing, and re-parent nothing.
+- **Nothing past the identifier takes part in grouping.** The marker at
+  position 2 is read off the entry it sits on; it opens nothing, closes
+  nothing, and re-parents nothing.
 - **An artist entry opens nothing.** `podcast:publisher:guid:…` is an entry in
   its own right: it starts no group, closes none, and is never an item of the
   group above it. See [An artist is a favorite that opens
@@ -205,12 +205,12 @@ before the marker existed is still a list somebody's favorites are on.
 
 A feed favorite and an item favorite are separate, independent things. Saving
 one episode of a show you do not follow is an ordinary state, and so is
-following a show none of whose episodes you have saved. **Position 3 of a feed
+following a show none of whose episodes you have saved. **Position 2 of a feed
 `i` tag** says which:
 
 ```json
-["i", "podcast:guid:<feedGuid>", "", "fav"]
-["i", "podcast:guid:<feedGuid>", "", "placement"]
+["i", "podcast:guid:<feedGuid>", "fav"]
+["i", "podcast:guid:<feedGuid>", "placement"]
 ```
 
 - `fav` — the user favorited this feed.
@@ -220,15 +220,23 @@ following a show none of whose episodes you have saved. **Position 3 of a feed
   back to the rules in the section above. Treat an unknown value as absent and
   carry the tag: it belongs to a writer newer than you.
 
-**Position 2 is NIP-73's URL hint, and stays that way.** Write `""` when you
-have no hint. This format has no use for the slot yet — see [Open
-questions](#open-questions--not-yet-resolved) — but a generic NIP-73 consumer
-reads position 2 as a URL, and handing it the string `fav` is a bug in
-somebody else's client that nothing here can fix afterwards. A marker
-therefore always ships four elements.
+**A marker ships three elements, and there is no fourth.** An earlier draft of
+this document reserved position 2 for NIP-73's optional URL hint and put the
+marker behind it at position 3. The hint is gone: an entry's guid resolves
+through the Podcast Index, which is the same lookup a client already makes for
+the title and the artwork, so the slot never had a job the guid was not doing.
+The cost is stated in [What this format does not
+do](#what-this-format-does-not-do) — the marker now sits where a generic
+NIP-73 consumer looks for a URL, and reads there as one.
+
+No event has ever carried a marker at the old position: the marker is
+unimplemented in both writers, so this moves a slot rather than a list. If you
+meet a four-element entry anyway, the value at position 2 is `""` and `""`
+states nothing, so it is carried and the feed falls back to the rules in the
+section above. That is the safe failure and it needs no migration rule.
 
 **Item entries take no marker.** An item on this list is a favorite; nothing
-else puts one there, and nothing nests below it. Position 3 on an item entry
+else puts one there, and nothing nests below it. Position 2 on an item entry
 is unspecified — carry it, do not read it.
 
 **Resolve the marker per FEED, not per group.** One feed may open two groups
@@ -355,7 +363,7 @@ the publisher feed**, not here. So the entry stands alone:
   cannot read at all.
 - It is **never an item** of the group above it. An artist is not a track.
 - It takes **no marker.** Nothing but a favorite puts an artist on this list,
-  so position 3 has no question to answer there. Emit the tag bare.
+  so position 2 has no question to answer there. Emit the tag bare.
 - Its kind still belongs in the trailing `k` tags, or `#k` discovery misses
   every artist favorite on every list.
 
@@ -685,10 +693,11 @@ tag**, not a value re-rendered from your own model: a later revision may put
 something at a position you don't read yet.
 
 **"Whole tag" means every element of it**, and this is no longer hypothetical:
-positions 2 and 3 of an `i` carry a URL hint and a [feed-favorite
-marker](#saying-whether-a-feed-is-favorited). A writer that rebuilds entries as
-`["i", id]` type-checks, renders correctly, and erases every marker on the list
-in one publish. ([Vector 27](#test-vectors).)
+position 2 of an `i` carries the [feed-favorite
+marker](#saying-whether-a-feed-is-favorited), and position 3 is undefined,
+which is precisely where a writer newer than you will put the next thing. A
+writer that rebuilds entries as `["i", id]` type-checks, renders correctly, and
+erases every marker on the list in one publish. ([Vector 27](#test-vectors).)
 
 An unparseable entry must not close the open feed group either. An
 unrecognized `i` sitting between a feed and its items must not re-parent
@@ -750,7 +759,7 @@ each other indefinitely.
 
 - **No split between shows and items ACROSS EVENTS.** A show favorite and an
   episode favorite are separate things on the list — [position
-  3](#saying-whether-a-feed-is-favorited) is what makes them separate — but
+  2](#saying-whether-a-feed-is-favorited) is what makes them separate — but
   both live in the one event, so a large favorites list risks hitting relay
   size caps (~128 KB on nos.lol).
   Item favorites accumulate an order of magnitude faster than feed
@@ -758,6 +767,21 @@ each other indefinitely.
   trying, where the same person follows perhaps forty shows — so the tracks
   are what eventually make a publish fail, and they take the show
   subscriptions down with them.
+- **No fallback URL for an entry the Podcast Index cannot resolve.** An entry
+  is a guid and a marker. Resolving the guid is the only way to reach a title,
+  artwork or a feed URL, so a feed that 404s and was never indexed leaves a
+  reader with a guid and nothing to render. NIP-73 has an optional URL hint
+  for exactly this, and an earlier draft reserved a slot for it; the slot is
+  gone, because the guid resolves for every entry either live app has
+  published and a reserved-but-empty position bought nothing.
+
+  Two things follow, and both are real. A generic NIP-73 consumer reads
+  position 2 as a URL, so it reads `fav` and `placement` as URLs — this format
+  hands another client a malformed value it will never fix afterwards, and
+  that is a deliberate trade rather than an oversight. And the unresolvable
+  entry has no answer at all now: carry it, render what you can, and do not
+  delete it, because a guid nobody can resolve today is still somebody's
+  favorite.
 - **No provenance, and so no last-write-wins.** Nothing on an entry records
   which app added it or when, which is why every writer has to keep its own
   baseline (see [Merging](#merging)) instead of deriving the answer from the
@@ -962,10 +986,10 @@ rather than a guess about bytes per entry.
 
 **25. A feed favorite and an item favorite are stated separately.** Favorite
 one episode of a show you do not follow: the group opened for it says
-`placement`, and the marker sits at position 3 with `""` at position 2, which
-is NIP-73's. Then favorite the show as well — the state this format could not
-express at all before, because a feed favorited alongside one of its tracks
-read back as a group that might exist only to place the track. Same group,
+`placement`, and the marker sits at position 2 with nothing behind it. Then
+favorite the show as well — the state this format could not express at all
+before, because a feed favorited alongside one of its tracks read back as a
+group that might exist only to place the track. Same group,
 same item, `fav`, and the item still parses with that feed as its parent. Pin
 the reading of a list that has no markers in the same fixture — itemless is a
 favorite, with items is unknowable, and answering `true` there is the mutation
@@ -988,10 +1012,10 @@ two of you rewriting the event at each other forever.
 
 **27. A marker is carried whole, and never invented for an entry you carry.**
 Rule 4 inside an `i` tag. A writer with no notion of markers — nothing in its
-local state says favorited or not — republishes position 3 and any hint beside
-it byte-identical; rebuilding entries as `["i", id]` erases every marker on
-the list in one publish and looks exactly like nobody having favorited those
-shows. Then the inverse, which is the 114 one level up: a writer that DOES
+local state says favorited or not — republishes position 2 and anything a
+newer writer parked behind it byte-identical; rebuilding entries as
+`["i", id]` erases every marker on the list in one publish and looks exactly
+like nobody having favorited those shows. Then the inverse, which is the 114 one level up: a writer that DOES
 know about markers may not stamp its own answer onto a group it is merely
 carrying. It does not know, `fav` invents a favorite, `placement` deletes one
 no other app will restate, and the absent marker is the only honest output.
@@ -1156,11 +1180,3 @@ the album, or the artist closes the group and the track becomes an orphan.
   two events without a crash in between duplicating or losing it, and a second
   helping of the collision cost named in [Core
   Architecture](#core-architecture).
-- Optional NIP-73-style relay/URL hints (position 2 on `i` tags) are not
-  currently used; could be added later as a fallback path to the raw feed
-  URL if a Podcast Index lookup fails. Dropping them costs the only answer
-  available for an entry Podcast Index cannot resolve at all — a feed that
-  404s and was never indexed leaves a guid and nothing else. The slot is still
-  free: the [feed-favorite marker](#saying-whether-a-feed-is-favorited) took
-  position 3 and writes `""` here precisely so a hint can arrive later without
-  a migration, and so a generic NIP-73 consumer never reads a marker as a URL.

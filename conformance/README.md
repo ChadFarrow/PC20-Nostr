@@ -137,6 +137,8 @@ breaking the reference on purpose and confirming the right one fails:
 | Read a non-array plaintext as an empty list | **23** |
 | Publish a private half past 60,000 bytes | **24** |
 | Rebuild `i` tags as `['i', id]` on emit | **25, 26, 27** |
+| Write the marker at position 3, behind an empty position 2 | **25, 26, 27** |
+| Read the marker from position 3 | **25, 26** |
 | Express a feed-favorite removal by leaving the marker off | **25, 26** |
 | Let a `placement` you hold overwrite a `fav` you do not claim | **26** |
 | Read an unmarked group with items as a feed favorite | **25, 27** |

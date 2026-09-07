@@ -1056,15 +1056,16 @@ test('25. A feed favorite and an item favorite are stated separately', () => {
   assert.ok(placing.publish);
   assert.deepEqual(
     tagFor(placing.publish.tags, FEED_A),
-    ['i', FEED_A, '', 'placement'],
+    ['i', FEED_A, 'placement'],
     'a group opened only to place a track must say so',
   );
   assert.ok(ids(placing.publish.tags).includes(ITEM_A1), 'the episode was lost');
   assert.equal(feedFavorite(placing.publish.tags, FEED_A), false);
 
-  // Position 2 is NIP-73's URL hint, not ours. A generic NIP-73 consumer reads
-  // it as a URL, so a marker written there hands it the string 'placement'.
-  assert.equal(tagFor(placing.publish.tags, FEED_A)[2], '');
+  // Three elements, and nothing past the marker. An earlier draft reserved
+  // position 2 for NIP-73's URL hint and put the marker at position 3; the
+  // hint went because the guid already resolves through the Podcast Index.
+  assert.equal(tagFor(placing.publish.tags, FEED_A).length, 3);
 
   // Now favorite the show as well. Same group, same item, different answer —
   // and this is the state the format could not express at all before: a feed
@@ -1077,7 +1078,7 @@ test('25. A feed favorite and an item favorite are stated separately', () => {
     mode: 'public',
   });
   assert.ok(both.publish, 'favoriting the show is a change and must publish');
-  assert.deepEqual(tagFor(both.publish.tags, FEED_A), ['i', FEED_A, '', 'fav']);
+  assert.deepEqual(tagFor(both.publish.tags, FEED_A), ['i', FEED_A, 'fav']);
   // The feed favorite is a CLAIM OF ITS OWN, separate from the entry's. The
   // group was already on the list — this device put it there to place a track
   // — so a baseline that records only identifiers has nothing that says who
@@ -1112,9 +1113,9 @@ test('25. A feed favorite and an item favorite are stated separately', () => {
   // holds when a reader meets the same feed twice on the wire (vector 19)...
   const twice = parseTags([
     ['medium', 'music'],
-    ['i', FEED_A, '', 'placement'],
+    ['i', FEED_A, 'placement'],
     ['i', ITEM_A1],
-    ['i', FEED_A, '', 'fav'],
+    ['i', FEED_A, 'fav'],
     ['i', ITEM_A2],
   ]);
   assert.deepEqual(
@@ -1129,8 +1130,8 @@ test('25. A feed favorite and an item favorite are stated separately', () => {
   // the halves happened to be concatenated in.
   const folded = plan({
     read: ev(
-      [ALT, VIS_PUBLIC, ['medium', 'podcast'], ['i', FEED_A, '', 'placement'], ['i', ITEM_A1], K_FEED, K_ITEM],
-      encodePrivate([['medium', 'podcast'], ['i', FEED_A, '', 'fav']]),
+      [ALT, VIS_PUBLIC, ['medium', 'podcast'], ['i', FEED_A, 'placement'], ['i', ITEM_A1], K_FEED, K_ITEM],
+      encodePrivate([['medium', 'podcast'], ['i', FEED_A, 'fav']]),
     ),
     local: [feed(FEED_A, 'podcast', [ITEM_A1])],
     baseline: base([FEED_A, ITEM_A1]),
@@ -1157,7 +1158,7 @@ test('26. Unfavoriting the show keeps the episode, and says so', () => {
   const read = ev([
     ALT,
     ['medium', 'podcast'],
-    ['i', FEED_A, '', 'fav'],
+    ['i', FEED_A, 'fav'],
     ['i', ITEM_A1],
     K_FEED,
     K_ITEM,
@@ -1228,20 +1229,23 @@ test('27. A marker is carried whole, and never invented for an entry you carry',
   // Rule 4 inside an `i` tag. A writer that rebuilds entries from its own
   // model emits `['i', id]` and drops every marker on the list — silently, and
   // it looks exactly like nobody having favorited any of those shows.
-  const HINT = 'https://example.com/feed.xml';
+  // Position 3 belongs to nobody yet, which is exactly why a tag carrying
+  // something there is the one to test: a writer that rebuilds the entry keeps
+  // what it understands and drops the rest.
+  const NEWER = 'written-by-a-writer-newer-than-this-one';
   const read = ev([
     ALT,
     ['medium', 'podcast'],
-    ['i', FEED_A, HINT, 'fav'],
+    ['i', FEED_A, 'fav', NEWER],
     ['i', ITEM_A1],
-    ['i', FEED_B, '', 'placement'],
+    ['i', FEED_B, 'placement'],
     ['i', ITEM_B1],
     K_FEED,
     K_ITEM,
   ]);
 
   // A marker-blind writer: `favorited` is absent from everything it holds,
-  // which is what an app that has never heard of position 3 passes in.
+  // which is what an app that has never heard of position 2 passes in.
   const blind = plan({
     read,
     local: [feed(FEED_A, 'podcast', [ITEM_A1]), feed(FEED_C, 'podcast')],
@@ -1251,10 +1255,10 @@ test('27. A marker is carried whole, and never invented for an entry you carry',
   assert.ok(blind.publish, 'adding a local favorite must produce a publish');
   assert.deepEqual(
     tagFor(blind.publish.tags, FEED_A),
-    ['i', FEED_A, HINT, 'fav'],
-    'the marker and the hint beside it must come back byte-identical',
+    ['i', FEED_A, 'fav', NEWER],
+    'the marker and the element past it must come back byte-identical',
   );
-  assert.deepEqual(tagFor(blind.publish.tags, FEED_B), ['i', FEED_B, '', 'placement']);
+  assert.deepEqual(tagFor(blind.publish.tags, FEED_B), ['i', FEED_B, 'placement']);
   assert.deepEqual(
     tagFor(blind.publish.tags, FEED_C),
     ['i', FEED_C],
@@ -1287,7 +1291,7 @@ test('27. A marker is carried whole, and never invented for an entry you carry',
     'a marker was invented for a group this writer only carries',
   );
   assert.equal(feedFavorite(carrying.publish.tags, FEED_A), null, 'still unknowable');
-  assert.deepEqual(tagFor(carrying.publish.tags, FEED_C), ['i', FEED_C, '', 'fav']);
+  assert.deepEqual(tagFor(carrying.publish.tags, FEED_C), ['i', FEED_C, 'fav']);
 });
 
 test('28. An artist entry is a favorite that opens nothing', () => {
@@ -1324,7 +1328,7 @@ test('28. An artist entry is a favorite that opens nothing', () => {
 
   // Carried in place by a writer changing something else, and BARE. A marker
   // states whether a feed is favorited as opposed to merely placed; an artist
-  // is never merely placed, so there is no question for position 3 to answer.
+  // is never merely placed, so there is no question for position 2 to answer.
   const carried = plan({
     read: ev(tags),
     local: [feed(FEED_A, 'music', [ITEM_A1], true)],

@@ -29,26 +29,25 @@ export const ALT = 'PC 2.0 Favorites';
 export const VISIBILITY = 'visibility';
 
 /**
- * Position 3 of a feed `i` tag: whether the user favorited the FEED itself, as
+ * Position 2 of a feed `i` tag: whether the user favorited the FEED itself, as
  * opposed to the group merely being open so an item below it can name a parent.
  *
- * Position 2 is left to NIP-73's URL hint and written as '' when there is
- * none. Putting the marker there would hand a generic NIP-73 consumer the
- * string 'fav' where it expects a URL. Data Structure, "Saying whether a feed
- * is favorited".
+ * There is nothing at position 3. An earlier draft put the marker there and
+ * left position 2 to NIP-73's URL hint; the hint was dropped because the guid
+ * already resolves through the Podcast Index. Data Structure, "Saying whether
+ * a feed is favorited".
  */
 export const FAV = 'fav';
 export const PLACEMENT = 'placement';
 
 /** The marker on a tag, or null when it states nothing this writer knows. */
 export function markerOf(tag) {
-  const m = tag?.[3];
+  const m = tag?.[2];
   return m === FAV || m === PLACEMENT ? m : null;
 }
 
-/** A feed `i` tag carrying a marker, keeping whatever hint was at position 2. */
-const feedTag = (id, marker, hint = '') =>
-  marker === null ? ['i', id] : ['i', id, hint ?? '', marker];
+/** A feed `i` tag carrying a marker. A marker states something or is absent. */
+const feedTag = (id, marker) => (marker === null ? ['i', id] : ['i', id, marker]);
 
 /** Baseline claims are per-thing, and a feed favorite is its own thing. */
 export const FAV_CLAIM = 'fav:';
@@ -347,7 +346,7 @@ function dedupeEntries(tags) {
       seen.add(tag[1]);
       const want = best.get(tag[1]) ?? null;
       if (want !== null && markerOf(tag) !== want) {
-        out.push(feedTag(tag[1], want, tag[2] ?? ''));
+        out.push(feedTag(tag[1], want));
         continue;
       }
     }
@@ -491,9 +490,10 @@ function mergeHalf(
           const wire = markerOf(tag);
           const want = markerFor(tag[1], wire);
           // Byte-identical unless the marker actually changed, so rule 5 still
-          // sees an unchanged list as unchanged — and any hint sitting at
-          // position 2 survives, because it is read off the tag, not invented.
-          out.push(want === wire ? tag : feedTag(tag[1], want, tag[2] ?? ''));
+          // sees an unchanged list as unchanged — and anything a newer writer
+          // parked past the marker survives, because the unchanged tag is
+          // pushed whole rather than rebuilt.
+          out.push(want === wire ? tag : feedTag(tag[1], want));
         } else {
           out.push(tag);
         }

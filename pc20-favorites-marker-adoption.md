@@ -23,7 +23,7 @@ either codebase has agreed to.
 2. **Either app reads the marker.** Any order, once stage 1 is everywhere.
 3. **Either app writes the marker.** Any order, once stage 1 is everywhere.
 
-The reason is one-directional damage. App A writes `["i", feed, "", "fav"]`.
+The reason is one-directional damage. App A writes `["i", feed, "fav"]`.
 App B reads the list, rebuilds the entry as `["i", feed]`, and republishes. The
 marker is gone — silently, on someone else's device, and app B's screen looks
 correct throughout. Both apps are writers, so both must be able to carry before
@@ -62,8 +62,8 @@ narrower than that: **a node the app could PLACE is re-emitted from the model
 rather than from the tag.** A node it could not place is already carried whole,
 which is why the fix is small.
 
-An `i` tag is `["i", identifier, hint, marker]`. Positions 2 and 3 are what
-gets dropped.
+An `i` tag is `["i", identifier, marker]`. Position 2 is what gets dropped,
+along with anything a writer newer than either app parks behind it.
 
 ### stablekraft-app
 
@@ -120,8 +120,7 @@ thing being fixed.
 
 A list carrying markers written by anyone survives both apps untouched. That is
 the whole prerequisite, and it is worth landing on its own: it is also what
-makes the still-unused [NIP-73 URL hint at position
-2](pc20-favorites.md#open-questions--not-yet-resolved) safe to introduce later
+lets a later revision put something at position 3, which nothing defines yet,
 without a second round of this.
 
 Vector 27 goes green here. 25 and 26 do not.
