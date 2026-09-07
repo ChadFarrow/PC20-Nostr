@@ -36,6 +36,7 @@ const {
   encodePlaintext,
   decodePlaintext,
   seal,
+  itemClaim,
 } = ADAPTER;
 
 // ---------------------------------------------------------------------------
@@ -56,12 +57,30 @@ const K_FEED = ['k', 'podcast:guid'];
 const K_ITEM = ['k', 'podcast:item:guid'];
 
 const ev = (tags, content = '') => ({ kind: 10333, tags, content });
-const feed = (id, medium, items = [], favorited = null) => ({
+/**
+ * A feed this device holds. `favorited` says whether the FEED itself is a
+ * favorite; `items` are item favorites from that feed, which need the feed
+ * guid and nothing else. Default true, because most fixtures here hold both.
+ */
+const feed = (id, medium, items = [], favorited = true) => ({
   id,
   medium,
   items,
   favorited,
 });
+
+/** The bare feed guid inside a `podcast:guid:` identifier. */
+const guidOf = (feedId) => feedId.slice('podcast:guid:'.length);
+
+/** An item `i` tag: the item's identifier, and the guid of its feed. */
+const item = (itemId, feedId) => ['i', itemId, guidOf(feedId)];
+
+/**
+ * The baseline claim for one item favorite. An item is the PAIR, so a claim on
+ * one is the pair — a baseline keyed on the item guid alone cannot tell two
+ * items in two feeds apart, and item guids are only unique within a feed.
+ */
+const claim = (itemId, feedId) => itemClaim(itemId, guidOf(feedId));
 const base = (pub = [], priv = []) => ({ public: pub, private: priv });
 
 /** Just the `i` values, in order. */
@@ -73,11 +92,8 @@ const at = (tags, id) => (tags ?? []).findIndex((t) => t[0] === 'i' && t[1] === 
 /** The whole `i` tag for an identifier, or undefined. */
 const tagFor = (tags, id) => (tags ?? []).find((t) => t[0] === 'i' && t[1] === id);
 
-/** What the list says about a FEED, resolved: true, false or null. */
-const feedFavorite = (tags, id) => {
-  const g = parseTags(tags).groups.find((x) => x.id === id);
-  return g === undefined ? undefined : g.favorited ?? null;
-};
+/** Is this feed favorited? Its entry being on the list is the whole answer. */
+const feedFavorite = (tags, id) => parseTags(tags).favorited.get(id) ?? false;
 
 /** Entry shape without the tag index, so two layouts can be compared. */
 const shape = (parsed) =>
@@ -85,7 +101,7 @@ const shape = (parsed) =>
     id: e.id,
     kind: e.kind,
     medium: e.medium,
-    parent: e.parent,
+    feed: e.feed,
   }));
 
 // ---------------------------------------------------------------------------
@@ -98,7 +114,7 @@ test('1. A foreign entry survives your republish', () => {
     ALT,
     ['medium', 'podcast'],
     ['i', FEED_A],
-    ['i', ITEM_A1],
+    item(ITEM_A1, FEED_A),
     ['medium', 'music'],
     ['i', FEED_B],
     K_FEED,
@@ -108,7 +124,7 @@ test('1. A foreign entry survives your republish', () => {
   const { publish } = plan({
     read,
     local: [feed(FEED_A, 'podcast', [ITEM_A1]), feed(FEED_C, 'podcast')],
-    baseline: base([FEED_A, ITEM_A1]),
+    baseline: base([FEED_A, claim(ITEM_A1, FEED_A)]),
     mode: 'public',
   });
 
@@ -212,16 +228,22 @@ test('4. An unrecognized tag or identifier kind survives', () => {
   assert.ok(flat.includes('a tag type with no meaning here'), 'unknown tag dropped');
   assert.ok(flat.includes('"future:thing"'), 'unknown `k` dropped');
 
-  // Rule 4 again: an unparseable entry must not close the open feed group.
-  // ITEM_A2 sits after the unreadable identifier and still belongs to FEED_A.
+  // Rule 4 again, and it still bites on the LEGACY layout. A two-element item
+  // tag takes its feed from the entry above it, so an unreadable identifier
+  // between the two must not end that run — do that and the item is left with
+  // no feed guid at all, which makes it unresolvable rather than mislabelled.
   const parsed = parseTags([
     ['medium', 'podcast'],
     ['i', FEED_A],
     ['i', 'future:thing:abc'],
-    ['i', ITEM_A2],
+    ['i', ITEM_A2], // legacy: no feed guid of its own
   ]);
-  const item = parsed.entries.find((e) => e.id === ITEM_A2);
-  assert.equal(item.parent, FEED_A, 'an unparseable entry re-parented the ones after it');
+  const entry = parsed.entries.find((e) => e.id === ITEM_A2);
+  assert.equal(
+    entry.feed,
+    guidOf(FEED_A),
+    'an unparseable entry ended the legacy run and stranded the item',
+  );
 });
 
 test('5. Placement', () => {
@@ -229,24 +251,36 @@ test('5. Placement', () => {
     ['i', FEED_C], // before any medium tag
     ['medium', 'podcast'],
     ['i', FEED_A],
-    ['i', ITEM_A1],
+    item(ITEM_A1, FEED_A),
     ['medium', 'music'],
     ['i', FEED_B],
-    ['i', ITEM_B1],
+    item(ITEM_B1, FEED_B),
   ]);
 
   const by = (id) => parsed.entries.find((e) => e.id === id);
 
-  // An item attaches to the MOST RECENTLY OPENED group — not the first, and
-  // not the nearest by any other measure.
-  assert.equal(by(ITEM_A1).parent, FEED_A);
-  assert.equal(by(ITEM_B1).parent, FEED_B);
+  // An item names its own feed, so the answer is on the entry rather than in
+  // the entry above it.
+  assert.equal(by(ITEM_A1).feed, guidOf(FEED_A));
+  assert.equal(by(ITEM_B1).feed, guidOf(FEED_B));
 
-  // Medium is a running value.
+  // ...and that survives a shuffle, which is the whole point. Reordering used
+  // to reattach every item to whatever feed happened to precede it.
+  const shuffled = parseTags([
+    item(ITEM_B1, FEED_B),
+    ['i', FEED_A],
+    item(ITEM_A1, FEED_A),
+    ['i', FEED_B],
+  ]);
+  const byShuffled = (id) => shuffled.entries.find((e) => e.id === id);
+  assert.equal(byShuffled(ITEM_B1).feed, guidOf(FEED_B), 'a reorder moved an item');
+  assert.equal(byShuffled(ITEM_A1).feed, guidOf(FEED_A), 'a reorder moved an item');
+
+  // Medium is a running value, and it is now the ONLY positional thing left.
   assert.equal(by(FEED_A).medium, 'podcast');
   assert.equal(by(FEED_B).medium, 'music');
 
-  // A group with no `medium` above it is UNKNOWN, never defaulted to
+  // An entry with no `medium` above it is UNKNOWN, never defaulted to
   // 'podcast'. Defaulting turns an absence into a claim.
   assert.equal(by(FEED_C).medium, null, 'medium was defaulted, not left unknown');
 });
@@ -279,7 +313,7 @@ test('7. Both `k` layouts parse identically', () => {
   const trailing = [
     ['medium', 'podcast'],
     ['i', FEED_A],
-    ['i', ITEM_A1],
+    item(ITEM_A1, FEED_A),
     K_FEED,
     K_ITEM,
   ];
@@ -289,7 +323,7 @@ test('7. Both `k` layouts parse identically', () => {
     ['medium', 'podcast'],
     ['i', FEED_A],
     K_FEED,
-    ['i', ITEM_A1],
+    item(ITEM_A1, FEED_A),
     K_ITEM,
   ];
 
@@ -362,14 +396,16 @@ test('10. A baseline is never written for a publish that did not land', () => {
   assert.deepEqual(ids(retry.publish.tags), [FEED_A, ITEM_A1]);
 });
 
-test('11. A group whose last item you removed goes; one with a foreign item left under it stays', () => {
-  // Both cases are "a feed in my baseline that I no longer hold". Only the
-  // first is a removal this writer may express.
+test('11. Removing a feed favorite never touches anybody\'s items', () => {
+  // The rule this replaces: a feed group used to survive while any item under
+  // it did, because the group was the only tag naming those items' feed.
+  // Dropping it deleted another app's tracks. An item now carries its own feed
+  // guid, so the two removals are independent and this cannot happen.
   const mineOnly = ev([
     ALT,
     ['medium', 'podcast'],
     ['i', FEED_A],
-    ['i', ITEM_A1],
+    item(ITEM_A1, FEED_A),
     K_FEED,
     K_ITEM,
   ]);
@@ -377,19 +413,22 @@ test('11. A group whose last item you removed goes; one with a foreign item left
   const gone = plan({
     read: mineOnly,
     local: [feed(FEED_C, 'podcast')],
-    baseline: base([FEED_A, ITEM_A1]),
+    baseline: base([FEED_A, claim(ITEM_A1, FEED_A)]),
     mode: 'public',
   });
-  assert.ok(!ids(gone.publish.tags).includes(FEED_A), 'an empty group should go');
+  const out1 = ids(gone.publish.tags);
+  assert.ok(!out1.includes(FEED_A), 'a feed favorite we took back should go');
+  assert.ok(!out1.includes(ITEM_A1), 'an item favorite we took back should go');
 
-  // ITEM_A2 belongs to another app. FEED_A is the only tag naming its parent,
-  // so dropping the group takes their track with it.
+  // ITEM_A2 belongs to another app. Our baseline claims the feed and ITEM_A1,
+  // so both of ours go — and theirs stays, WITH ITS FEED GUID, even though no
+  // feed entry for FEED_A is left on the list at all.
   const withForeign = ev([
     ALT,
     ['medium', 'podcast'],
     ['i', FEED_A],
-    ['i', ITEM_A1],
-    ['i', ITEM_A2],
+    item(ITEM_A1, FEED_A),
+    item(ITEM_A2, FEED_A),
     K_FEED,
     K_ITEM,
   ]);
@@ -397,17 +436,24 @@ test('11. A group whose last item you removed goes; one with a foreign item left
   const stays = plan({
     read: withForeign,
     local: [feed(FEED_C, 'podcast')],
-    baseline: base([FEED_A, ITEM_A1]),
+    baseline: base([FEED_A, claim(ITEM_A1, FEED_A)]),
     mode: 'public',
   });
 
   const out = ids(stays.publish.tags);
   assert.ok(out.includes(ITEM_A2), "another app's track was deleted");
-  assert.ok(out.includes(FEED_A), 'the group naming their track was dropped with it');
   assert.ok(!out.includes(ITEM_A1), 'our own removal should still propagate');
   assert.ok(
-    at(stays.publish.tags, FEED_A) < at(stays.publish.tags, ITEM_A2),
-    'the surviving item must still sit under its parent',
+    !out.includes(FEED_A),
+    'the feed favorite was kept alive by an item that no longer needs it',
+  );
+  // The surviving item is still resolvable on its own. Under the old format
+  // this is the assertion that could not be made: the feed guid lived in a tag
+  // that was just deleted.
+  assert.deepEqual(
+    tagFor(stays.publish.tags, ITEM_A2),
+    item(ITEM_A2, FEED_A),
+    "the surviving item lost the feed guid it needs to be looked up",
   );
 });
 
@@ -789,24 +835,26 @@ test('17. A writer that cannot read a half may not restate the mode', () => {
   );
 });
 
-test('18. Items keep their wire order, and a new item lands at the end of its own group', () => {
-  // Two groups, and the writer holds the first one's items in a DIFFERENT
-  // order from the wire, plus one new item for it. Three ways to get this
-  // wrong, and each one is a well-formed event:
+test('18. Entries keep their wire order, and a new one lands in its own medium run', () => {
+  // The writer holds one feed's items in a DIFFERENT order from the wire, plus
+  // one new item for it. Two ways to get this wrong, and each is well-formed:
   //
   //   local order first   — the other app reads it back, imposes ITS order,
   //                         and the two rewrite the event at each other forever
-  //   append to the event — the new item lands after FEED_B and re-parents to it
-  //   sort by anything    — same as the first, with a different key
+  //   append to the event — the new item opens a second `medium podcast` run
+  //
+  // A third way used to exist and is now impossible: appending to the end of
+  // the event once re-parented the new item to whatever feed was last opened.
+  // The item names its own feed, so misplacing it costs contiguity, not data.
   const read = ev([
     ALT,
     ['medium', 'podcast'],
     ['i', FEED_A],
-    ['i', ITEM_A1],
-    ['i', ITEM_A2],
+    item(ITEM_A1, FEED_A),
+    item(ITEM_A2, FEED_A),
     ['medium', 'music'],
     ['i', FEED_B],
-    ['i', ITEM_B1],
+    item(ITEM_B1, FEED_B),
     K_FEED,
     K_ITEM,
   ]);
@@ -818,7 +866,7 @@ test('18. Items keep their wire order, and a new item lands at the end of its ow
       feed(FEED_A, 'podcast', [ITEM_A3, ITEM_A2, ITEM_A1]), // held in another order
       feed(FEED_B, 'music', [ITEM_B1]),
     ],
-    baseline: base([FEED_A, ITEM_A1, ITEM_A2, FEED_B, ITEM_B1]),
+    baseline: base([FEED_A, claim(ITEM_A1, FEED_A), claim(ITEM_A2, FEED_A), FEED_B, claim(ITEM_B1, FEED_B)]),
     mode: 'public',
   });
 
@@ -826,95 +874,115 @@ test('18. Items keep their wire order, and a new item lands at the end of its ow
   assert.deepEqual(
     ids(publish.tags),
     [FEED_A, ITEM_A1, ITEM_A2, ITEM_A3, FEED_B, ITEM_B1],
-    'read order kept, the new item after its own group and before the next',
+    'read order kept, the new item at the end of its own medium run',
   );
   const parsed = parseTags(publish.tags);
+  const a3 = parsed.entries.find((e) => e.id === ITEM_A3);
+  assert.equal(a3.feed, guidOf(FEED_A), 'the new item lost its feed guid');
+  assert.equal(a3.medium, 'podcast', 'the new item opened a second medium run');
   assert.equal(
-    parsed.entries.find((e) => e.id === ITEM_A3).parent,
-    FEED_A,
-    'the new item was appended to the event and attached to the wrong group',
+    publish.tags.filter((t) => t[0] === 'medium' && t[1] === 'podcast').length,
+    1,
+    'the podcast run was split in two',
   );
 });
 
 test('19. The same feed twice on the wire loses no item', () => {
-  // A duplicate group is well-formed: a reader attaches each item to the most
-  // recently opened group, and both groups name the same feed. A writer that
-  // models groups by feed guid meets the second one already "taken" — and
-  // skipping it drops ITEM_A2, which is a real favorite named nowhere else.
+  // A duplicate feed entry is well-formed: two writers each stated the same
+  // favorite. Under the old grouping it was dangerous — each copy opened a
+  // group, and a writer that modelled groups by feed guid met the second one
+  // already "taken" and dropped the items under it. Items name their own feed
+  // now, so folding the duplicate cannot move anything.
   const read = ev([
     ALT,
     ['medium', 'podcast'],
     ['i', FEED_A],
-    ['i', ITEM_A1],
+    item(ITEM_A1, FEED_A),
     ['i', FEED_A],
-    ['i', ITEM_A2],
+    item(ITEM_A2, FEED_A),
     K_FEED,
     K_ITEM,
   ]);
 
+  const feedsOf = (tags) =>
+    parseTags(tags)
+      .entries.filter((e) => e.feed !== null)
+      .map((e) => [e.id, e.feed]);
+
   // Carry it: nothing local, nothing claimed. Publishing nothing is fine;
-  // publishing something must still hold both items under FEED_A.
+  // publishing something must still hold both items against FEED_A.
   const carried = plan({ read, local: [], baseline: base(), mode: 'public' });
   const after = carried.publish ?? read;
-  const parents = (tags) =>
-    parseTags(tags)
-      .entries.filter((e) => e.parent !== null)
-      .map((e) => [e.id, e.parent]);
   assert.deepEqual(
-    parents(after.tags).sort(),
-    [[ITEM_A1, FEED_A], [ITEM_A2, FEED_A]].sort(),
-    "the duplicate group's item was dropped, or moved under another feed",
+    feedsOf(after.tags).sort(),
+    [
+      [ITEM_A1, guidOf(FEED_A)],
+      [ITEM_A2, guidOf(FEED_A)],
+    ].sort(),
+    'an item lost or moved when the duplicate feed entry was folded',
   );
+  assert.ok(ids(after.tags).includes(FEED_A), 'the feed favorite itself was dropped');
 
-  // Then a real change. The writer folds or carries — either keeps every item
-  // under its feed — and adds its own.
+  // Then a real change. Folding the duplicate is allowed; losing an item is
+  // not, and neither is losing the favorite the duplicate stated.
   const ITEM_A3 = 'podcast:item:guid:aaaaaaaa-1111-0000-0000-000000000003';
   const { publish } = plan({
     read,
     local: [feed(FEED_A, 'podcast', [ITEM_A1, ITEM_A3])],
-    baseline: base([FEED_A, ITEM_A1]),
+    baseline: base([FEED_A, claim(ITEM_A1, FEED_A)]),
     mode: 'public',
   });
   assert.ok(publish, 'adding an item must publish');
   assert.deepEqual(
-    parents(publish.tags).sort(),
-    [[ITEM_A1, FEED_A], [ITEM_A2, FEED_A], [ITEM_A3, FEED_A]].sort(),
-    "the duplicate group's item did not survive the writer's own change",
+    feedsOf(publish.tags).sort(),
+    [
+      [ITEM_A1, guidOf(FEED_A)],
+      [ITEM_A2, guidOf(FEED_A)],
+      [ITEM_A3, guidOf(FEED_A)],
+    ].sort(),
+    "the duplicate's item did not survive the writer's own change",
   );
 });
 
-test('20. An item before any feed group is carried, in place, and opens nothing', () => {
-  // Nothing in this document writes one, and another writer may. It has no
-  // parent — that is the whole fact about it — and it must not become the
-  // parent of anything, close a group, or move.
+test('20. An item that names no feed is carried, in place, and never deleted', () => {
+  // Every item published before this revision looks like this, and so does one
+  // written by a writer that dropped position 2. Its feed guid is not
+  // recoverable — no entry above it names one — so this writer cannot resolve
+  // it, cannot render it, and must still not touch it. Deleting an entry is a
+  // thing the user asked for.
   const ORPHAN = 'podcast:item:guid:00000000-9999-0000-0000-000000000001';
   const tags = [
     ALT,
     ['i', ORPHAN],
     ['medium', 'podcast'],
     ['i', FEED_A],
-    ['i', ITEM_A1],
+    item(ITEM_A1, FEED_A),
     K_FEED,
     K_ITEM,
   ];
 
   const parsed = parseTags(tags);
   const by = (id) => parsed.entries.find((e) => e.id === id);
-  assert.ok(by(ORPHAN), 'an orphan item is an entry, not junk');
-  assert.equal(by(ORPHAN).parent, null, 'an orphan has no parent');
-  assert.equal(by(ITEM_A1).parent, FEED_A, 'the orphan re-parented the items after it');
+  assert.ok(by(ORPHAN), 'an item naming no feed is an entry, not junk');
+  assert.equal(by(ORPHAN).feed, null, 'a feed guid was invented for it');
+  assert.equal(
+    by(ITEM_A1).feed,
+    guidOf(FEED_A),
+    'the unresolvable item disturbed the entry after it',
+  );
 
   const { publish } = plan({
     read: ev(tags),
     local: [feed(FEED_A, 'podcast', [ITEM_A1]), feed(FEED_C, 'podcast')],
-    baseline: base([FEED_A, ITEM_A1]),
+    baseline: base([FEED_A, claim(ITEM_A1, FEED_A)]),
     mode: 'public',
   });
   assert.ok(publish);
   assert.ok(ids(publish.tags).includes(ORPHAN), 'the orphan was dropped');
-  assert.ok(
-    at(publish.tags, ORPHAN) < at(publish.tags, FEED_A),
-    'the orphan moved — and after a feed entry it would BE that feed\'s item',
+  assert.deepEqual(
+    tagFor(publish.tags, ORPHAN),
+    ['i', ORPHAN],
+    'a feed guid was invented for an item whose feed nobody knows',
   );
 });
 
@@ -1042,124 +1110,145 @@ test('24. A private half past the NIP-44 v2 cliff is refused, not published', ()
 });
 
 test('25. A feed favorite and an item favorite are stated separately', () => {
-  // Opening a group is the only way to name an item's parent, so a group
-  // appears whether or not the user favorited the feed. Position 3 of the feed
-  // `i` says which, and the two answers are independent: one episode of a show
-  // nobody follows, and a show followed with none of its episodes saved, are
-  // both ordinary states.
-  const placing = plan({
-    read: ev([]),
+  // Save one item from a feed you have not favorited. ONE tag: the item, with
+  // the guid of its feed beside it. No feed entry at all.
+  //
+  // This is the case the old format could not write. It had to open a feed
+  // entry to hold the item, so a feed the user never chose appeared on the
+  // list — 114 of one real list's 196 — and a marker existed to say which of
+  // them were real.
+  const itemOnly = plan({
+    read: ev([ALT, VIS_PUBLIC, K_FEED, K_ITEM]),
     local: [feed(FEED_A, 'podcast', [ITEM_A1], false)],
     baseline: base(),
     mode: 'public',
   });
-  assert.ok(placing.publish);
+  assert.ok(itemOnly.publish, 'saving an item must publish');
   assert.deepEqual(
-    tagFor(placing.publish.tags, FEED_A),
-    ['i', FEED_A, 'placement'],
-    'a group opened only to place a track must say so',
+    ids(itemOnly.publish.tags),
+    [ITEM_A1],
+    'a feed the user never favorited was written to the list',
   );
-  assert.ok(ids(placing.publish.tags).includes(ITEM_A1), 'the episode was lost');
-  assert.equal(feedFavorite(placing.publish.tags, FEED_A), false);
+  assert.deepEqual(
+    tagFor(itemOnly.publish.tags, ITEM_A1),
+    item(ITEM_A1, FEED_A),
+    'the item must carry the feed guid it cannot be looked up without',
+  );
+  assert.equal(feedFavorite(itemOnly.publish.tags, FEED_A), false);
 
-  // Three elements, and nothing past the marker. An earlier draft reserved
-  // position 2 for NIP-73's URL hint and put the marker at position 3; the
-  // hint went because the guid already resolves through the Podcast Index.
-  assert.equal(tagFor(placing.publish.tags, FEED_A).length, 3);
+  // The baseline claims the PAIR. An item guid alone cannot tell this favorite
+  // from the same item guid in another feed.
+  assert.deepEqual(itemOnly.baselineIfLanded.public, [claim(ITEM_A1, FEED_A)]);
 
-  // Now favorite the show as well. Same group, same item, different answer —
-  // and this is the state the format could not express at all before: a feed
-  // favorited ALONGSIDE one of its tracks read back as a group that might
-  // exist only to place the track.
+  // Now favorite the feed as well. A second choice, so a second tag — and the
+  // item is untouched.
   const both = plan({
-    read: placing.publish,
+    read: itemOnly.publish,
     local: [feed(FEED_A, 'podcast', [ITEM_A1], true)],
-    baseline: placing.baselineIfLanded,
+    baseline: itemOnly.baselineIfLanded,
     mode: 'public',
   });
-  assert.ok(both.publish, 'favoriting the show is a change and must publish');
-  assert.deepEqual(tagFor(both.publish.tags, FEED_A), ['i', FEED_A, 'fav']);
-  // The feed favorite is a CLAIM OF ITS OWN, separate from the entry's. The
-  // group was already on the list — this device put it there to place a track
-  // — so a baseline that records only identifiers has nothing that says who
-  // stated the favorite, and cannot express taking it back.
-  assert.ok(
-    both.baselineIfLanded.public.includes('fav:' + FEED_A),
-    'a feed favorite this device stated must enter its baseline',
-  );
+  assert.ok(both.publish, 'favoriting the feed is a change and must publish');
   assert.equal(feedFavorite(both.publish.tags, FEED_A), true);
-  assert.ok(ids(both.publish.tags).includes(ITEM_A1), 'the episode was lost');
-  assert.equal(
-    parseTags(both.publish.tags).entries.find((e) => e.id === ITEM_A1).parent,
-    FEED_A,
-    'the marker must take no part in grouping',
-  );
-
-  // And the reading a list written before any of this existed still gets: an
-  // ITEMLESS group is an unambiguous feed favorite, one with items is
-  // UNKNOWABLE. Answering `true` there is the mutation that manufactured 114
-  // album favorites off one real list.
-  const legacy = parseTags([
-    ['medium', 'podcast'],
-    ['i', FEED_A],
-    ['i', ITEM_A1],
-    ['i', FEED_B],
-  ]);
-  assert.equal(legacy.groups.find((g) => g.id === FEED_A).favorited, null);
-  assert.equal(legacy.groups.find((g) => g.id === FEED_B).favorited, true);
-
-  // The favorite is a property of the FEED, not of a group, so two copies of
-  // one feed need not agree and the strongest statement is the answer. That
-  // holds when a reader meets the same feed twice on the wire (vector 19)...
-  const twice = parseTags([
-    ['medium', 'music'],
-    ['i', FEED_A, 'placement'],
-    ['i', ITEM_A1],
-    ['i', FEED_A, 'fav'],
-    ['i', ITEM_A2],
-  ]);
   assert.deepEqual(
-    twice.groups.map((g) => g.favorited),
-    [true, true],
-    'a feed favorited on one of its groups is favorited',
+    tagFor(both.publish.tags, ITEM_A1),
+    item(ITEM_A1, FEED_A),
+    'the item changed when the feed favorite was added beside it',
+  );
+  assert.deepEqual(
+    ids(both.publish.tags).sort(),
+    [FEED_A, ITEM_A1].sort(),
+    'two favorites, two tags',
   );
 
-  // ...and when two copies are FOLDED INTO ONE, which is where losing it costs
-  // data: a whole-list move emits the entry once (vector 15), and taking
-  // whichever copy came first drops the favorite on the strength of the order
-  // the halves happened to be concatenated in.
+  // Favoriting the feed alone is the mirror case: one tag, and no item.
+  const feedOnly = plan({
+    read: ev([ALT, VIS_PUBLIC, K_FEED]),
+    local: [feed(FEED_B, 'podcast', [], true)],
+    baseline: base(),
+    mode: 'public',
+  });
+  assert.deepEqual(ids(feedOnly.publish.tags), [FEED_B]);
+  assert.deepEqual(tagFor(feedOnly.publish.tags, FEED_B), ['i', FEED_B]);
+
+  // An entry in BOTH halves is one entry, and a whole-list move must emit it
+  // once. Vector 15 pins the public copy; this pins that the pair is what the
+  // dedupe compares, so the feed favorite and the item favorite do not
+  // collapse into each other.
   const folded = plan({
     read: ev(
-      [ALT, VIS_PUBLIC, ['medium', 'podcast'], ['i', FEED_A, 'placement'], ['i', ITEM_A1], K_FEED, K_ITEM],
-      encodePrivate([['medium', 'podcast'], ['i', FEED_A, 'fav']]),
+      [ALT, VIS_PUBLIC, ['medium', 'podcast'], ['i', FEED_A], K_FEED, K_ITEM],
+      encodePrivate([['medium', 'podcast'], item(ITEM_A1, FEED_A), ['i', FEED_A]]),
     ),
-    local: [feed(FEED_A, 'podcast', [ITEM_A1])],
-    baseline: base([FEED_A, ITEM_A1]),
+    local: [feed(FEED_A, 'podcast', [ITEM_A1], true)],
+    baseline: base([FEED_A, claim(ITEM_A1, FEED_A)]),
     mode: 'public',
   });
   assert.ok(folded.publish, 'a half-converged list must be finished');
   assert.equal(
     ids(folded.publish.tags).filter((id) => id === FEED_A).length,
     1,
-    'the entry that was in both halves was emitted twice',
+    'the feed favorite that was in both halves was emitted twice',
   );
   assert.equal(
-    feedFavorite(folded.publish.tags, FEED_A),
-    true,
-    'the surviving copy must carry the strongest marker either copy held',
+    ids(folded.publish.tags).filter((id) => id === ITEM_A1).length,
+    1,
+    'the item that was in both halves was emitted twice',
+  );
+
+  // IDENTITY IS THE PAIR. An item guid is unique inside its feed and is not
+  // globally unique, so the same item guid under two feed guids is two
+  // different items. A writer that keys entries on the identifier alone folds
+  // them into one and deletes a favorite nobody can restate.
+  const shared = ev([
+    ALT,
+    VIS_PUBLIC,
+    ['medium', 'podcast'],
+    ['i', ITEM_A1, guidOf(FEED_A)],
+    ['i', ITEM_A1, guidOf(FEED_B)],
+    K_ITEM,
+  ]);
+  const kept = plan({
+    read: shared,
+    local: [feed(FEED_C, 'podcast', [], true)],
+    baseline: base(),
+    mode: 'public',
+  });
+  assert.ok(kept.publish);
+  assert.equal(
+    ids(kept.publish.tags).filter((id) => id === ITEM_A1).length,
+    2,
+    'two items sharing an item guid were folded into one',
+  );
+
+  // And a baseline claim on one is not a claim on the other. Claiming the
+  // FEED_A copy and no longer holding it removes exactly that one.
+  const oneGone = plan({
+    read: shared,
+    local: [],
+    baseline: base([claim(ITEM_A1, FEED_A)]),
+    mode: 'public',
+  });
+  assert.ok(oneGone.publish);
+  assert.deepEqual(
+    oneGone.publish.tags.filter((t) => t[0] === 'i'),
+    [['i', ITEM_A1, guidOf(FEED_B)]],
+    'a claim on one copy removed the other, or removed neither',
   );
 });
 
-test('26. Unfavoriting the show keeps the episode, and says so', () => {
-  // The question this vector exists for: the user drops the show and keeps one
-  // episode. The group cannot go — it is the only thing naming that episode's
-  // parent — so the removal has to be said on the group rather than by
-  // deleting it.
+test('26. Unfavoriting the feed keeps the item, and needs nothing to say so', () => {
+  // The user drops the feed and keeps one item of it. Under the old format the
+  // feed entry could not go — it was the only tag naming the item's feed — so
+  // the removal had to be STATED with a `placement` marker, and a writer that
+  // expressed it by leaving the marker off said "nobody knows" instead.
+  //
+  // The item names its own feed now. The removal is an ordinary removal.
   const read = ev([
     ALT,
     ['medium', 'podcast'],
-    ['i', FEED_A, 'fav'],
-    ['i', ITEM_A1],
+    ['i', FEED_A],
+    item(ITEM_A1, FEED_A),
     K_FEED,
     K_ITEM,
   ]);
@@ -1167,110 +1256,105 @@ test('26. Unfavoriting the show keeps the episode, and says so', () => {
   const dropped = plan({
     read,
     local: [feed(FEED_A, 'podcast', [ITEM_A1], false)],
-    baseline: base([FEED_A, ITEM_A1, 'fav:' + FEED_A]),
+    baseline: base([FEED_A, claim(ITEM_A1, FEED_A)]),
     mode: 'public',
   });
-  assert.ok(dropped.publish, 'unfavoriting the show is a change and must publish');
-  assert.ok(ids(dropped.publish.tags).includes(ITEM_A1), 'the episode went with the show');
-  assert.equal(
-    parseTags(dropped.publish.tags).entries.find((e) => e.id === ITEM_A1).parent,
-    FEED_A,
-    'the episode was re-parented',
+  assert.ok(dropped.publish, 'unfavoriting the feed must publish');
+  assert.deepEqual(
+    ids(dropped.publish.tags),
+    [ITEM_A1],
+    'the feed favorite survived, or the item went with it',
   );
-  // STATED, not unstated. Removing the marker leaves the group unknowable
-  // again, so no reader can tell the removal from a list written by an app
-  // that never had markers — and on an itemless group unmarked reads back as
-  // a favorite, which resurrects the one the user just dropped.
-  assert.equal(
-    feedFavorite(dropped.publish.tags, FEED_A),
-    false,
-    'the removal must be stated on the wire, not merely left off',
+  assert.deepEqual(
+    tagFor(dropped.publish.tags, ITEM_A1),
+    item(ITEM_A1, FEED_A),
+    'the item lost the feed guid when its feed entry was removed',
   );
-  assert.ok(
-    !dropped.baselineIfLanded.public.includes('fav:' + FEED_A),
-    'a feed favorite this device no longer asserts must leave its baseline',
+  assert.equal(feedFavorite(dropped.publish.tags, FEED_A), false);
+  assert.deepEqual(
+    dropped.baselineIfLanded.public,
+    [claim(ITEM_A1, FEED_A)],
+    'the baseline still claims a feed favorite this device gave up',
   );
 
-  // The other direction, from the same fixture: drop the EPISODE, keep the
-  // show. The group stays, still marked, and goes itemless.
-  const kept = plan({
+  // The other direction from the same fixture: drop the item, keep the feed.
+  const other = plan({
     read,
     local: [feed(FEED_A, 'podcast', [], true)],
-    baseline: base([FEED_A, ITEM_A1, 'fav:' + FEED_A]),
+    baseline: base([FEED_A, claim(ITEM_A1, FEED_A)]),
     mode: 'public',
   });
-  assert.ok(kept.publish);
-  assert.ok(!ids(kept.publish.tags).includes(ITEM_A1), 'the episode stayed');
-  assert.equal(feedFavorite(kept.publish.tags, FEED_A), true, 'the show went with the episode');
+  assert.ok(other.publish);
+  assert.deepEqual(ids(other.publish.tags), [FEED_A]);
 
-  // A `fav` your baseline does NOT claim is another app's, and holding the
-  // feed as a mere placement is not a statement that beats it. Overwriting it
-  // has that app restate it on its next cycle, and the two rewrite the event
-  // at each other forever, each publish locally reasonable.
+  // And the conflict. A feed favorite this baseline does NOT claim belongs to
+  // another app. Holding it as not-favorited here does not beat it: overwrite
+  // it and that app restates it next cycle, forever.
   const foreign = plan({
     read,
-    local: [feed(FEED_A, 'podcast', [ITEM_A1, ITEM_A2], false)],
-    baseline: base([ITEM_A1]),
+    local: [feed(FEED_A, 'podcast', [ITEM_A1], false)],
+    baseline: base([claim(ITEM_A1, FEED_A)]),
     mode: 'public',
   });
-  assert.ok(foreign.publish, 'adding an episode is a change');
-  assert.equal(
-    feedFavorite(foreign.publish.tags, FEED_A),
-    true,
-    "another app's feed favorite was overwritten by a placement",
+  const stillThere = foreign.publish ? ids(foreign.publish.tags) : ids(read.tags);
+  assert.ok(
+    stillThere.includes(FEED_A),
+    "another app's feed favorite was deleted by a device that never made it",
   );
   assert.ok(
-    !foreign.baselineIfLanded.public.includes('fav:' + FEED_A),
+    !foreign.baselineIfLanded.public.includes(FEED_A),
     'carrying a feed favorite is not claiming it',
   );
 });
 
-test('27. A marker is carried whole, and never invented for an entry you carry', () => {
-  // Rule 4 inside an `i` tag. A writer that rebuilds entries from its own
-  // model emits `['i', id]` and drops every marker on the list — silently, and
-  // it looks exactly like nobody having favorited any of those shows.
-  // Position 3 belongs to nobody yet, which is exactly why a tag carrying
-  // something there is the one to test: a writer that rebuilds the entry keeps
-  // what it understands and drops the rest.
+test('27. An entry is carried whole, and no writer invents a feed guid', () => {
+  // Rule 4 inside an `i` tag, and the stakes went UP with this revision. A
+  // writer that rebuilds entries from its own model emits `['i', id]` and
+  // drops position 2 — which no longer costs a label, it costs the item's
+  // address. An item guid is unique only inside its feed, so an item stripped
+  // of its feed guid cannot be looked up by anyone, ever again.
+  //
+  // Position 3 belongs to nobody yet, which is why a tag carrying something
+  // there is the one to test.
   const NEWER = 'written-by-a-writer-newer-than-this-one';
   const read = ev([
     ALT,
     ['medium', 'podcast'],
-    ['i', FEED_A, 'fav', NEWER],
-    ['i', ITEM_A1],
-    ['i', FEED_B, 'placement'],
-    ['i', ITEM_B1],
+    ['i', FEED_A],
+    ['i', ITEM_A1, guidOf(FEED_A), NEWER],
+    item(ITEM_B1, FEED_B),
     K_FEED,
     K_ITEM,
   ]);
 
-  // A marker-blind writer: `favorited` is absent from everything it holds,
-  // which is what an app that has never heard of position 2 passes in.
-  const blind = plan({
+  const carrying = plan({
     read,
-    local: [feed(FEED_A, 'podcast', [ITEM_A1]), feed(FEED_C, 'podcast')],
-    baseline: base([FEED_A, ITEM_A1]),
+    local: [feed(FEED_C, 'podcast', [], true)],
+    baseline: base(),
     mode: 'public',
   });
-  assert.ok(blind.publish, 'adding a local favorite must produce a publish');
+  assert.ok(carrying.publish, 'adding a local favorite must produce a publish');
   assert.deepEqual(
-    tagFor(blind.publish.tags, FEED_A),
-    ['i', FEED_A, 'fav', NEWER],
-    'the marker and the element past it must come back byte-identical',
+    tagFor(carrying.publish.tags, ITEM_A1),
+    ['i', ITEM_A1, guidOf(FEED_A), NEWER],
+    'the feed guid and the element past it must come back byte-identical',
   );
-  assert.deepEqual(tagFor(blind.publish.tags, FEED_B), ['i', FEED_B, 'placement']);
+  assert.deepEqual(tagFor(carrying.publish.tags, ITEM_B1), item(ITEM_B1, FEED_B));
+  assert.deepEqual(tagFor(carrying.publish.tags, FEED_A), ['i', FEED_A]);
   assert.deepEqual(
-    tagFor(blind.publish.tags, FEED_C),
+    tagFor(carrying.publish.tags, FEED_C),
     ['i', FEED_C],
-    'a writer with nothing to say must say nothing, not guess',
+    'a feed entry took a second element it has no meaning for',
   );
 
-  // And the inverse, which is the 114 one level up: a marker-aware writer may
-  // not stamp its own answer onto a group it is merely CARRYING. It does not
-  // know whether that show is favorited — that is what the absent marker
-  // means — and either guess destroys something. `fav` manufactures a favorite
-  // the user never made; `placement` deletes one no other app can restate.
-  const unmarked = ev([
+  // Carrying a foreign entry is not claiming it.
+  assert.ok(!carrying.baselineIfLanded.public.includes(FEED_A));
+  assert.ok(!carrying.baselineIfLanded.public.includes(claim(ITEM_A1, FEED_A)));
+
+  // THE MIGRATION. A legacy two-element item takes its feed from the entry
+  // above it, and a writer that touches the list rewrites it with that guid on
+  // the entry. It happens once, and after it the item survives a reorder.
+  const legacy = ev([
     ALT,
     ['medium', 'podcast'],
     ['i', FEED_A],
@@ -1278,35 +1362,41 @@ test('27. A marker is carried whole, and never invented for an entry you carry',
     K_FEED,
     K_ITEM,
   ]);
-  const carrying = plan({
-    read: unmarked,
+  const upgraded = plan({
+    read: legacy,
     local: [feed(FEED_C, 'podcast', [], true)],
     baseline: base(),
     mode: 'public',
   });
-  assert.ok(carrying.publish, 'a new local favorite must publish');
+  assert.ok(upgraded.publish);
   assert.deepEqual(
-    tagFor(carrying.publish.tags, FEED_A),
-    ['i', FEED_A],
-    'a marker was invented for a group this writer only carries',
+    tagFor(upgraded.publish.tags, ITEM_A1),
+    item(ITEM_A1, FEED_A),
+    'a legacy item was republished still unable to name its own feed',
   );
-  assert.equal(feedFavorite(carrying.publish.tags, FEED_A), null, 'still unknowable');
-  assert.deepEqual(tagFor(carrying.publish.tags, FEED_C), ['i', FEED_C, 'fav']);
+
+  // ...and it is idempotent. Reading the upgraded list back changes nothing.
+  const again = plan({
+    read: upgraded.publish,
+    local: [feed(FEED_C, 'podcast', [], true)],
+    baseline: upgraded.baselineIfLanded,
+    mode: 'public',
+  });
+  assert.equal(again.publish, null, 'the migration republishes on every load');
 });
 
-test('28. An artist entry is a favorite that opens nothing', () => {
-  // Music has three levels — artist, album, track — and the list carries only
-  // two of them positionally. Favoriting an artist says "show me their whole
-  // catalogue", and the catalogue is named in the publisher feed, not here. So
-  // the entry stands alone: it opens no group, closes none, and is never an
-  // item of the group above it.
+test('28. An artist entry is a favorite that belongs to no feed', () => {
+  // Music has three levels — artist, album, track — and this list carries two.
+  // Favoriting an artist says "show me their whole catalogue", and the
+  // catalogue is named in the publisher feed, not here. So the entry stands
+  // alone: it names no feed, and nothing names it.
   const ARTIST = 'podcast:publisher:guid:0e8f6a1b-2c3d-4e5f-8a9b-0c1d2e3f4a5b';
   const tags = [
     ALT,
     ['medium', 'music'],
     ['i', FEED_A],
     ['i', ARTIST],
-    ['i', ITEM_A1],
+    item(ITEM_A1, FEED_A),
     K_FEED,
     K_ITEM,
   ];
@@ -1314,57 +1404,51 @@ test('28. An artist entry is a favorite that opens nothing', () => {
   const parsed = parseTags(tags);
   const by = (id) => parsed.entries.find((e) => e.id === id);
   assert.ok(by(ARTIST), 'an artist entry is an entry, not junk');
-  assert.equal(by(ARTIST).parent, null, 'an artist has no parent');
+  assert.equal(by(ARTIST).feed, null, 'an artist was given a feed guid');
   assert.equal(
-    by(ITEM_A1).parent,
-    FEED_A,
-    'the artist re-parented the track after it — a track belongs to its ALBUM',
-  );
-  assert.ok(
-    !parsed.groups.some((g) => g.id === ARTIST),
-    'an artist opened a group; nothing in this format nests under one',
+    by(ITEM_A1).feed,
+    guidOf(FEED_A),
+    'the artist entry disturbed the track after it',
   );
   assert.equal(by(ARTIST).favorited, true, 'nothing but a favorite puts an artist here');
 
-  // Carried in place by a writer changing something else, and BARE. A marker
-  // states whether a feed is favorited as opposed to merely placed; an artist
-  // is never merely placed, so there is no question for position 2 to answer.
+  // Carried in place by a writer changing something else, and BARE. There is
+  // no feed for an artist to belong to, so a second element on one states
+  // nothing and costs bytes on every republish forever.
   const carried = plan({
     read: ev(tags),
     local: [feed(FEED_A, 'music', [ITEM_A1], true)],
-    baseline: base([FEED_A, ITEM_A1]),
+    baseline: base([FEED_A, claim(ITEM_A1, FEED_A), ITEM_A2]),
     mode: 'public',
   });
-  assert.ok(carried.publish, 'favoriting the album is a change and must publish');
-  assert.deepEqual(tagFor(carried.publish.tags, ARTIST), ['i', ARTIST]);
-  const after = parseTags(carried.publish.tags);
+  const out = carried.publish ?? ev(tags);
+  assert.deepEqual(tagFor(out.tags, ARTIST), ['i', ARTIST]);
   assert.equal(
-    after.entries.find((e) => e.id === ITEM_A1).parent,
-    FEED_A,
-    'the track lost its album across a republish',
+    parseTags(out.tags).entries.find((e) => e.id === ITEM_A1).feed,
+    guidOf(FEED_A),
+    'the track lost its feed across a republish',
   );
   assert.ok(
-    at(carried.publish.tags, FEED_A) < at(carried.publish.tags, ARTIST) &&
-      at(carried.publish.tags, ARTIST) < at(carried.publish.tags, ITEM_A1),
+    at(out.tags, FEED_A) < at(out.tags, ARTIST) && at(out.tags, ARTIST) < at(out.tags, ITEM_A1),
     'the artist moved; entries read keep their position',
   );
 
   // The same, from the app that HOLDS the artist — which is where a writer
-  // would reach for a marker, because it has an answer and somewhere to put it.
-  // There is still no question: an artist entry cannot mean "placed here for
-  // something below", so `fav` on one states nothing and costs bytes on every
-  // republish forever.
+  // reaches for an extra element, because it has state and somewhere to put it.
   const held = plan({
     read: ev(tags),
-    local: [feed(FEED_A, 'music', [ITEM_A1, ITEM_A2], true), feed(ARTIST, 'music', [], true)],
-    baseline: base([FEED_A, ITEM_A1, ARTIST, 'fav:' + FEED_A]),
+    local: [
+      feed(FEED_A, 'music', [ITEM_A1, ITEM_A2], true),
+      feed(ARTIST, 'music', [], true),
+    ],
+    baseline: base([FEED_A, claim(ITEM_A1, FEED_A), ARTIST]),
     mode: 'public',
   });
   assert.ok(held.publish, 'adding a track is a change');
   assert.deepEqual(
     tagFor(held.publish.tags, ARTIST),
     ['i', ARTIST],
-    'a marker was written onto an artist entry',
+    'an artist entry was given a second element',
   );
 
   // And a device can originate one.

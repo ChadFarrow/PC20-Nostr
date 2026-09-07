@@ -62,35 +62,44 @@ the Nostr side.
 | kind 10333 | list feed |
 |---|---|
 | `["i", "podcast:guid:X"]`, nothing under it | `<podcast:remoteItem feedGuid="X"/>` |
-| `["i", "podcast:item:guid:Y"]` under group X | `<podcast:remoteItem feedGuid="X" itemGuid="Y"/>` |
+| `["i", "podcast:item:guid:Y", "X"]` | `<podcast:remoteItem feedGuid="X" itemGuid="Y"/>` |
 | `["medium", "music"]`, running until the next one | `medium="music"` on each element |
 | nothing | `feedUrl`, `title` |
 
 Entries map one to one, so converting between the formats is bookkeeping on
 guids rather than translation. Everything below is about the bookkeeping.
 
-## Position against repetition
+## Position against repetition — and the event changed sides
 
-This is the difference the rest follow from.
+This was the difference the rest followed from, and kind 10333 has since
+crossed it.
 
-A `remoteItem` names its parent feed on the element itself and carries nothing
-by position. Kind 10333 names the parent by *position*: an item entry belongs
-to the feed group above it, and takes the medium from the last `medium` tag
-before it. The list feed repeats; the event refers.
+A `remoteItem` names its feed on the element itself and carries nothing by
+position. Kind 10333 used to name it by *position*: an item entry belonged to
+the feed entry above it. It now writes the feed guid on the item, at position 2
+of the `i` tag, which is the `remoteItem` shape in a tag array. Only `medium`
+is still positional.
 
-Repetition costs identifiers, and the first real event published in this
-format is enough to price it. That list held 196 feed groups and 227 items,
-of which only 82 groups were feeds the user had actually favorited.
+The repetition is therefore no longer the list feed's alone, and the price
+below is now what kind 10333 pays too. The first real event published in this
+format is enough to give it: that list held 196 feed entries and 227 items, of
+which only 82 were feeds the user had actually favorited.
 
-- **As tags:** 196 feed guids + 227 item guids = **423 identifiers.**
-- **As `remoteItem`s:** each of the 227 items also names its parent, and the
-  114 groups that existed only to place an item disappear, because nothing
-  needs placing any more. So 227 × 2 + 82 = **536 identifiers.**
+- **The old layout:** 196 feed guids + 227 item guids = **423 identifiers.**
+- **Either format now:** each of the 227 items also names its feed, and the 114
+  entries that existed only to place an item disappear, because nothing needs
+  placing any more. So 227 × 2 + 82 = **536 identifiers.**
 
 That is 113 more, and the added ones are all feed guids, which are UUIDs of
 36 characters: about **4 KB** on a 36 KB event. The per-entry `k` tags the
 same document already removed cost 11 KB. The repetition is therefore about a
 third the price of a mistake that format has already paid for and undone.
+
+What bought the 4 KB is the reason the list feed never had these problems: an
+item guid is unique only inside its feed, so an entry that does not name its
+feed is not an address. The two sections below were open questions about kind
+10333 when this page was written, and both are answered the same way the list
+feed answers them — by repeating the feed guid.
 
 Count identifiers only. XML says more around each one than a JSON tag array
 does, so a generated feed is larger than this in absolute terms; the ratio is
@@ -101,27 +110,28 @@ the part worth carrying away.
 Two of the favorites spec's open questions do not exist in a list feed, and
 both for that one reason.
 
-**A feed group is not always a favorite.** In kind 10333 the only way to say
-where an item came from is to open a group for its feed, so a group appears
-whether or not the user favorited the feed — 114 of those 196. A `remoteItem`
-carries its parent inline, so an item reference needs no group, and a
-reference with no `itemGuid` is unambiguously the feed. The question does not
-arise there at all.
+**A feed entry is not always a favorite.** It used to be true of kind 10333
+that the only way to say where an item came from was to open an entry for its
+feed, so a feed entry appeared whether or not the user favorited it — 114 of
+those 196. A `remoteItem` carries its feed inline, so an item reference needs
+no such entry, and a reference with no `itemGuid` is unambiguously the feed.
+The question never arose there.
 
-Kind 10333 now answers it, but it had to add something to do so: a marker at
-position 2 of the feed `i` tag, `fav` or `placement`, and a rule for reading
-the entries written before it existed. That is a few bytes per group rather
-than a repeated identifier — cheaper than the repetition priced above — and it
-is still a rule a third implementer has to get right, where the list feed's
-answer falls out of the shape. The list feed pays identifiers to make the
-question impossible; the event pays a marker to make it answerable.
+A revision of the spec first answered it with a marker — `fav` or `placement`
+on the feed entry, a few bytes per entry rather than a repeated identifier, and
+cheaper than the repetition priced above. That marker is gone. Kind 10333 now
+does what the list feed does: the item carries the feed guid, so a feed entry
+appears only when the user favorited the feed and there is nothing to label.
+Both formats now pay identifiers to make the question impossible, and the
+event is no longer buying a cheaper answer to a question of its own making.
 
 **No fallback when a guid will not resolve.** The favorites spec considered a
 URL hint at position 2 of an `i` tag, so an entry the Podcast Index cannot
-resolve would be more than a guid and nothing, and then dropped the slot and
-gave the position to the marker: the guid resolves for every entry either live
-app has published. The namespace already spends an attribute on exactly that,
-and says why —
+resolve would be more than a guid and nothing. The slot went to the feed guid
+instead, and the trade is defensible for the same reason the namespace gives:
+`<podcast:guid>` is assigned once and outlives the feed URL, so a stored URL is
+stalest exactly when it is most needed. The namespace already spends an
+attribute on the fallback, and says why —
 `feedUrl` is "beneficial ... for those cases as a fallback", and if both are
 present a capable app resolves `feedGuid` and uses it. `title` answers a
 second version of the same problem: it lets an app draw the list before any
@@ -193,11 +203,12 @@ Facts a bridge has to respect. Each is already argued in the favorites spec;
 they are collected here because a converter is where all three get broken at
 once.
 
-- **A group with items under it is not a feed favorite unless it says so.**
-  Read position 2 of the feed `i`: `fav` converts to a feed-level
-  `remoteItem`, `placement` does not, and an unmarked group with items is
-  UNKNOWABLE — leave it out. Emitting those manufactures favorites the user
-  never made, and on the list measured above that is 114 of them.
+- **A feed entry is a feed favorite, and nothing else is one.**
+  Every `podcast:guid` entry converts to a feed-level `remoteItem`, and an item
+  entry converts to a `remoteItem` carrying both guids. There is no third case:
+  a converter that also emits a feed-level `remoteItem` for every feed guid it
+  sees on an item manufactures favorites the user never made, and on the list
+  measured above that is 114 of them.
 - **An entry above the first `medium` tag has an unknown medium.** Leave the
   `medium` attribute off. Filling it in turns an absence into a claim, and no
   other app has a reason to correct it.

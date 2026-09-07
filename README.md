@@ -61,11 +61,11 @@ favorites spec beside the format Podcasting 2.0 already has for the same
 payload: a `musicL` feed of `<podcast:remoteItem>`s. Spec against spec, no
 proposal, and it prices what each side pays for its choice.
 
-**[pc20-favorites-marker-adoption.md](pc20-favorites-marker-adoption.md)** is
-what the two shipping apps each have to change before a show favorite and an
-episode favorite can be two answers. Both rebuild `i` tags from their own
-model today, which erases the marker that says which — so the first stage is
-work in both repos, and it comes before either may write one.
+**[pc20-favorites-feed-guid-migration.md](pc20-favorites-feed-guid-migration.md)**
+is what the two shipping apps each have to change so an item entry carries the
+guid of its feed. Both rebuild `i` tags from their own model today, which
+strips that guid — and an item guid is not an address on its own, so the first
+stage is work in both repos and it comes before either may write one.
 
 ## Working on this repo
 

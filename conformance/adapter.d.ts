@@ -22,31 +22,34 @@ export interface FavoritesEvent {
   content: string;
 }
 
-/** One feed on this device, and the items favorited under it. */
+/**
+ * One feed on this device, and the items favorited from it.
+ *
+ * This is a convenient shape rather than a wire shape: an item needs the guid
+ * of its feed, and grouping the items under the feed is the tidiest way to
+ * supply it. Nothing about it reaches the event.
+ */
 export interface LocalGroup {
   /**
    * A `podcast:guid:…` feed, or a `podcast:publisher:guid:…` artist.
    *
-   * An artist nests nothing: it is emitted bare, takes no marker, and its
-   * `items` are not this format's to place. Vector 28.
+   * An artist belongs to no feed and holds no items: it is emitted bare, and
+   * any `items` beside one are not this format's to place. Vector 28.
    */
   id: string;
   /** The medium hint, or null when the feed never declared one. */
   medium: string | null;
-  /** `podcast:item:guid:…` identifiers belonging to this feed. */
+  /** `podcast:item:guid:…` identifiers of items favorited FROM this feed. */
   items: string[];
   /**
-   * Has the user favorited the FEED, as opposed to the group being here only
-   * so the items under it can name a parent?
+   * Has the user favorited the FEED itself?
    *
-   * THREE values, not two. `null` — the default, and what an app with no
-   * notion of feed-favorite markers passes — means this device does not know,
-   * which is the honest answer for a group adopted off the wire with nothing
-   * on it. Collapse it into either boolean and the next publish states
-   * something the user never said: `true` manufactures a favorite, `false`
-   * deletes one no other app will restate. Vectors 25, 26, 27.
+   * A plain boolean, and false is an ordinary answer rather than a claim. A
+   * feed entry is written only when this is true, so a feed you hold only to
+   * supply its items' feed guid never reaches the list — which is the case the
+   * old format could not express without a placement marker. Vectors 25, 26.
    */
-  favorited?: boolean | null;
+  favorited?: boolean;
 }
 
 /**
@@ -65,15 +68,17 @@ export interface Baseline {
 }
 
 /**
- * A feed favorite is a CLAIM OF ITS OWN, beside the entry's.
+ * A claim must be as unique as the thing it stands for.
  *
- * The reference writes it into the same per-half array as `fav:<identifier>`;
- * how you store it is yours, as long as it is a separate answer. Your device
- * may be the reason a group is on the list without being the reason it is
- * marked `fav`, and the other way round — so a baseline holding only
- * identifiers can express neither removal. Vector 26.
+ * A feed or an artist is its identifier. An ITEM IS THE PAIR: an item guid is
+ * unique inside its feed and is not globally unique, so a baseline keyed on
+ * the identifier alone cannot tell two items in two feeds apart, and removing
+ * one removes both. The reference joins them with ` @ `; the exact string is
+ * yours, since nothing on the wire carries it, but you must export
+ * `itemClaim` so the vectors can hand you a baseline in your own shape.
+ * Vector 25.
  */
-export type FavoriteClaim = `fav:${string}`;
+export type ItemClaim = string;
 
 export interface PlanInput {
   /**
@@ -174,34 +179,40 @@ export interface ParsedEntry {
   kind: string;
   /** The running `medium` value, or null when none preceded the entry. */
   medium: string | null;
-  /** The feed group this item belongs to, or null for a feed entry. */
-  parent: string | null;
-  /** Position 3 as read: 'fav', 'placement', or null for anything else. */
-  marker?: 'fav' | 'placement' | null;
   /**
-   * Resolved for a feed entry: is this FEED favorited?
+   * The BARE feed guid this item belongs to, read off position 2 of its own
+   * tag — not a `podcast:guid:` identifier, and not the entry above it.
    *
-   * Resolved per feed rather than per group — one feed may open two groups and
-   * they need not agree — with a statement outranking silence and `fav`
-   * outranking `placement`. `null` where no copy says and the group has items:
-   * unknowable, and answering `true` there invents favorites the user never
-   * made. Vector 25.
+   * Null for a feed entry, for an artist, and for a legacy item that names no
+   * feed and has no feed entry above it to borrow one from. An item guid alone
+   * is not an address, so a null here means unresolvable, not merely
+   * unlabelled: carry it, never delete it. Vector 20.
    */
-  favorited?: boolean | null;
-  /** Position in the tag array. Order is semantic; keep it. */
+  feed: string | null;
+  /**
+   * True when this entry came from a two-element item tag and its feed was
+   * taken from the entry above it. A writer rewrites such a tag with the feed
+   * guid on the entry — the one-time migration. Vector 27.
+   */
+  legacy?: boolean;
+  /** Always true for a feed or artist entry: being on the list IS the favorite. */
+  favorited?: boolean;
+  /** What a baseline claims and a dedupe compares. See ItemClaim. */
+  key?: string;
+  /** Position in the tag array. `medium` is still positional; keep it. */
   index: number;
 }
 
 export interface ParsedList {
   entries: ParsedEntry[];
-  groups: Array<{
-    id: string;
-    medium: string | null;
-    items: string[];
-    marker?: 'fav' | 'placement' | null;
-    /** The per-FEED answer, so every group of one feed carries the same one. */
-    favorited?: boolean | null;
-  }>;
+  /**
+   * Feed identifiers the user favorited, mapped to true.
+   *
+   * There is no group list any more, and no question for one to answer: a feed
+   * entry on this list IS a feed favorite, because nothing is on the list for
+   * structural reasons.
+   */
+  favorited: Map<string, boolean>;
   /** `k` values as read. Never used to derive an entry's kind. */
   kinds: string[];
   /** Tags and identifiers no writer here understands. Carried, not parsed. */
@@ -214,6 +225,16 @@ export interface FavoritesAdapter {
 
   /** The kind of an identifier, or null. Vector 6. */
   kindOf(identifier: string): string | null;
+
+  /**
+   * The baseline claim for one item favorite, from the item's identifier and
+   * the BARE feed guid it belongs to.
+   *
+   * Exported so the vectors can build a baseline in your shape rather than the
+   * reference's. Whatever you return, the same pair must always produce it and
+   * two different pairs must never collide. See ItemClaim. Vector 25.
+   */
+  itemClaim(itemId: string, feedGuid: string): string;
 
   /** One publish cycle, decided but not sent. */
   plan(input: PlanInput): PlanResult;

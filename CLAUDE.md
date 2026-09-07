@@ -49,9 +49,9 @@ A **reference repo with four parts**, none of which is an application.
    `comparisons/` (why each shipped copy won), `analysis/` (the scripts
    behind every number). See `catalog/README.md`.
 
-One page sits outside those four. `pc20-favorites-marker-adoption.md` says what
-`stablekraft-app` and `boostmebitch` each have to change to adopt the
-feed-favorite marker, read at `4722dd8` and `938f90d`. It is the only page here
+One page sits outside those four. `pc20-favorites-feed-guid-migration.md` says
+what `stablekraft-app` and `boostmebitch` each have to change so an item entry
+carries the guid of its feed, read at `4722dd8` and `938f90d`. It is the only page here
 that tells another repo what to do, and it is a **plan, not an extraction** —
 no line of it has run in either app. It is therefore the page that rots
 fastest: every line number in it is a claim about a file this repo does not
@@ -227,12 +227,24 @@ and read the other one.
 
 ## Invariants a change must not quietly break
 
-- **Tag order is semantic.** `medium` is a running value that applies to
-  every entry after it, and item entries belong to the most recently opened
-  feed group. An item's parent feed and its medium are carried by position,
-  not by anything on the entry itself, so any client that sorts, dedupes, or
-  rebuilds the tag array from parsed structs silently reattaches every item
-  to the wrong feed. Nothing else in the format recovers the association.
+- **An entry names its own feed; only `medium` is positional.** An item tag
+  is `["i", itemId, feedGuid]`, so sorting or rebuilding the array cannot
+  reattach it. `medium` is still a running value applying to every entry after
+  it, so a reorder costs a wrong label — which a Podcast Index lookup
+  corrects — rather than a wrong feed, which nothing corrected. The old rule
+  was the reverse and it is the reason this one is written down.
+- **An item guid is not an address.** `<podcast:guid>` is globally unique by
+  construction and outlives the feed URL; an item's `<guid>` is unique only
+  inside its feed, which is why `/episodes/byguid` demands a feed identifier
+  beside it. So position 2 is mandatory on an item entry, identity is the
+  PAIR — dedupe or claim on the item guid alone and two items in two feeds
+  fold into one — and a writer that rebuilds entries as `["i", id]` does not
+  drop a label, it makes those favorites unresolvable by everyone forever.
+- **One favorite, one tag.** A feed entry appears only when the user favorited
+  the feed. Nothing is on the list for structural reasons, so there is no
+  favorite-versus-placement question and no marker to answer it. A brief
+  revision of the spec had one at position 2; the feed guid took the slot,
+  because that was the value actually missing.
 - **Medium is a hint, never truth.** A Podcast Index lookup on the guid wins
   over the stored hint whenever they disagree.
 - **Merging is what makes wholesale replacement safe — there is no
@@ -280,6 +292,13 @@ and read the other one.
   `conformance/README.md` carries the matrix; every one of the 28 is killed by
   at least one mutation, and the first two rows of that table are the defects
   that actually reached production on 2026-08-25.
+- **The feed-guid migration has shipped data behind it, unlike the marker.**
+  Every list in production writes items as two elements. A reader must accept
+  both forms — three elements means the feed guid is at position 2, two means
+  it comes from the feed entry above, as before — and a writer fills it in on
+  its next publish. Both apps must read position 2 before either stops writing
+  the placement feed entries, or a reader still on the old rules loses every
+  item whose feed entry disappeared.
 - **Every kind here is self-assigned, not NIP-allocated**: 10333 for
   favorites, 3369 / 33369 / 23369 for playback events. Say so wherever it
   matters, and keep the collision cost stated: relay filters are
