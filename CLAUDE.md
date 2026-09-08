@@ -28,13 +28,22 @@ A **reference repo with four parts**, none of which is an application.
    implementer of a *third* app who has only this document. This part is
    **prose only**; there is nothing to build, lint or test in it.
 
-   It is **rules, and the test vectors that pin them**. The reasoning — what
-   was believed, what was measured, what broke, what was rejected — lives in
-   `notes/pc20-favorites-rationale.md`, which is not normative and which the
-   spec links to with a `(why)` beside the rule it explains. **Put a new rule
-   in the spec and its reason in the note.** A rule whose reason a reader
-   cannot find is still a rule, so a rule may ship without a note entry; a note
-   entry may never state a rule the spec does not.
+   **It is rules and nothing else, and short is the point.** Three files
+   carry the format between them, and a paragraph belongs in exactly one:
+
+   | file | holds | normative |
+   |---|---|---|
+   | `pc20-favorites.md` | the rules, roughly one line each | yes |
+   | `conformance/vectors.md` | the 31 vectors, stated as behaviors | yes |
+   | `notes/pc20-favorites-rationale.md` | why each rule exists, what was measured, what was rejected | no |
+
+   The spec links a rule to its reason with a `(why)` and to its vector by
+   number. **Put a new rule in the spec, its vector in `vectors.md`, its
+   reason in the note**, and resist writing the reason twice — a rule that
+   grows a paragraph of justification is how this document reached 1394 lines
+   and had to be split. A rule whose reason a reader cannot find is still a
+   rule, so a rule may ship without a note entry; a note entry may never state
+   a rule the spec does not.
 2. **The playback-events spec.** `nip-value-playback-events.md` — kinds
    3369 / 33369 / 23369, for publishing what a streaming-sats or auto-boost
    payment was for, so the metadata reaches something other than the
@@ -436,9 +445,9 @@ and read the other one.
   entry you hold needs its claim as the resurrection guard. Retiring only ever
   removes claims, so it cannot claim what is not yours. Vector 31, issue #41.
 - **A normative rule needs a vector, and a vector needs a case.** A new
-  "you must do X" in `pc20-favorites.md` earns a numbered entry under **Test
-  vectors**, and that entry earns a case in `conformance/vectors.test.mjs`
-  with the same number. The 14 vectors were prose for the document's whole
+  "you must do X" in `pc20-favorites.md` earns a numbered entry in
+  `conformance/vectors.md`, and that entry earns a case in
+  `conformance/vectors.test.mjs` with the same number. The 14 vectors were prose for the document's whole
   life, and in that time both apps discovered the same class of defect by
   shipping it to a real user. A rule nobody can run is a rule the next
   implementer learns the expensive way.

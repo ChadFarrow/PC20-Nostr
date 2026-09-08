@@ -74,7 +74,8 @@ and you can count the user's choices by counting the lines. `content` is empty
 only because this list has no private half; it is carried verbatim, never
 assumed.
 
-Adding it to a third? Run the spec's 31 test vectors against your own code:
+Adding it to a third? The spec is about 360 lines of rules; the reasons are in
+a separate note, and the 31 test vectors run against your own code:
 
 ```bash
 node --test conformance/vectors.test.mjs

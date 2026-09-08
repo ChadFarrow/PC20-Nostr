@@ -2,7 +2,7 @@
 
 What `stablekraft-app` and `boostmebitch` each have to change so an item entry
 carries the guid of its feed, per [One favorite, one
-tag](pc20-favorites.md#2-entries).
+tag](pc20-favorites.md#entries).
 
 **Read on 2026-09-07 at `stablekraft-app@4722dd8` and `boostmebitch@938f90d`.**
 Every line number below is at those commits and will drift. This page is a
@@ -114,7 +114,7 @@ Four things happened, one per stage:
 There is no `visibility` tag on either side because the read had none, and
 absent means inferred rather than public. A writer does not add one it was not
 given — see [The list is public or
-private](pc20-favorites.md#5-public-and-private).
+private](pc20-favorites.md#public-and-private).
 
 ## The order is not a preference
 
@@ -262,7 +262,7 @@ lose a label — you make every item favorite already published unresolvable.
 
 An unreadable identifier between a feed entry and a two-element item must not
 end that run either, or the item is stranded.
-([Vector 4](pc20-favorites.md#test-vectors).)
+([Vector 4](conformance/vectors.md).)
 
 ### What stage 1 alone buys
 
@@ -291,13 +291,13 @@ positionally is republished as
 identifier moved to position 2, not an appended third element. Each list
 upgrades itself once, on the first publish after the reader ships, and the
 upgrade must be idempotent: reading the result back changes nothing.
-([Vector 27](pc20-favorites.md#test-vectors).)
+([Vector 27](conformance/vectors.md).)
 
 **An item whose feed you could not resolve is the exception.** There is no
 feed identifier to write at position 1, so it goes back exactly as it arrived,
 two elements. Do not invent a placeholder feed guid — a wrong one resolves to
 the wrong thing, which is worse than resolving to nothing.
-([Vector 20](pc20-favorites.md#test-vectors).)
+([Vector 20](conformance/vectors.md).)
 
 ### A baseline claim on an item is the PAIR
 
@@ -342,7 +342,7 @@ Vector 26 goes green here.
 Inside one `medium` run: items naming no feed, then artists, then albums and
 podcasts, then items grouped by the feed they name. Read order stands inside a
 band, and a new entry goes at the end of its band. See [Tag
-order](pc20-favorites.md#4-tag-order).
+order](pc20-favorites.md#tag-order).
 
 **This is the one stage that is safe to ship alone**, and it is the only one
 where neither app has to wait for the other. Both apps preserve-and-append
@@ -373,7 +373,7 @@ forgets it turns a passing vector red again.
 (`lib/nostr/favorites-single-list.test.ts:510`, "an unrecognized identifier kind
 is never guessed at — and never dropped"). That is correct, and it is written
 down as [An artist is a favorite that belongs to no
-feed](pc20-favorites.md#2-entries). This
+feed](pc20-favorites.md#entries). This
 repository's own reference implementation was the reader that had it wrong, and
 it was changed rather than either app.
 
