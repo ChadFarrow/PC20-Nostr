@@ -188,9 +188,27 @@ of this file named two different SHAs and said hundreds of lines had moved
 under `lib/nostr/`; both claims were wrong, which is what a SHA in an entry is
 for.
 
-What HAS moved is the spec beneath them. Neither app has adopted the feed guid
-on the item, the banded runs, or the reframed rule 5, so the page compares two
-codebases against a document they now trail. Re-read before trusting a
+What HAS moved is the spec beneath them, and the two apps have moved unevenly
+under it — which is the reason the sentence to avoid is still "both apps do X".
+
+`boostmebitch` has adopted the feed guid on the item, the banded runs and the
+reframed rule 5, at `7503ac5` (#364, 2026-09-08), and the three rules #38 and
+#40 added the same day — a move between halves is a merge and not a copy, an
+emptied half encodes to nothing, a carried claim retires with the entry it names
+— at `a906096`, on the branch `claude/bmb-update-favorites-53y466`. It scores 28
+of the 31 vectors, and the three it does not are old divergences its
+`scripts/conformance.mjs` records one by one: the wholesale-delete guard is
+stricter than vector 25, stage 3 of the feed-guid migration is deliberately
+unshipped (26), and vector 27's "a writer may not claim an entry it carries"
+contradicts the adopt-what-you-render model `adapter.d.ts` documents by name.
+That last one is a question for this repo, not a defect over there.
+
+`stablekraft-app` was NOT checked. It is not cloned on the machine this was
+written on and it is outside that session's repository scope, so nothing here
+says where it stands — say that rather than assuming it moved with the other one.
+
+So the comparison page measures two codebases against a document one of them
+has caught up with and the other may not have. Re-read before trusting a
 conclusion, not because the code drifted but because the standard did.
 
 ## The implementation repos are read-only
