@@ -31,7 +31,7 @@ Supporting modules — boostmebitch: `favorites.ts`, `favorites-sync.ts`,
 
 **Neither is "canonical" any more, and this table used to say boostmebitch
 was.** That ranking was made when it was 722 lines to stablekraft's 662 and
-the format had one half. Both have roughly doubled since, in different
+the format had no private side. Both have roughly doubled since, in different
 directions and against different pressures, and the ranking did not survive
 it. Read whichever answers the question you have, and record the SHA.
 
@@ -72,7 +72,7 @@ that is the useful part.
 | 26 — unfavoriting the feed keeps the item | red | red |
 | 27 — an entry is carried whole | red | green |
 | 28 — an artist entry belongs to no feed | green | red, until it declares the opt-out |
-| 30 — an empty half is an empty string | red | red |
+| 30 — when nothing is private, `content` is the empty string | red | red |
 | 31 — a carried claim retires with its entry | red | red |
 
 Four of those are the spec moving, not the apps breaking:
@@ -140,7 +140,7 @@ cross-references faster than anyone updates them.
 [`favorites-list.ts`](../modules/nostr/favorites-list.ts) — zero imports, same discipline as
 `read-trust.ts`. Extracted at `76e1fe6`, after boostmebitch#294; before that it
 sat at `55a6445`, and before that at `1f26ba0` and 722 lines, which predates
-the private half, the `content` carry and the per-half baseline. Anyone who copied it in that window got a file that would
+private lists, the `content` carry and the per-place baseline. Anyone who copied it in that window got a file that would
 blank another app's private entries.
 
 **The extracted copy still matches `76e1fe6` byte for byte, and its source has
@@ -210,19 +210,19 @@ back on the next cycle. On the device that deleted it, the favorite returns
 by itself. Vector 9 caught it on the first conformance run; stablekraft-app#236 fixed
 it.
 
-**2b. A public writer over a private half it cannot open. FIXED in
+**2b. A public writer over encrypted entries it cannot open. FIXED in
 stablekraft-app#236.** stablekraft refused EVERY publish when `content` held bytes its
 signer could not decrypt, mode regardless. On a list that does not say
 private that strands every favorite a NIP-55 user makes there the moment any
-other app writes a private half. boostmebitch refuses only a publish that
+other app writes a private list. boostmebitch refuses only a publish that
 would have to change `content`. Vector 12; #236 carries the bytes and writes the
-public half.
+public entries.
 
 **3. Loose entries can never be unfavorited in stablekraft.** It carries
 loose nodes verbatim and never removes them. boostmebitch removes one when
 the baseline says this device published it and no longer holds it — checking
-*both* halves of the baseline, because a malformed `podcast:guid:` may have
-been recorded on the feeds side; which half it landed in is an accident of
+*both* sides of the baseline, because a malformed `podcast:guid:` may have
+been recorded on the feeds side; which one it landed in is an accident of
 history, whether we published it is the question.
 
 **4. The change gate.** boostmebitch's `planFavoritesPublish` compares
@@ -269,10 +269,10 @@ do it.
 **What "local" means after a cycle.** stablekraft's local state is a database
 the merge never writes; its inbound reconcile adds what it can resolve and
 nothing else, so a foreign entry is carried and never held. boostmebitch's
-local state is a cache of the merge: the hydrator paints the active half
+local state is a cache of the merge: the hydrator paints the active place
 whole, so an entry adopted off the relay is held from then on, claimed in the
 baseline, and removed by that device only if the user unfavorites it there.
-Both conform — neither adopts out of the INACTIVE half beyond its baseline —
+Both conform — neither adopts out of the INACTIVE place beyond its baseline —
 but a multi-cycle vector that feeds the same `local` into cycle two is
 testing a state boostmebitch can never be in. The contract gained `holds` for
 it (`conformance/adapter.d.ts`), and vectors 13 and 14 feed it back.

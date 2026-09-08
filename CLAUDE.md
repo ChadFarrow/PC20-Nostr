@@ -29,7 +29,7 @@ A **reference repo with four parts**, none of which is an application.
    nothing to build, lint or test in it.
 
    **There are two audiences, and the second is the bigger one.** Syncing a
-   user's favorites is what the format was built for, and it is the half with
+   user's favorites is what the format was built for, and it is the part with
    the destructive failure modes. But the event is public and the entries are
    guids, so an app may read a list and render, count, recommend or import it
    without ever writing — and a reader owes nothing to `Merging`. Do not let a
@@ -178,7 +178,7 @@ and it was closed the same night.** Recorded because the window was real, the
 order it happened in is the thing to learn from, and a reader who finds only the
 happy ending will not know why the rule is worded the way it is.
 
-§4 requires `content` to come back byte for byte, and the private-half section
+§4 requires `content` to come back byte for byte, and the private-list section
 requires that carry to ship in *both* apps before either starts encrypting. It
 did not happen in that order. `stablekraft-app` shipped a NIP-44 ciphertext into
 `content` and switched a real account to private while `boostmebitch@edffe3c`
@@ -186,7 +186,8 @@ still hardcoded `content: ''` in `publishFavoritesTags` and never read
 `event.content` at all. For about an hour, one favorite toggled in boostmebitch
 would have erased 436 encrypted entries — silently, on someone else's device,
 with no undo, on a replaceable event that keeps no history. Exactly the loss §4
-exists to prevent, reached by shipping the halves in the wrong order rather than
+exists to prevent, reached by shipping the two sides in the wrong order rather
+than
 by getting any rule wrong.
 
 Both now carry it: `boostmebitch@791dae6` (#222, #232) and `stablekraft-app@75a8fbf0`
@@ -218,8 +219,8 @@ under it — which is the reason the sentence to avoid is still "both apps do X"
 
 `boostmebitch` has adopted the feed guid on the item, the banded runs and the
 reframed rule 5, at `7503ac5` (#364, 2026-09-08), and the three rules #38 and
-#40 added the same day — a move between halves is a merge and not a copy, an
-emptied half encodes to nothing, a carried claim retires with the entry it names
+#40 added the same day — a change of mode is a merge and not a copy, an
+emptied `content` encodes to nothing, a carried claim retires with the entry it names
 — at `a906096`, on the branch `claude/bmb-update-favorites-53y466`. It scores 28
 of the 31 vectors, and the three it does not are old divergences its
 `scripts/conformance.mjs` records one by one: the wholesale-delete guard is
@@ -392,14 +393,15 @@ and read the other one.
   only tags — and publish only when the bytes change, NORMALISED first (see
   below). A change that weakens any of those needs to say which data gets
   destroyed instead.
-- **A move between halves runs rule 3 like any other cycle.** The pass that
-  reads one half and emits it into the other looks like a copy, and a writer
+- **A change of mode runs rule 3 like any other cycle.** The pass that reads
+  entries from one place and emits them into the other looks like a copy, and a
+  writer
   that codes it as one keeps every entry it reads — including the one this
   device claims and no longer holds, which is a removal the user made. That is
   not a removal delayed by a cycle. The baseline written beside the move cannot
   claim an entry the device does not hold, so nothing later can drop it, and
   the favorite comes back on every device for good. THREE passes move entries
-  between halves and the rule is the same in all three: the two whole-list
+  between places and the rule is the same in all three: the two whole-list
   moves, where the flag doing it had no other effect — the ordinary rule
   already carries an entry you neither hold nor claim, so "adopt everything"
   only ever meant "suppress removals" — and the claim-back, where an app takes
@@ -423,33 +425,33 @@ and read the other one.
   whole life and the reference was right the whole time; that drift is why the
   comparison site now carries a comment naming the case.
 - **`content` is carried, not only tags.** §4 covers the whole event. A
-  writer that has never heard of a private half still republishes the bytes
+  writer that has never heard of a private list still republishes the bytes
   it read, verbatim — it has nothing to parse, only bytes to put back.
-  Supporting a private half is optional; carrying one is not. A republish
+  Supporting private lists is optional; carrying one is not. A republish
   path whose `content` is a literal rather than a value threaded from the
   read is the bug, and a default parameter is how it gets written.
-- **The privacy choice belongs to the list, not to the app.** Whichever half
+- **The privacy choice belongs to the list, not to the app.** Whichever place
   holds entries is the mode of the whole list, and every writer puts its
-  entries in that half. The direction is asymmetric: public → private *may*
+  entries there. The direction is asymmetric: public → private *may*
   move another app's entries, because it only reduces exposure and is
   reversible; private → public may not, because it is a disclosure that
   publishes an `i` tag relays index. The other rule — an app moves only what
   it wrote — was tried first: it encrypted 436 entries, left 13 written by a
   second app public and relay-indexed, and said nothing on screen about which
   were which.
-- **A baseline answers "your own contribution" once per half.** The half you
+- **A baseline answers "your own contribution" once per place.** The one you
   did not publish into has no new contribution, so its claims are carried,
-  never recomputed. Recompute them and you claim every entry in that half,
+  never recomputed. Recompute them and you claim every entry there,
   another writer's included; nothing backs the claim next cycle, so the
-  removal test deletes the whole half at once. It takes two cycles to appear —
+  removal test deletes all of them at once. It takes two cycles to appear —
   the first publish emits correct bytes and only the baseline beside them is
   wrong — so every single-cycle test passes over it.
   CARRYING A CLAIM IS NOT KEEPING IT ALIVE PAST ITS ENTRY, though. A writer
-  edits the inactive half too — the claim-back removes entries from it, a
+  edits the inactive place too — the claim-back removes entries from it, a
   whole-list move empties it — and a claim left behind by either can never be
   satisfied again, so the only thing it still does is fire the removal row on
   the next app that writes that entry there. Retire it when the entry is gone
-  from that half AND you no longer hold it; either alone keeps it, because an
+  from there AND you no longer hold it; either alone keeps it, because an
   entry you hold needs its claim as the resurrection guard. Retiring only ever
   removes claims, so it cannot claim what is not yours. Vector 31, issue #41.
 - **A normative rule needs a vector, and a vector needs a case.** A new

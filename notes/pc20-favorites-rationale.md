@@ -312,16 +312,16 @@ itself, rather than a wrong feed that nothing corrects.
 ## Where the default is safe, and where it is not
 <a id="no-safe-default"></a>
 
-**Why a tag, when the encryption already says it.** Almost. "Whichever half
-holds entries is the mode" answers correctly for every list that has entries,
-and it is what both existing implementations do. It cannot answer for a list
-that has none — a new account, or one whose last favorite was just removed —
-and that is not an edge case, it is where every user starts.
+**Why a tag, when the encryption already says it.** Almost. "Whichever of the
+two holds entries is the mode" answers correctly for every list that has
+entries, and it is what both existing implementations do. It cannot answer for
+a list that has none — a new account, or one whose last favorite was just
+removed — and that is not an edge case, it is where every user starts.
 
 This document used to say there was no safe default, and that every writer had
 to ask there. The rule was right about the danger and wrong about the price. An
 "ask the user" flow sits in front of a brand-new account's first favorite, in
-every app, forever; an app that does not offer a private half at all has no
+every app, forever; an app that does not offer private lists at all has no
 question it can honestly put; and the state it protects — nobody anywhere has
 ever chosen a mode — is not the state the danger lives in.
 
@@ -334,14 +334,14 @@ absence of one.
 Two neighbouring states keep the old rule, and each is a way the default turns
 back into the disclosure it replaced.
 
-- **A `content` this writer cannot account for is somebody's half.** An empty
-  tag list is not an empty list. Default there and the next publish puts `i`
-  tags beside ciphertext, splitting a list under the rule that says a list is
-  wholly in one half. This is why emptiness is tested on the `content` STRING
-  rather than on whether entries came back from it — a decode returns nothing
-  both for a half that is empty and for one this writer cannot read, and only
-  the first is safe. Vector 30's rule that an emptied half encodes to `''` is
-  what makes the string trustworthy.
+- **A `content` this writer cannot account for is somebody's encrypted list.**
+  An empty tag list is not an empty list. Default there and the next publish
+  puts `i` tags beside ciphertext, splitting a list under the rule that says a
+  list is wholly public or wholly private. This is why emptiness is tested on
+  the `content` STRING rather than on whether entries came back from it — a
+  decode returns nothing both for a `content` that is empty and for one this
+  writer cannot read, and only the first is safe. Vector 30's rule that an
+  emptied `content` encodes to `''` is what makes the string trustworthy.
 - **The default is a tiebreak, never an inference.** An inferred mode outranks
   a writer's own standing setting, deliberately: acting on the setting is one
   app silently overruling another. Put the default in the inference and it
@@ -350,27 +350,27 @@ back into the disclosure it replaced.
   plaintext. Same disclosure, arrived at from the other side. It is an answer
   for a writer that has no preference either, and nothing more.
 
-A list holding entries in both halves still asks. There the guess is not about
+A list holding entries in both places still asks. There the guess is not about
 a favorite nobody has made yet — it is about entries somebody already hid.
 
 The second thing the tag buys is a **direction to fold in**. Before it, a list
-found with entries in both halves was ambiguous: you could carry it, which is
-what the spec requires, but nothing said which half the user had actually asked
-for. Now something does.
+found with entries in both places was ambiguous: you could carry it, which is
+what the spec requires, but nothing said which the user had actually asked for.
+Now something does.
 
-**The tag is consent, which is why changing the mode requires reading both
-halves.** The old rule was an asymmetry: public → private could move another
-app's entries because it only reduces exposure, and private → public could not,
-because publishing an `i` tag is a disclosure and irreversible. The asymmetry
-existed because no app could tell the user's intent for the whole list from the
-event. The tag is that intent, stated by an app that could see everything it
-was about to disclose — so with the tag present the move is symmetric. Absent
-the tag, the conservative rule still stands.
+**The tag is consent, which is why changing the mode requires reading both the
+tags and `content`.** The old rule was an asymmetry: public → private could
+move another app's entries because it only reduces exposure, and private →
+public could not, because publishing an `i` tag is a disclosure and
+irreversible. The asymmetry existed because no app could tell the user's intent
+for the whole list from the event. The tag is that intent, stated by an app
+that could see everything it was about to disclose — so with the tag present
+the move is symmetric. Absent the tag, the conservative rule still stands.
 
-An app whose signer has no NIP-44 cannot see the private half, so it cannot
-move those entries and cannot honestly claim the list is public — it would be
-stating a convergence it is not able to perform, and the entries it cannot see
-would sit encrypted under a tag saying they are not.
+An app whose signer has no NIP-44 cannot read the encrypted entries, so it
+cannot move those entries and cannot honestly claim the list is public — it
+would be stating a convergence it is not able to perform, and the entries it
+cannot see would sit encrypted under a tag saying they are not.
 
 **"Not on Nostr" is a local choice and is not on the wire.** There is no third
 `visibility` value, and writing one would tell every other writer to stop on
@@ -390,30 +390,30 @@ which is the kind of partial that is worse than a clear no: nothing on screen
 said which entries were still public, and the remedy was to go and make the
 same choice again in every other app they had ever signed into.
 
-So the whole list has one mode, every writer puts its entries in that half, and
-the event says which.
+So the whole list has one mode, every writer puts its entries where that mode
+says, and the event says which.
 
-**Rendering both halves as one library is not the same as adopting both.** An
+**Rendering both places as one library is not the same as adopting both.** An
 app that shows the union — the natural thing, since it is one person's
 favorites — still has to keep the set it renders apart from the set it claims,
-because local state goes wholly into the half that app writes into. Adopt an
-entry out of the other half and the next publish moves it across. On a
-whole-list move to private that is the point, and the entry is meant to travel.
-Going the other way it is a **disclosure**: the entry reappears as a plaintext
-`i` tag, relays index `i`, and an item favorite discloses more than itself on
-the way out — its feed guid is what lands at position 1, so publishing one
-saved episode puts the show into the relay's index of that feed. Carrying an
-entry and showing it are fine together; carrying it and *owning* it is not.
+because local state goes wholly into the place that app writes into. Adopt an
+entry out of the other and the next publish moves it across. On a whole-list
+move to private that is the point, and the entry is meant to travel. Going the
+other way it is a **disclosure**: the entry reappears as a plaintext `i` tag,
+relays index `i`, and an item favorite discloses more than itself on the way
+out — its feed guid is what lands at position 1, so publishing one saved
+episode puts the show into the relay's index of that feed. Carrying an entry
+and showing it are fine together; carrying it and *owning* it is not.
 
-**A reader shows the private half whatever its own last choice was.** The
-entries are the user's, whoever wrote them, and rendering them discloses
-nothing. An implementation that filters the half it is not currently writing
+**A reader shows a private list's entries whatever its own last choice was.**
+The entries are the user's, whoever wrote them, and rendering them discloses
+nothing. An implementation that filters the place it is not currently writing
 down to what its own baseline claims — a natural way to keep one app from
 adopting another's entries — hides the user's own favorites from them, on the
 device they just made the choice on.
 
-## The order the two halves shipped in
-<a id="private-half-sequencing"></a>
+## The order private lists had to ship in
+<a id="private-list-sequencing"></a>
 
 A writer that encrypts before every other writer carries `content` does not
 fail loudly — it silently makes those favorites disappear on the far side,
@@ -429,8 +429,8 @@ closed the same night, and both apps now carry `content`.
 
 The sequencing rule in the spec is what that hour bought, and it has two steps
 because the second is one step further along the same shape: an app must be
-able to **read and render** the private half before anything moves entries into
-it on its behalf, or the move is indistinguishable from a deletion on that
+able to **read and render** the encrypted entries before anything moves entries
+into it on its behalf, or the move is indistinguishable from a deletion on that
 app's screen.
 
 ### What NIP-44 costs
@@ -439,10 +439,10 @@ app's screen.
   the same entries produce different bytes every time. A byte comparison of
   ciphertext therefore always differs, and every load republishes — two apps
   rewriting the event against each other forever, this time self-inflicted.
-- **A signer that cannot decrypt looks exactly like an empty private half.**
-  Not every NIP-07 or NIP-46 signer implements `nip44`. The user cannot
-  otherwise tell "hidden here by choice" from "this app has not shipped support
-  yet", and both render as a shorter list.
+- **A signer that cannot decrypt looks exactly like an empty `content`.** Not
+  every NIP-07 or NIP-46 signer implements `nip44`. The user cannot otherwise
+  tell "hidden here by choice" from "this app has not shipped support yet", and
+  both render as a shorter list.
 - **Size, at about 1.5×.** NIP-44 pads to a power-of-two chunk, then base64
   encodes: 25 KB of tag JSON becomes 37 KB of `content`, and 90 KB becomes 128
   KB. The ~128 KB relay cap is then reached at roughly 90 KB of entries rather
@@ -468,15 +468,15 @@ every reader already understands it: `JSON.parse` returns the same string byte
 for byte in any implementation, so a writer that never heard of the rule still
 reads the list.
 
-### An empty half that encodes to ciphertext
+### An empty `content` that encodes to ciphertext
 
 A `medium` run left with nothing under it is not cosmetic: it makes an empty
-half encode to real ciphertext, and ciphertext is how the next writer knows
-somebody owns this half. A signer with no NIP-44 cannot open those bytes, so it
-reads them as a private half it must not disturb and declines to change the
-mode on top of what it cannot see — which is the correct rule, reached on false
-evidence. The user asks for private, the app agrees the request is legitimate,
-the list stays public, and nothing on screen says why.
+`content` encode to real ciphertext, and ciphertext is how the next writer
+knows somebody owns those bytes. A signer with no NIP-44 cannot open those
+bytes, so it reads them as a private list it must not disturb and declines to
+change the mode on top of what it cannot see — which is the correct rule,
+reached on false evidence. The user asks for private, the app agrees the
+request is legitimate, the list stays public, and nothing on screen says why.
 
 ### An alternative that was considered
 
@@ -534,15 +534,15 @@ written to, and the first entry that matches gets read as "mine, and I removed
 it" and deleted. An implementation shipped exactly that and destroyed an album
 favorite that existed only on the other app's side.
 
-### Why the two-half baseline rule is hard to catch
+### Why the per-place baseline rule is hard to catch
 
 The damage needs **two cycles** — the first publish emits correct bytes and
 only the baseline recorded beside it is wrong — and the first cycle need not
 publish at all, because a writer that records a baseline when the bytes already
 match records the bad one anyway. One implementation shipped it in both
 directions at once: the same writer, in public mode, published an empty
-`content` over a private half it was carrying, and in private mode published an
-empty tag list over a public one.
+`content` over encrypted entries it was carrying, and in private mode published
+an empty tag list over a public one.
 
 ## Reading, and why an EOSE is not proof
 <a id="trustworthy-read"></a>
@@ -581,7 +581,7 @@ that did it.
 no rule mentioned it: `content` was empty, the example showed `""`, and a
 writer that followed the document to the letter republished the empty string
 the format had specified from the start. That silence is what
-[2026-08-25](#private-half-sequencing) cost an hour of.
+[2026-08-25](#private-list-sequencing) cost an hour of.
 
 ## Normalising before you compare
 <a id="reframed-bytes"></a>
