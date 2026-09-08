@@ -71,7 +71,7 @@ that is the useful part.
 | 25 — feed and item favorites stated separately | red | green |
 | 26 — unfavoriting the feed keeps the item | red | red |
 | 27 — an entry is carried whole | red | green |
-| 28 — an artist entry belongs to no feed | green | red |
+| 28 — an artist entry belongs to no feed | green | red, until it declares the opt-out |
 | 30 — an empty half is an empty string | red | red |
 | 31 — a carried claim retires with its entry | red | red |
 
@@ -97,12 +97,22 @@ which contradicts the adopt-what-you-render model `adapter.d.ts` documents by
 name. That header still says "25 of 28"; the suite is 31 now, so the count is
 stale even though all three reasons stand.
 
-**Vector 28 is a question for the spec, not a defect in stablekraft.** It fails
-on `favoriting an artist must publish` — the vector hands the adapter a local
-artist favorite and requires one. The spec says carrying an artist entry is
-mandatory and offering the feature is not, so an app that does not originate
-them cannot pass. Either the vector needs a way to opt out of its last part, or
-the spec has to say origination is mandatory. It currently says the opposite.
+**Vector 28 was the suite's bug, not stablekraft's, and it is fixed.** It
+failed on `favoriting an artist must publish` — the vector handed the adapter a
+local artist favorite and required one, while the spec says carrying an artist
+entry is mandatory and offering the feature is not. An app that does not
+originate them could not pass a vector testing an optional feature.
+
+The vector now splits. Everything mandatory still runs for everyone: the entry
+parses, names no feed, does not disturb the track after it, and comes back bare
+and in its band. An app with no artist favorites in its UI declares
+`capabilities.artistFavorites: false` in its adapter and stops there. The flag
+has to be honest — an adapter declaring it while originating an artist anyway
+fails, which is a row in the mutation matrix.
+
+Measured: adding that flag to stablekraft's adapter turns 28 green and takes it
+to **26 of 31**. The change is four lines in
+`lib/nostr/favorites-conformance-adapter.ts`; nothing in the app's merge moves.
 
 ## Read this before comparing the two
 
@@ -274,9 +284,9 @@ it (`conformance/adapter.d.ts`), and vectors 13 and 14 feed it back.
   hydrator are not extracted — they depend on that app's pool and storage.
   Read them in place.
 - `check:conformance` in each app needs a checkout of this repo —
-  `../PC20-Nostr` beside it, or `PC20_NOSTR_DIR`. Neither app's CI has that, so it runs by hand,
-  which is one step better than the vectors being prose and one step short of
-  being a gate. It is also why both apps sat at 25/31 without anything going
+  `../PC20-Nostr` beside it, or `PC20_NOSTR_DIR`. Neither app's CI has that, so
+  it runs by hand, which is one step better than the vectors being prose and
+  one step short of being a gate. It is also why both apps sat at 25/31 without anything going
   red on them: nothing runs the current vectors on a push.
 - The scores above were produced from shallow clones in a sandbox. To reproduce
   them: clone each repo, then
