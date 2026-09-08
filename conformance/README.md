@@ -119,7 +119,7 @@ One line each. The full statement of every vector is in
 | 18 | Two apps reordering entries at each other forever; a new entry splitting a medium run in two, or landing at the end of the run instead of its band |
 | 19 | A duplicate feed entry folded in a way that loses an item, or loses the favorite |
 | 20 | An item naming no feed deleted as junk, handed a feed guid nobody knows, or banded in behind an album and given that album's |
-| 21 | A foreign `alt` carried beside ours, or ours not first |
+| 21 | A foreign `alt` carried beside ours, ours not first, or the mode not marked at the top |
 | 22 | A literal `?` in the plaintext, breaking every private publish through a NIP-55 signer |
 | 23 | A non-array plaintext read as "empty", so the next republish erases it |
 | 24 | A private list past the NIP-44 v2 cliff, read back as empty on an older signer |
@@ -165,6 +165,8 @@ breaking the reference on purpose and confirming the right one fails:
 | Put an item that names no feed in band 3 | **20** |
 | Band a run that holds a tag you cannot classify | **4** |
 | Declare `artistFavorites: false` from an adapter that originates one | **28** |
+| Append `visibility` after the entries instead of second | **21** |
+| Emit `visibility` ahead of `alt` | **21** |
 | Skip a duplicate feed group | **19** |
 | Drop an item that has no group above it | **20** |
 | Compare against the read as it arrived instead of reframed | **7**, 17 |

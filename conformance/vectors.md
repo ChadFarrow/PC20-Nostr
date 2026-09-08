@@ -222,9 +222,15 @@ whichever album landed last. That is the assertion band 0 exists for. This is
 what an item written before this revision looks like when no feed entry
 precedes it, and it is unresolvable by anyone, which is not the same as junk.
 
-**21. Exactly one `alt`, ours, first.** Read a list whose `alt` carries some
-other label, publish a change, and the event's first tag is `["alt", "PC 2.0
-Favorites"]` with no second `alt` beside it.
+**21. The framing tags are ours, and they lead.** Read a list whose `alt`
+carries some other label, publish a change, and the event's first tag is
+`["alt", "PC 2.0 Favorites"]` with no second `alt` beside it. Then pin the mode
+beside it: on a list that states one, `visibility` is the SECOND tag,
+immediately after `alt`, so the mode is marked at the top and a reader knows it
+before parsing an entry. Feed the same fixture with `visibility` somewhere in
+the middle — a reader must still find it, and the writer must still emit it
+second, which is the pair of rules that lets both be true at once without a
+republish.
 
 **22. The private plaintext carries no `?`.** Encode an item whose guid holds a
 query string: the plaintext contains no `?` character, `JSON.parse` of it

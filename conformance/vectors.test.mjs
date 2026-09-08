@@ -1297,7 +1297,7 @@ test('20. An item that names no feed is carried, in place, and never deleted', (
   );
 });
 
-test('21. Exactly one `alt`, ours, first', () => {
+test('21. The framing tags are ours, and they lead', () => {
   // A NIP-31 rendering hint, not user data. A writer regenerates it rather
   // than carrying a foreign value, because the event can hold only one and a
   // reader that has no definition for kind 10333 shows whatever is there.
@@ -1319,6 +1319,50 @@ test('21. Exactly one `alt`, ours, first', () => {
     publish.tags.filter((t) => t[0] === 'alt').length,
     1,
     'a foreign alt was carried beside ours',
+  );
+
+  // THE MODE IS MARKED AT THE TOP. On a list that states one, `visibility` is
+  // the second tag, so a reader knows whether it is looking at a public or a
+  // private list before it parses an entry. The fixture puts it in the MIDDLE
+  // on the way in: a reader must find it wherever it sits — an older list may
+  // carry it anywhere — and a writer must still emit it second. Those two
+  // rules are what let both be true without a republish, which is rule 5's
+  // normalisation doing its job.
+  //
+  // The list stays PUBLIC here on purpose. Emit the entries into `content` and
+  // the tag array collapses to `alt` and `visibility` alone, where "second"
+  // and "last" are the same slot and a writer that appends the mode still
+  // passes. Entries have to remain in the tags for the position to mean
+  // anything.
+  const misplaced = ev([
+    ALT,
+    ['medium', 'podcast'],
+    ['i', FEED_A],
+    VIS_PUBLIC,
+    K_FEED,
+  ]);
+  const framed = plan({
+    read: misplaced,
+    local: [feed(FEED_A, 'podcast'), feed(FEED_C, 'podcast')],
+    baseline: base([FEED_A]),
+    mode: null, // follow the list
+  });
+  assert.ok(framed.publish, 'adding a favorite is a change');
+  const out = framed.publish;
+  assert.deepEqual(out.tags[0], ALT, 'alt is still first');
+  assert.deepEqual(
+    out.tags[1],
+    VIS_PUBLIC,
+    'the mode is not marked at the top: `visibility` must be the second tag',
+  );
+  assert.ok(
+    out.tags.some((t) => t[0] === 'i'),
+    'the fixture must keep entries in the tags, or position 1 proves nothing',
+  );
+  assert.equal(
+    out.tags.filter((t) => t[0] === 'visibility').length,
+    1,
+    'the mode was stated twice',
   );
 });
 

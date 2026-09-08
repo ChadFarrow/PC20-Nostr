@@ -152,7 +152,7 @@ Keep same-medium entries contiguous. A medium must not open a second run.
 | tag | where |
 |---|---|
 | `alt` | first, exactly once; regenerated rather than carried, discarded on read (Vector 21) |
-| `visibility` | not positional; put it next to `alt` |
+| `visibility` | **second, immediately after `alt`** — the mode is declared before any entry |
 | `medium` | opens a run; applies until the next one |
 | `i` | inside its run, by band |
 | `k` | at the end, one per distinct kind; order among them unspecified |
@@ -161,6 +161,13 @@ Emit one `k` per distinct kind, not one per `i`. **A reader MUST accept both
 layouts and MUST ignore `k` when parsing entries**, deriving the kind from the
 identifier. A reader that walks `i`/`k` in pairs shows an empty library rather
 than an error. (Vector 7) ([why](notes/pc20-favorites-rationale.md#trailing-k))
+
+`visibility` goes second, immediately after `alt`, so **the mode is marked at
+the top of the list** and a reader knows it before parsing a single entry. A
+**reader MUST accept it anywhere** in the tag array and never depend on that
+position: an older list may carry it elsewhere, and
+[rule 5](#5-publish-only-when-the-bytes-change) is what stops the difference
+costing a republish. (Vector 21)
 
 ### Bands
 
@@ -198,9 +205,10 @@ list's entries are the plaintext `i` tags; a private list's are the encrypted
 places is broken — carried, then repaired, never tidied away.
 
 `["visibility","public"]` or `["visibility","private"]` states the mode of the
-whole list, and any app may change it. It is multi-letter on purpose: relays
-index single-letter tags, and a `#v=private` filter would enumerate the pubkeys
-keeping a private list.
+whole list, and any app may change it. It is marked at the top, right after
+`alt`, so the list says what it is before it says what is on it. It is
+multi-letter on purpose: relays index single-letter tags, and a `#v=private`
+filter would enumerate the pubkeys keeping a private list.
 
 - **An empty, untagged list is public.** No `visibility` tag, no `i` tag, and
   `content` the empty string: publish into the tags. Nobody has chosen a mode,
