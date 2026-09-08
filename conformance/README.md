@@ -61,11 +61,13 @@ somebody has already shipped:
 - **`baselineIfLanded` is returned, not recorded.** A baseline written for an
   event that never reached a relay says "I am already asserting this", so the
   entry is never retried — lost permanently, while the UI reports success.
-- **`favorited` on a local group has THREE values.** `true`, `false`, and
-  `null` for "this device does not know" — which is the honest answer for a
-  group it adopted off the wire with no marker on it. A shim that omits the
-  field passes vectors 1-24 unchanged and fails 25-27, which is the right
-  answer for an app that has not shipped feed-favorite markers yet.
+- **`favorited` on a local group is a plain boolean**, and false is an
+  ordinary answer. A feed entry is written only when it is true, so a feed you
+  hold only to supply its items' feed guid never reaches the list at all.
+- **A baseline claim on an item is the PAIR**, built with `itemClaim`. An item
+  guid is unique inside its feed and is not globally unique, so a baseline
+  keyed on the identifier alone cannot tell two items in two feeds apart and
+  removing one removes both.
 
 If your app's shapes differ, adapt in the shim rather than editing the vectors.
 The vectors are the spec; the shim is yours.
@@ -79,31 +81,31 @@ Numbering matches the spec exactly.
 | 1 | A writer built from local state alone — the natural way to write one |
 | 2 | A failed read treated as an empty list |
 | 3 | A merge that is not idempotent, so two apps never converge |
-| 4 | Dropping a tag, `k` value or identifier written by a newer app |
+| 4 | Dropping a tag, `k` value or identifier written by a newer app; an unreadable position 2 read as a feed favorite |
 | 5 | Items reattached to the wrong feed; an unknown medium defaulted to `podcast` |
-| 6 | `podcast:item:guid:https` — a `k` value no relay filter matches |
+| 6 | An entry kind read off position 1 alone, so `podcast:item:guid` never reaches the event; and `podcast:item:guid:https` — a `k` value no relay filter matches |
 | 7 | A reader that walks `i`/`k` in pairs, showing an empty library and no error |
 | 8 | A baseline ignored, so removals either never propagate or delete everything |
 | 9 | The resurrection loop: an entry another app deleted returning on every load |
 | 10 | A lost publish made permanent by recording its baseline anyway |
-| 11 | Deleting another app's tracks along with the group that named their parent |
+| 11 | Removing a feed favorite dragging somebody's saved items out with it |
 | 12 | Blanking `content` over another app's private half |
 | 13 | A user left 97% private, or a private entry disclosed as a relay-indexed `i` tag |
 | 14 | Deleting the half you do not write into — invisible for one whole cycle |
 | 15 | A list stuck with entries in both halves: tidied away, or converged into a duplicated `i` tag |
 | 16 | An empty list with no mode to infer — the favorite guessed into the wrong half |
 | 17 | A list declared public while the entries in it stayed encrypted |
-| 18 | Two apps reordering one group's items at each other forever; a new item attached to the wrong feed |
-| 19 | A duplicate feed group skipped, and the favorites under it lost |
-| 20 | An item with no group above it deleted as junk, or made to re-parent everything after it |
+| 18 | Two apps reordering entries at each other forever; a new entry splitting a medium run in two, or landing at the end of the run instead of its band |
+| 19 | A duplicate feed entry folded in a way that loses an item, or loses the favorite |
+| 20 | An item naming no feed deleted as junk, handed a feed guid nobody knows, or banded in behind an album and given that album's |
 | 21 | A foreign `alt` carried beside ours, or ours not first |
 | 22 | A literal `?` in the plaintext, breaking every private publish through a NIP-55 signer |
 | 23 | A non-array plaintext read as "empty", so the next republish erases it |
 | 24 | A private half past the NIP-44 v2 cliff, read back as empty on an older signer |
-| 25 | A show favorite and an episode favorite collapsed into one bit; 114 placement groups read as favorites |
-| 26 | Unfavoriting a show taking its saved episode with it, or the removal left unsaid and reappearing |
-| 27 | Entries rebuilt as `['i', id]`, erasing every marker; a marker invented for a group you only carry |
-| 28 | An artist entry made a group, a track, or a group-closer — each one re-parents somebody's tracks |
+| 25 | A feed the user never favorited written to the list; two items sharing an item guid folded into one |
+| 26 | Unfavoriting a feed taking its saved item with it, or deleting a favorite another app made |
+| 27 | Entries rebuilt as `['i', id]`, stripping the feed guid that makes an item resolvable at all |
+| 28 | An artist entry given a feed guid, or made an item of the entry above it |
 
 ## The suite is mutation-tested
 
@@ -130,24 +132,28 @@ breaking the reference on purpose and confirming the right one fails:
 | Re-encode an opaque private half as an empty array | **17** |
 | Append a known group's new items to the end of the event | **18** |
 | Put local items ahead of the ones read | **18** |
+| Emit band 3 before band 2 | 1, 2, 10, **18**, 28 |
+| Append a new entry at the end of the run instead of its band | **18**, 28 |
+| Skip the by-feed grouping inside band 3 | **18** |
+| Put an item that names no feed in band 3 | **20** |
+| Band a run that holds a tag you cannot classify | **4** |
 | Skip a duplicate feed group | **19** |
 | Drop an item that has no group above it | **20** |
 | Carry the `alt` you read | **21** |
 | Hand the signer a plaintext with a literal `?` | **22** |
 | Read a non-array plaintext as an empty list | **23** |
 | Publish a private half past 60,000 bytes | **24** |
-| Rebuild `i` tags as `['i', id]` on emit | **25, 26, 27** |
-| Express a feed-favorite removal by leaving the marker off | **25, 26** |
-| Let a `placement` you hold overwrite a `fav` you do not claim | **26** |
-| Read an unmarked group with items as a feed favorite | **25, 27** |
-| Ignore the marker and always use the itemless heuristic | **25, 26** |
-| Stamp your own answer on a group you only carry | 8, **27** |
-| Never claim a feed favorite in the baseline | **25** |
-| Keep the first copy's marker when folding two halves | **25** |
-| Let an artist entry open a feed group | **28** |
-| Let an artist entry be an item of the group above | **28** |
-| Let an artist entry close the open group | **28** |
-| Write a marker onto an artist entry | **28** |
+| Rebuild `i` tags as `['i', id]` on emit, dropping half the pair | **6, 25, 27** |
+| Read an item's feed from the entry above it, ignoring position 1 | **5, 25, 26** |
+| Drop the legacy path, so a two-element item names no feed | **4, 27** |
+| Republish a legacy item without rewriting it | **27** |
+| Invent a feed guid for an item whose feed nobody knows | **20** |
+| Key an entry on position 1 alone rather than on the pair | 2, 3, 10, 11, 18, 19, **25, 26** |
+| Derive an entry's `k` kind from position 1 alone | **6** |
+| Read an unrecognised position 2 as a feed favorite | **4** |
+| Write a feed entry for a feed you hold only to supply a feed guid | **25** |
+| Let an artist entry be an item of the entry above it | **28** |
+| Write a feed guid onto an artist entry | **28** |
 
 The first two rows are not hypothetical. They are the two defects that reached
 production on 2026-08-25, and they are why this directory exists.

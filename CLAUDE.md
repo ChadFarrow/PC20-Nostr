@@ -49,9 +49,9 @@ A **reference repo with four parts**, none of which is an application.
    `comparisons/` (why each shipped copy won), `analysis/` (the scripts
    behind every number). See `catalog/README.md`.
 
-One page sits outside those four. `pc20-favorites-marker-adoption.md` says what
-`stablekraft-app` and `boostmebitch` each have to change to adopt the
-feed-favorite marker, read at `4722dd8` and `938f90d`. It is the only page here
+One page sits outside those four. `pc20-favorites-feed-guid-migration.md` says
+what `stablekraft-app` and `boostmebitch` each have to change so an item entry
+carries the guid of its feed, read at `4722dd8` and `938f90d`. It is the only page here
 that tells another repo what to do, and it is a **plan, not an extraction** —
 no line of it has run in either app. It is therefore the page that rots
 fastest: every line number in it is a claim about a file this repo does not
@@ -135,8 +135,8 @@ The spec was **authored, not extracted**. Every rule in it began as a design
 decision someone made rather than a behavior observed in production, and most
 still are.
 
-Both implementations went live on 2026-08-13: `~/Vibe/stablekraft-app`
-publishes and reads kind 10333 in production, and `~/Vibe/boostmebitch`
+Both implementations went live on 2026-08-13: `~/stablekraft-app`
+publishes and reads kind 10333 in production, and `~/boostmebitch`
 started publishing it the same evening. That is **two writers, one user, one
 day old** — a source of measurements (event sizes, group counts, bugs each
 actually hit) and not evidence that a rule is settled.
@@ -183,34 +183,83 @@ have moved (`edffe3c`, `fbb6612a`) with hundreds of lines changed under
 
 ## The implementation repos are read-only
 
-Every repo under `~/Vibe` other than this one — `ITDV-Lightning`,
-`boostmebitch`, `stablekraft-app`, `MSP-2.0`, `candr.space` and the rest — is
-a source to read, never a target to change: no edits, no commits, no branches,
-no PRs, no "while I'm in here" fixes. Read them as much as a claim requires —
-that is how one gets verified — but what comes back lands here, as spec text,
-a catalog entry or a known-gap note, never as a patch over there.
+Every repo beside this one — `ITDV-Lightning`, `boostmebitch`,
+`stablekraft-app`, `MSP-2.0`, `candr.space` and the rest — is a source to
+read, never a target to change: no edits, no commits, no branches, no PRs, no
+"while I'm in here" fixes. Read them as much as a claim requires — that is how
+one gets verified — but what comes back lands here, as spec text, a catalog
+entry or a known-gap note, never as a patch over there.
 
 **Never `git pull` in one.** A pull rewrites the working tree, and at least
-one repo under `~/Vibe` is carrying thousands of uncommitted files that exist
+one of these repos is carrying thousands of uncommitted files that exist
 nowhere else.
+
+### Where they are, and which are not here at all
+
+They sit **directly in `~`**, one directory per repo, beside `~/PC20-Nostr`.
+Not under `~/Vibe`; an earlier revision of this file said that and no such
+directory exists. Two of the paths do not match the repo name:
+
+| repo | path | note |
+|---|---|---|
+| `boostmebitch` | `~/boostmebitch` | |
+| `stablekraft-app` | `~/stablekraft-app` | |
+| `MSP-2.0` | `~/MSP 2.0` | **a space, not a hyphen** — quote it |
+| `ITDV-Lightning` | — | **not cloned here** |
+| `candr.space` | — | **not cloned here**, and private on GitHub |
+
+`~/boostbox-1` is the clone of `ChadFarrow/boostbox`, which is not on the
+allowlist either way. Checked 2026-09-07: 17 repos in `~`, none named `Vibe`.
+
+**Two allowlisted sources are missing, and that is a fact to state rather than
+route around.** Read them over the API instead — read-only, and it answers
+`origin/HEAD` directly rather than a stale checkout:
+
+```bash
+gh api repos/ChadFarrow/<repo>/commits/main --jq '.sha[0:7]'      # the SHA
+gh api repos/ChadFarrow/<repo>/contents/<path> --jq '.content' | base64 -d
+```
+
+Do not clone one to make a claim easier without being asked. A catalog entry
+whose source cannot be read at a recorded SHA is unverified and must say so.
+
+**Known gap: the catalog scripts still hardcode `~/Vibe`.**
+`catalog/check-drift.sh` defaults `ROOT` to `$HOME/Vibe`, and `closure.py`,
+`feature.py`, `magnitude.py` and `overlap.py` each set
+`VIBE = os.path.expanduser("~/Vibe")`. Repointing the base is not enough on
+its own either: they build `<root>/<repo name>`, which misses `~/MSP 2.0`, and
+they name all five repos, two of which are not cloned here.
+
+Measured on 2026-09-07, so use these results rather than re-deriving them:
+
+- `./catalog/check-recipes.sh --network` — **passes**, all 10 checks. It reads
+  only this repo, so the path has no effect on it.
+- `./catalog/check-drift.sh ~` — **exit 1**. `PROVENANCE.tsv` has 14 rows: the
+  2 `boostmebitch` rows verify clean, and the other 12 report `MISSING REPO`
+  (11 `ITDV-Lightning`, not cloned; 1 `MSP-2.0`, whose directory has a space).
+  Run without the `~` argument it reports all 14 as missing.
+
+So the drift checker cannot currently confirm 12 of 14 extracted files, and a
+number produced by an `analysis/` script has not been reproduced on this
+machine. Say that rather than quoting either as verified.
 
 ## Read `origin/HEAD`, never the local checkout
 
-The clones under `~/Vibe` are not current. When the catalog was built, **9 of
-15 were behind their remote** — one by 19 commits, both kind-10333
-implementations by 2 and 3 — and two were sitting on feature branches rather
-than their default branch.
+The local clones are not current. When the catalog was built, **9 of 15 were
+behind their remote** — one by 19 commits, both kind-10333 implementations by
+2 and 3 — and two were sitting on feature branches rather than their default
+branch.
 
-So a claim verified by reading `~/Vibe/<repo>/lib/thing.ts` is a claim about
+So a claim verified by reading `~/<repo>/lib/thing.ts` is a claim about
 whatever happened to be checked out, and it will be wrong about half the time.
 This is not hypothetical: the first draft of
 `catalog/comparisons/favorites-10333.md` reported four bugs in stablekraft's merge
 that had already been fixed upstream.
 
 ```bash
-git -C ~/Vibe/<repo> fetch origin --quiet          # touches .git/refs only
-git -C ~/Vibe/<repo> show origin/HEAD:<path>
-git -C ~/Vibe/<repo> rev-parse --short origin/HEAD # the SHA to record
+git -C ~/<repo> fetch origin --quiet          # touches .git/refs only
+git -C ~/<repo> show origin/HEAD:<path>
+git -C ~/<repo> rev-parse --short origin/HEAD # the SHA to record
 ```
 
 `fetch` never modifies a working tree, so this stays inside the read-only
@@ -219,7 +268,7 @@ rule.
 **Record the SHA in the entry.** A row without one is unverified and must say
 so — a stale example is worse than none, because it will be trusted and it
 will be wrong. With the SHA, checking is one command:
-`git -C ~/Vibe/<repo> diff <sha> origin/HEAD -- <path>`.
+`git -C ~/<repo> diff <sha> origin/HEAD -- <path>`.
 
 **Do not trust one implementation's comments about another.** Both apps carry
 headers describing how the other one behaves, and both are out of date. Go
@@ -227,12 +276,53 @@ and read the other one.
 
 ## Invariants a change must not quietly break
 
-- **Tag order is semantic.** `medium` is a running value that applies to
-  every entry after it, and item entries belong to the most recently opened
-  feed group. An item's parent feed and its medium are carried by position,
-  not by anything on the entry itself, so any client that sorts, dedupes, or
-  rebuilds the tag array from parsed structs silently reattaches every item
-  to the wrong feed. Nothing else in the format recovers the association.
+- **An entry names its own feed; only `medium` MEANS anything positionally.**
+  An item tag is
+  `["i", "podcast:guid:<feedGuid>", "podcast:item:guid:<itemGuid>"]` —
+  `<podcast:remoteItem>` as one tag, required `feedGuid` then optional
+  `itemGuid`, both as full NIP-73 identifiers — so sorting or rebuilding the
+  array cannot reattach it. `medium` is still a running value applying to every
+  entry after it, so a reorder costs a wrong label — which a
+  Podcast Index lookup corrects — rather than a wrong feed, which nothing
+  corrected. The old rule was the reverse and it is the reason this one is
+  written down.
+- **Order is prescribed, not preserved, and only the rule above makes that
+  possible.** Each `medium` run is emitted in four bands: items naming no feed,
+  then artists, then albums and podcasts, then items grouped by the feed they
+  name. Read order stands inside a band and a new entry goes at the end of its
+  band. The earlier rule was "keep what you read, append yours", whose failure
+  mode needs two apps imposing DIFFERENT orders — one order in the document
+  converges even against a writer that does not sort, because that writer keeps
+  what it read. Two exceptions carry the whole risk: an item naming no feed
+  goes in band 0, because banding it in behind an album silently hands it that
+  album's guid; and a run holding a tag you cannot classify is emitted in wire
+  order, because a tag with no kind has no band.
+- **An item guid is not an address.** `<podcast:guid>` is globally unique by
+  construction and outlives the feed URL; an item's `<guid>` is unique only
+  inside its feed, which is why `/episodes/byguid` demands a feed identifier
+  beside it. So position 2 is mandatory on an item entry, identity is the
+  PAIR — dedupe or claim on the item guid alone and two items in two feeds
+  fold into one — and a writer that rebuilds entries as `["i", id]` does not
+  drop a label, it makes those favorites unresolvable by everyone forever.
+- **A feed favorite and an item favorite differ only in length.** Both carry
+  `podcast:guid:<feedGuid>` at position 1, exactly as `remoteItem` uses one
+  required attribute for both. Three things follow. A key, dedupe or lookup on
+  position 1 alone folds a feed favorite together with every item favorite
+  under it. An entry's KIND is the kind of its LAST identifier — position 2
+  when there is one — or `#k` discovery stops finding item favorites at all.
+  And a position 2 you cannot read makes the entry unreadable, never a feed
+  favorite: guess and a newer writer's entry becomes a followed show.
+- **Relays index position 1, which is now the feed guid for both.** So `#i`
+  for a feed returns the feed favorite and every item favorite from it
+  together, there is no per-item filter on these kinds, and publishing one
+  saved episode puts the show into that index. A kind:1 boost note still tags
+  the episode as `podcast:item:guid:<itemGuid>`, so a `#i` written for one
+  does not find the other — say so rather than letting it be discovered.
+- **One favorite, one tag.** A feed entry appears only when the user favorited
+  the feed. Nothing is on the list for structural reasons, so there is no
+  favorite-versus-placement question and no marker to answer it. A brief
+  revision of the spec had one at position 2; the item guid took the slot,
+  because that was the value actually missing.
 - **Medium is a hint, never truth.** A Podcast Index lookup on the guid wins
   over the stored hint whenever they disagree.
 - **Merging is what makes wholesale replacement safe — there is no
@@ -280,6 +370,16 @@ and read the other one.
   `conformance/README.md` carries the matrix; every one of the 28 is killed by
   at least one mutation, and the first two rows of that table are the defects
   that actually reached production on 2026-08-25.
+- **The feed-guid migration has shipped data behind it, unlike the marker.**
+  Every list in production writes items as two elements. A reader must accept
+  both forms — `["i","podcast:guid:F","podcast:item:guid:X"]` is an item
+  entry, while a two-element `["i","podcast:item:guid:X"]` takes its feed from
+  the entry above, as before — and a writer rewrites the WHOLE tag on its next
+  publish, moving the identifier to position 2 rather than appending. Both
+  apps must read the three-element form before either writes it: a reader
+  still on the old rules does not merely lose such an entry, it reads
+  `podcast:guid:F` at position 1 and turns one saved episode into a favorite
+  of the whole show.
 - **Every kind here is self-assigned, not NIP-allocated**: 10333 for
   favorites, 3369 / 33369 / 23369 for playback events. Say so wherever it
   matters, and keep the collision cost stated: relay filters are

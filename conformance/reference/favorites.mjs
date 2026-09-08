@@ -29,29 +29,80 @@ export const ALT = 'PC 2.0 Favorites';
 export const VISIBILITY = 'visibility';
 
 /**
- * Position 3 of a feed `i` tag: whether the user favorited the FEED itself, as
- * opposed to the group merely being open so an item below it can name a parent.
+ * Position 1 of a feed favorite AND of an item favorite: the feed's
+ * `<podcast:guid>`, as the NIP-73 identifier `podcast:guid:<feedGuid>`.
  *
- * Position 2 is left to NIP-73's URL hint and written as '' when there is
- * none. Putting the marker there would hand a generic NIP-73 consumer the
- * string 'fav' where it expects a URL. Data Structure, "Saying whether a feed
- * is favorited".
+ * An item guid is unique inside its feed and is NOT globally unique, so it is
+ * not an address on its own — the Podcast Index `/episodes/byguid` lookup
+ * refuses the call outright without a `feedid`, `feedurl` or `podcastguid`
+ * beside it. The pair is the address, and it is written in the order
+ * `<podcast:remoteItem>` writes it: the required `feedGuid` first, then the
+ * optional `itemGuid`. Data Structure, "One favorite, one tag".
  */
-export const FAV = 'fav';
-export const PLACEMENT = 'placement';
+const FEED_PREFIX = 'podcast:guid:';
 
-/** The marker on a tag, or null when it states nothing this writer knows. */
-export function markerOf(tag) {
-  const m = tag?.[3];
-  return m === FAV || m === PLACEMENT ? m : null;
+/** The bare feed guid inside a `podcast:guid:` identifier. */
+export const feedGuidOf = (identifier) =>
+  typeof identifier === 'string' && identifier.startsWith(FEED_PREFIX)
+    ? identifier.slice(FEED_PREFIX.length)
+    : null;
+
+/** The `podcast:guid:` identifier for a bare feed guid. */
+export const feedIdOf = (guid) => FEED_PREFIX + guid;
+
+/**
+ * The item identifier at position 2, or null when the tag carries none.
+ *
+ * Its PRESENCE is the whole distinction between a feed favorite and an item
+ * favorite, because both carry the same identifier at position 1.
+ * `<podcast:remoteItem>` draws the line in the same place: `feedGuid` alone
+ * points at the feed, `feedGuid` plus `itemGuid` points at one item in it.
+ *
+ * Position 2 is a full `podcast:item:guid:` identifier, not a bare guid. It
+ * costs about 18 bytes an entry and buys a tag that says what each half of it
+ * is without a table — the same reason position 1 is not a bare feed guid.
+ * A position 2 this writer cannot recognise is NOT an item entry: the tag is
+ * carried whole and untouched instead of guessed at (rule 4).
+ */
+export function itemIdOf(tag) {
+  const g = tag?.[2];
+  return typeof g === 'string' && kindOf(g) === 'podcast:item:guid' ? g : null;
 }
 
-/** A feed `i` tag carrying a marker, keeping whatever hint was at position 2. */
-const feedTag = (id, marker, hint = '') =>
-  marker === null ? ['i', id] : ['i', id, hint ?? '', marker];
+/**
+ * What makes an entry unique, and therefore what a baseline claims and what a
+ * dedupe collapses.
+ *
+ * A FEED or an ARTIST is its identifier. An ITEM is the PAIR: the same item
+ * guid under two different feed guids is two different items, because an item
+ * guid is only unique within its feed. Deduping on the identifier alone would
+ * merge two real favorites into one.
+ *
+ * Position 1 no longer separates them either. A feed favorite and an item
+ * favorite of that same feed carry the SAME string at position 1 — only the
+ * item's position 2 tells them apart — so an entry key that reads position 1
+ * alone folds a feed favorite together with every item favorite under it.
+ *
+ * Relay `#i` filters match position 1 alone, which is now the feed guid for
+ * both. A `#i` for a feed therefore returns the feed favorite and every item
+ * favorite from it, and a per-item `#i` on this kind is not available. See
+ * "What this format does not do".
+ */
+export const keyOf = (entry) =>
+  entry.feed === null || entry.feed === undefined
+    ? entry.id
+    : itemClaim(entry.id, entry.feed);
 
-/** Baseline claims are per-thing, and a feed favorite is its own thing. */
-export const FAV_CLAIM = 'fav:';
+/**
+ * The baseline claim for one item favorite.
+ *
+ * A baseline records what THIS device asserted, so its entries must be as
+ * unique as the things they stand for. An item is the pair, so a claim on an
+ * item is the pair. The exact string is this writer's own business — nothing
+ * on the wire carries it — but an adapter must export this so the vectors can
+ * hand it a baseline in the shape it writes one.
+ */
+export const itemClaim = (itemId, feedGuid) => itemId + ' @ ' + feedGuid;
 
 /**
  * The known-kinds table. Data Structure, "Derive the kind from a known-kinds
@@ -79,6 +130,23 @@ export function kindOf(identifier) {
 const isFeedKind = (k) => k === 'podcast:guid';
 
 /**
+ * The kind an ENTRY declares, which is not always the kind of its identifier.
+ *
+ * `podcast:guid:<feedGuid>` with an item guid beside it IS an item entry, so
+ * it declares `podcast:item:guid`. Reading the prefix alone would drop that
+ * kind off every list whose item favorites are all written the current way,
+ * and `#k` discovery would stop finding item favorites entirely.
+ *
+ * The legacy two-element `podcast:item:guid:<itemGuid>` form already carries
+ * its kind in the prefix, so it needs no special case here.
+ */
+export function kindOfTag(tag) {
+  const item = itemIdOf(tag);
+  if (item !== null && isFeedKind(kindOf(tag?.[1]))) return kindOf(item);
+  return kindOf(tag?.[1]);
+}
+
+/**
  * A kind that is an entry in its own right and nests nothing.
  *
  * An artist. Favoriting one says "show me this artist's whole catalogue", and
@@ -99,27 +167,36 @@ const isStandaloneKind = (k) => k === 'podcast:publisher:guid';
 // ---------------------------------------------------------------------------
 
 /**
- * Tag array in, structure out. Grouping rules:
+ * Tag array in, structure out.
  *
- *   - `medium` is a RUNNING value, applying to every entry after it.
- *   - A feed `i` opens a group, tagged with the current medium.
- *   - An item `i` belongs to the MOST RECENTLY OPENED group, until the next
- *     feed entry or the next `medium` tag.
+ *   - `medium` is a RUNNING value, applying to every entry after it. It is the
+ *     only positional thing left in the format.
+ *   - A `podcast:guid:` `i` with NOTHING at position 2 is a feed favorite.
+ *     Its presence IS the favorite: nothing is on this list for structural
+ *     reasons, so there is nothing to label.
+ *   - A `podcast:guid:` `i` WITH a `podcast:item:guid:` identifier at
+ *     position 2 is an item favorite — the feed at position 1, the item at
+ *     position 2, the order `<podcast:remoteItem>` uses. It does not depend on
+ *     the entry above it, so sorting or rebuilding the array cannot move it to
+ *     another feed.
+ *   - A `podcast:guid:` `i` with something UNREADABLE at position 2 is
+ *     neither. It is carried whole rather than read as a feed favorite, or a
+ *     newer writer's entry silently becomes a followed show.
  *   - An entry before any `medium` tag has an UNKNOWN medium — null here,
  *     never defaulted to 'podcast'.
- *   - `k` takes no part in grouping and is never used to derive an entry's
+ *   - `k` takes no part in anything and is never used to derive an entry's
  *     kind. Both `k` layouts therefore parse identically (vector 7).
- *   - An unparseable `i` is carried and does NOT close the open group
- *     (rule 4), or everything after it re-parents.
- *   - Position 3 of a feed `i` says whether the FEED is favorited. It takes no
- *     part in grouping, and it is resolved PER FEED rather than per group,
- *     because a feed may open two groups (vector 19) and the favorite is a
- *     property of the feed.
+ *   - An unparseable `i` is carried whole (rule 4).
+ *
+ * LEGACY: a two-element `podcast:item:guid:` tag predates all of this, and
+ * every list published before this revision is full of them. Its feed comes
+ * from the most recent feed entry above it, which is where the old format kept
+ * it. Dropping that path does not merely lose a label — an item guid alone is
+ * not an address, so it would make every published item favorite unresolvable.
  */
 export function parseTags(tags) {
   let medium = null;
-  let group = null;
-  const groups = [];
+  let openFeed = null; // legacy only: the feed a bare item tag belongs to
   const entries = [];
   const kinds = [];
   const foreign = [];
@@ -130,7 +207,7 @@ export function parseTags(tags) {
 
     if (name === 'medium') {
       medium = value ?? null;
-      group = null; // a medium tag closes the open group
+      openFeed = null; // a medium tag ended a legacy run
       return;
     }
     if (name === 'k') {
@@ -146,77 +223,69 @@ export function parseTags(tags) {
 
     const kind = kindOf(value);
     if (kind === null) {
-      // Unreadable identifier. Carried whole, and the open group stays open.
+      // Unreadable identifier. Carried whole, and a legacy run stays open.
       foreign.push({ index, tag });
       return;
     }
 
+    const itemId = itemIdOf(tag);
+    const slot2 = tag[2];
+
     if (isFeedKind(kind)) {
-      group = { id: value, kind, medium, index, items: [], marker: markerOf(tag) };
-      groups.push(group);
-      entries.push({
-        id: value,
-        kind,
-        medium,
-        index,
-        parent: null,
-        marker: group.marker,
-      });
+      if (itemId === null && typeof slot2 === 'string' && slot2 !== '') {
+        // A feed identifier with SOMETHING at position 2 that this writer
+        // cannot read. It is not a feed favorite — a later revision may have
+        // put another kind of entry here — so guessing turns one saved
+        // episode into a followed show. Carry it whole (rule 4), and do not
+        // open a legacy run on it either.
+        foreign.push({ index, tag });
+        return;
+      }
+      if (itemId === null) {
+        // A feed favorite. It still opens a run for the legacy path below.
+        openFeed = feedGuidOf(value);
+        entries.push({ id: value, kind, medium, index, feed: null, favorited: true });
+      } else {
+        // An item favorite: this feed, that item. Note it does NOT open a
+        // legacy run — the feed is here because the ITEM needs it, and the
+        // user may never have favorited the feed at all.
+        entries.push({
+          id: itemId,
+          kind: 'podcast:item:guid',
+          medium,
+          index,
+          feed: feedGuidOf(value),
+          legacy: false,
+        });
+      }
     } else if (isStandaloneKind(kind)) {
-      // No parent, and it leaves the open group OPEN — the items after it still
-      // belong to the album above. Always a favorite: nothing else puts an
-      // artist on the list, so there is no marker to read and none to write.
-      entries.push({ id: value, kind, medium, index, parent: null, favorited: true });
+      // An artist. Always a favorite: nothing else puts one on the list, and
+      // it belongs to no feed.
+      entries.push({ id: value, kind, medium, index, feed: null, favorited: true });
     } else {
-      if (group) group.items.push(value);
+      // A two-element `podcast:item:guid:` tag — legacy only. Its feed is
+      // whichever feed entry was last opened above it.
       entries.push({
         id: value,
         kind,
         medium,
         index,
-        parent: group ? group.id : null,
+        feed: openFeed,
+        legacy: true,
       });
     }
   });
 
-  // Is the FEED favorited? Ranked, because one feed may open two groups and
-  // the two need not agree — the favorite is a property of the feed, not of
-  // whichever group happens to carry the marker.
-  //
-  //   `fav`         the user favorited it. Outranks everything: `placement`
-  //                 means "I only needed a parent here", never "the user does
-  //                 not want this feed".
-  //   `placement`   they did not. A STATEMENT, so it outranks silence: the
-  //                 marker was written by a writer that knew, and a bare group
-  //                 beside it by one that did not.
-  //   itemless      unmarked, nothing under it — nothing else would have put
-  //                 it there, so it is a favorite. The reading that held for
-  //                 this format's whole life before the marker.
-  //   with items    unmarked and unknowable. NOT a favorite and not "no":
-  //                 answering either invents something the user never said,
-  //                 and 114 of one real list's 196 groups are in this state.
-  const RANK = { [FAV]: 3, [PLACEMENT]: 2, itemless: 1, unknown: 0 };
-  const ANSWER = { 3: true, 2: false, 1: true, 0: null };
-  const rank = new Map();
-  for (const g of groups) {
-    const r =
-      g.marker === FAV
-        ? RANK[FAV]
-        : g.marker === PLACEMENT
-          ? RANK[PLACEMENT]
-          : g.items.length === 0
-            ? RANK.itemless
-            : RANK.unknown;
-    rank.set(g.id, Math.max(rank.get(g.id) ?? 0, r));
-  }
+  for (const e of entries) e.key = keyOf(e);
+
+  // Which feeds the user favorited. A feed entry means exactly that, so the
+  // question the marker used to answer does not arise.
   const favorited = new Map();
-  for (const [id, r] of rank) favorited.set(id, ANSWER[r]);
-  for (const g of groups) g.favorited = favorited.get(g.id) ?? null;
   for (const e of entries) {
-    if (e.parent === null && favorited.has(e.id)) e.favorited = favorited.get(e.id) ?? null;
+    if (isFeedKind(e.kind)) favorited.set(e.id, true);
   }
 
-  return { entries, groups, kinds, foreign, favorited };
+  return { entries, kinds, foreign, favorited };
 }
 
 /** Whole event in, structure plus the raw halves out. */
@@ -321,49 +390,68 @@ export function decodePrivate(content) {
 // ---------------------------------------------------------------------------
 
 /**
- * One `i` per identifier, first position wins.
+ * One `i` per ENTRY KEY, first position wins.
  *
  * Only reachable from the both-halves state: an entry in BOTH halves is one
- * entry, and a whole-list move that concatenates the halves emits it twice —
- * a second group for the same feed, double-counted by every reader. Vector 15
- * pins it in one direction; the tag makes the other direction reachable too.
+ * entry, and a whole-list move that concatenates the halves emits it twice.
+ * The key is the pair for an item, so the same item guid under two different
+ * feed guids is two entries and both survive — they are two different items.
  */
 function dedupeEntries(tags) {
-  // The surviving copy takes the strongest marker any copy carried. Collapsing
-  // two entries into one collapses their answers too, and taking whichever
-  // came first would drop a feed favorite on the strength of the order the two
-  // halves happened to be concatenated in.
-  const best = new Map();
-  for (const tag of tags ?? []) {
-    if (tag[0] !== 'i') continue;
-    const m = markerOf(tag);
-    if (m === FAV || (m === PLACEMENT && best.get(tag[1]) !== FAV)) best.set(tag[1], m);
-  }
+  const parsed = parseTags(tags);
+  const keyAt = new Map();
+  for (const e of parsed.entries) keyAt.set(e.index, e.key);
+
   const seen = new Set();
   const out = [];
-  for (const tag of tags ?? []) {
-    if (tag[0] === 'i') {
-      if (seen.has(tag[1])) continue;
-      seen.add(tag[1]);
-      const want = best.get(tag[1]) ?? null;
-      if (want !== null && markerOf(tag) !== want) {
-        out.push(feedTag(tag[1], want, tag[2] ?? ''));
-        continue;
-      }
+  (tags ?? []).forEach((tag, index) => {
+    const key = keyAt.get(index);
+    if (key !== undefined) {
+      if (seen.has(key)) return;
+      seen.add(key);
     }
     out.push(tag);
-  }
+  });
   return out;
 }
 
-const idsOf = (localGroups) => {
+/**
+ * The keys this device is asserting.
+ *
+ * A local group is a convenient shape for "these items, from this feed" — the
+ * feed guid an item needs comes from the group holding it. `favorited` says
+ * whether the FEED itself is a favorite; without it the group contributes only
+ * its items, and no feed entry is written at all. That is the case the old
+ * format could not express without a placement marker.
+ */
+const keysOf = (localGroups) => {
   const out = new Set();
   for (const g of localGroups ?? []) {
-    out.add(g.id);
-    for (const item of g.items ?? []) out.add(item);
+    const kind = kindOf(g.id);
+    if (isStandaloneKind(kind)) {
+      out.add(g.id);
+      continue;
+    }
+    if ((g.favorited ?? false) === true) out.add(g.id);
+    const feed = feedGuidOf(g.id);
+    for (const item of g.items ?? []) out.add(item + ' @ ' + feed);
   }
   return out;
 };
+
+/**
+ * The tag a local item is written as: the FEED at position 1, the item guid
+ * bare at position 2. `<podcast:remoteItem>`'s order, and its optionality —
+ * the required half names the feed, the optional half narrows it to one item.
+ *
+ * A null feed guid means a local group whose id is not a `podcast:guid:`
+ * identifier — a caller error, not a wire state — and it emits the legacy form
+ * rather than inventing a guid. An item READ off the wire that names no feed
+ * never reaches here at all: the pass above carries it whole and untouched,
+ * which is what vector 20 pins.
+ */
+const itemTag = (itemId, feedGuid) =>
+  feedGuid === null ? ['i', itemId] : ['i', feedIdOf(feedGuid), itemId];
 
 /**
  * Rule 3, over ONE half's tag array.
@@ -381,81 +469,23 @@ const idsOf = (localGroups) => {
  * including ones this device neither holds nor claims (Open questions, "The
  * choice belongs to the LIST"). It only ever reduces exposure.
  *
- * `carryMarkers` turns off marker restatement for a pass whose job is only to
- * move another half's tags across. That pass is given `local: []`, so every
- * entry in it would look like one this device no longer holds, and a `fav`
- * claim left in the baseline would silently downgrade another app's feed
- * favorite in the middle of a privacy change.
+ * There is no feed-survival rule any more. A feed entry held nothing up, so
+ * dropping one never took another app's items with it.
  */
-function mergeHalf(
-  readTags,
-  localGroups,
-  baselineIds,
-  { adoptAll = false, carryMarkers = false } = {},
-) {
-  const held = idsOf(localGroups);
+function mergeHalf(readTags, localGroups, baselineIds, { adoptAll = false } = {}) {
+  const held = keysOf(localGroups);
   const claimed = new Set(baselineIds ?? []);
-  // Three values, not two. `undefined` is "this device is not holding the
-  // feed at all"; `null` is "holding it, with nothing to say about the feed
-  // itself" — which is what an app that adopted an unmarked group off the wire
-  // knows. Collapsing either into `false` is how 114 placement groups become
-  // 114 feed favorites the user never made, one publish later.
-  const localFav = new Map();
-  for (const g of localGroups ?? []) localFav.set(g.id, g.favorited ?? null);
+  const keep = (key) => adoptAll || held.has(key) || !claimed.has(key);
 
-  const keep = (id) => adoptAll || held.has(id) || !claimed.has(id);
-
-  /**
-   * The marker to emit for a feed entry, given what the wire says.
-   *
-   * Favoriting is an ADDITION and needs nothing but local state. Unfavoriting
-   * is a REMOVAL and goes through the baseline exactly as dropping an entry
-   * does — otherwise this app's "I only opened this group to place a track"
-   * overwrites another app's "the user favorited this show", that app restates
-   * it on its next cycle, and the two rewrite the event at each other forever.
-   */
-  const markerFor = (id, wire) => {
-    if (carryMarkers) return wire;
-    const mine = localFav.has(id) ? localFav.get(id) : undefined;
-    if (mine === true) return FAV;
-    // A `fav` this baseline claims, no longer asserted locally, is the user
-    // unfavoriting the show here. It holds even when the group itself survives
-    // to place somebody else's items — which is the whole point of the marker.
-    if (wire === FAV && claimed.has(FAV_CLAIM + id)) return PLACEMENT;
-    if (wire === FAV) return FAV; // another app's claim; we have nothing to beat it
-    if (mine === false) return PLACEMENT;
-    return wire;
-  };
-
-  // Pass 1: decide each entry, keeping read order and position.
   const parsed = parseTags(readTags);
   const decision = new Map(); // tag index -> true/false
-  for (const e of parsed.entries) decision.set(e.index, keep(e.id));
-
-  // "A feed group survives while any item under it does." The group is the
-  // only thing naming those items' parent; dropping it takes another app's
-  // tracks with it.
-  for (const g of parsed.groups) {
-    if (decision.get(g.index)) continue;
-    const anyItemSurvives = parsed.entries.some(
-      (e) => e.parent === g.id && decision.get(e.index),
-    );
-    if (anyItemSurvives) decision.set(g.index, true);
-  }
-
-  // Which group each emitted `i` belongs to, so a new item for a group that is
-  // already on the list can be placed at the end of THAT group's run. Appending
-  // it to the end of the event instead re-parents it to whichever group was
-  // opened last — well-formed, and wrong. Vector 18.
-  const ownerOf = new Map(); // tag index -> group id
+  const entryAt = new Map();
   for (const e of parsed.entries) {
-    // A standalone entry owns nothing and belongs to nothing, so it is not a
-    // splice target for anybody's new items.
-    ownerOf.set(e.index, isStandaloneKind(e.kind) ? null : (e.parent ?? e.id));
+    decision.set(e.index, keep(e.key));
+    entryAt.set(e.index, e);
   }
 
   const out = [];
-  const owner = []; // parallel to `out`
   let emittedMedium = null;
   (readTags ?? []).forEach((tag, index) => {
     const name = tag[0];
@@ -476,89 +506,178 @@ function mergeHalf(
       );
       if (anyKept) {
         out.push(tag);
-        owner.push(null);
         emittedMedium = tag[1] ?? null;
       }
       return;
     }
     if (decision.has(index)) {
       if (decision.get(index)) {
-        const parsedEntry = parsed.entries.find((e) => e.index === index);
-        // Feed entries only. An artist entry is unconditionally a favorite, so
-        // there is nothing for a marker to say and writing one would state an
-        // answer to a question nobody asked.
-        if (parsedEntry && parsedEntry.parent === null && isFeedKind(parsedEntry.kind)) {
-          const wire = markerOf(tag);
-          const want = markerFor(tag[1], wire);
-          // Byte-identical unless the marker actually changed, so rule 5 still
-          // sees an unchanged list as unchanged — and any hint sitting at
-          // position 2 survives, because it is read off the tag, not invented.
-          out.push(want === wire ? tag : feedTag(tag[1], want, tag[2] ?? ''));
-        } else {
-          out.push(tag);
-        }
-        owner.push(ownerOf.get(index) ?? null);
+        const e = entryAt.get(index);
+        // THE MIGRATION, and it happens once per list. A legacy item tag
+        // knows its feed only from the entry above it; rewriting it as
+        // `['i', podcast:guid:<feed>, <item>]` is what makes it survive a
+        // reorder. Nothing else in this function rebuilds a tag, so a tag
+        // that is already self-addressing is pushed whole and rule 5 still
+        // sees no change.
+        if (e && e.legacy && e.feed !== null) out.push(itemTag(e.id, e.feed));
+        else out.push(tag);
       }
       return;
     }
-    out.push(tag); // foreign tag, or an `i` no writer here can parse — carried whole
-    owner.push(null);
+    out.push(tag); // foreign tag, or an `i` no writer here can parse — carried
   });
 
   // Pass 2: add what we hold that was not on the list.
   //
-  // A group already on the list keeps its items in the order they were read,
-  // and its new items go at the end of its own run — never at the end of the
-  // event, where they would attach to the last group opened, and never ahead
-  // of the ones read, which is the local-first order that has two apps
-  // rewriting the event against each other forever. Vector 18.
-  const onList = new Set(parsed.entries.map((e) => e.id));
-  for (const g of localGroups ?? []) {
-    const newItems = (g.items ?? []).filter(
-      (id) => !onList.has(id) && !claimed.has(id),
-    );
-    const groupIsNew = !onList.has(g.id) && !claimed.has(g.id);
-    if (!groupIsNew && newItems.length === 0) continue;
-    // A group with nothing to place and no favorite on it is not an entry.
-    if (groupIsNew && newItems.length === 0 && (g.favorited ?? null) === false) continue;
+  // A new entry goes at the END OF ITS OWN MEDIUM RUN — never ahead of what
+  // was read, which is the local-first order that has two apps rewriting the
+  // event at each other forever, and never simply at the end of the event,
+  // which opens a second run for a medium that already has one. Ordering no
+  // longer decides which feed an item belongs to, so this is about churn and
+  // contiguity rather than about correctness.
+  const onList = new Set(parsed.entries.map((e) => e.key));
 
-    // An artist. It nests nothing, so it is emitted bare and never marked, and
-    // any items a caller hung under it are not this format's to place.
-    if (isStandaloneKind(kindOf(g.id))) {
-      if (groupIsNew) {
-        out.push(['i', g.id]);
-        owner.push(null);
-      }
+  /** Insert tags at the end of `medium`'s run, opening one if there is none. */
+  const appendInRun = (medium, tags) => {
+    if (tags.length === 0) return;
+    // Where each emitted tag's run starts, walking what we have emitted.
+    let run = null;
+    let lastOfRun = -1;
+    for (let i = 0; i < out.length; i++) {
+      if (out[i][0] === 'medium') run = out[i][1] ?? null;
+      if (run === medium) lastOfRun = i;
+    }
+    if (lastOfRun === -1) {
+      if (medium !== null) out.push(['medium', medium]);
+      out.push(...tags);
+      emittedMedium = medium;
+      return;
+    }
+    out.splice(lastOfRun + 1, 0, ...tags);
+  };
+
+  for (const g of localGroups ?? []) {
+    const kind = kindOf(g.id);
+    const standalone = isStandaloneKind(kind);
+    const feed = standalone ? null : feedGuidOf(g.id);
+
+    const wantsFeed = standalone || (g.favorited ?? false) === true;
+    const feedIsNew = wantsFeed && !onList.has(g.id) && !claimed.has(g.id);
+    const newItems = standalone
+      ? []
+      : (g.items ?? []).filter((id) => {
+          const key = itemClaim(id, feed);
+          return !onList.has(key) && !claimed.has(key);
+        });
+
+    if (!feedIsNew && newItems.length === 0) continue;
+
+    const fresh = [];
+    if (feedIsNew) fresh.push(['i', g.id]);
+    for (const id of newItems) fresh.push(itemTag(id, feed));
+    appendInRun(g.medium ?? null, fresh);
+  }
+
+  // Pass 3: put each run in band order. `appendInRun` only kept a medium run
+  // from being split in two; this is what decides where inside it an entry
+  // sits, for read and local entries alike.
+  return orderRun(out);
+}
+
+/**
+ * The four bands of one `medium` run, in emit order.
+ *
+ *   0  an item that names NO feed
+ *   1  artists
+ *   2  albums and podcasts
+ *   3  items, grouped by the feed they name
+ *
+ * BAND 0 IS NOT COSMETIC. A legacy `["i","podcast:item:guid:X"]` takes its
+ * feed from the most recent feed entry above it. Put every feed entry above
+ * every item and such an entry resolves to the LAST album in band 2 — a wrong
+ * feed, which is worse than none, and worse than what it had. Ahead of band 2
+ * there is no feed entry to mistake for its parent; an artist is never a feed,
+ * so band 1 beside it is harmless. Vector 20.
+ *
+ * A resolvable legacy item never reaches band 0: the same publish rewrites it,
+ * so it arrives in band 3 already naming its feed.
+ */
+const bandOf = (e) => {
+  if (e.kind === 'podcast:publisher:guid') return 1;
+  if (e.kind === 'podcast:item:guid') return e.feed === null ? 0 : 3;
+  return 2; // a feed favorite
+};
+
+/**
+ * Emit order inside each `medium` run. Data Structure, "Tag order".
+ *
+ * Applied ONCE, to the whole merged half, rather than threaded through the two
+ * merge passes. That is what makes an entry land in the same place whether it
+ * came off the wire or out of local state — two passes each doing half the job
+ * is how two writers' orders drift apart.
+ *
+ * Order is prescribed rather than preserved, and the difference matters. The
+ * old rule was "keep what you read, append yours", whose failure mode was two
+ * apps imposing DIFFERENT orders and rewriting the event at each other. One
+ * order in the document converges; "preserve what you read" only converges if
+ * every writer preserves. This is available at all only because an entry names
+ * its own feed — under the old format, moving a track away from its album
+ * destroyed the association.
+ *
+ * WITHIN a band the read order is kept and new entries land at the end, so no
+ * existing list is reshuffled. Band 3 groups by feed, groups in order of first
+ * appearance, so an album's tracks stay together.
+ *
+ * A RUN HOLDING A TAG THIS WRITER CANNOT CLASSIFY IS EMITTED AS READ. Rule 4
+ * carries an unparseable `i` or an unknown tag type untouched, and vector 4
+ * pins that such a tag between a feed entry and a legacy item must not end the
+ * run. Rather than invent a place for something with no band, leave the run
+ * alone: it degrades to the old behaviour, and a writer that cannot sort still
+ * preserves what a writer that can wrote.
+ */
+function orderRun(tags) {
+  const parsed = parseTags(tags);
+  const entryAt = new Map(parsed.entries.map((e) => [e.index, e]));
+  const foreignAt = new Set(parsed.foreign.map((f) => f.index));
+
+  // Split into runs: each `medium` tag opens one, and anything before the
+  // first opens a headless run whose entries have an unknown medium.
+  const runs = [];
+  let current = { header: null, idx: [] };
+  (tags ?? []).forEach((tag, index) => {
+    if (tag[0] === 'medium') {
+      runs.push(current);
+      current = { header: tag, idx: [] };
+      return;
+    }
+    current.idx.push(index);
+  });
+  runs.push(current);
+
+  const out = [];
+  for (const run of runs) {
+    if (run.header) out.push(run.header);
+    if (run.idx.length === 0) continue;
+
+    if (run.idx.some((i) => foreignAt.has(i) || !entryAt.has(i))) {
+      for (const i of run.idx) out.push(tags[i]);
       continue;
     }
 
-    if (!groupIsNew && onList.has(g.id)) {
-      const at = owner.lastIndexOf(g.id);
-      if (at !== -1) {
-        out.splice(at + 1, 0, ...newItems.map((id) => ['i', id]));
-        owner.splice(at + 1, 0, ...newItems.map(() => g.id));
-        continue;
-      }
-    }
+    const bands = [[], [], [], []];
+    for (const i of run.idx) bands[bandOf(entryAt.get(i))].push(i);
 
-    const medium = g.medium ?? null;
-    if (medium !== emittedMedium) {
-      if (medium !== null) {
-        out.push(['medium', medium]);
-        owner.push(null);
-      }
-      emittedMedium = medium;
+    // Band 3 groups by feed, groups in order of first appearance.
+    const groups = new Map();
+    for (const i of bands[3]) {
+      const feed = entryAt.get(i).feed;
+      if (!groups.has(feed)) groups.set(feed, []);
+      groups.get(feed).push(i);
     }
-    if (groupIsNew) {
-      out.push(feedTag(g.id, markerFor(g.id, null)));
-      owner.push(g.id);
-    }
-    for (const id of newItems) {
-      out.push(['i', id]);
-      owner.push(g.id);
-    }
+    bands[3] = [...groups.values()].flat();
+
+    for (const band of bands) for (const i of band) out.push(tags[i]);
   }
-
   return out;
 }
 
@@ -575,7 +694,11 @@ function frame(entryTags, carried = [], visibility = null) {
   const kinds = [];
   for (const t of entryTags) {
     if (t[0] !== 'i') continue;
-    const k = kindOf(t[1]);
+    // `kindOfTag`, not `kindOf`: an item entry's identifier says
+    // `podcast:guid` and the entry is `podcast:item:guid`. Reading the prefix
+    // alone drops the item kind off the event, and `#k` discovery stops
+    // finding item favorites.
+    const k = kindOfTag(t);
     if (k && !kinds.includes(k)) kinds.push(k);
   }
   for (const k of carried) {
@@ -758,7 +881,6 @@ export function plan({
     // every private-mode cycle, so the list never reached a fixed point.
     const moving = mergeHalf(inactiveReadTags, [], inactiveBaseline, {
       adoptAll: true,
-      carryMarkers: true,
     });
     mergedActive = dedupeEntries(
       mergeHalf([...activeReadTags, ...moving], local, activeBaseline, {
@@ -778,7 +900,6 @@ export function plan({
     // those once, where they belong.
     const moving = mergeHalf(inactiveReadTags, [], inactiveBaseline, {
       adoptAll: true,
-      carryMarkers: true,
     });
     mergedActive = dedupeEntries(
       mergeHalf([...activeReadTags, ...moving], local, activeBaseline, {
@@ -795,9 +916,16 @@ export function plan({
       mergedInactive = null; // carry the ciphertext verbatim
     } else {
       const returning = new Set(base.private);
-      mergedInactive = inactiveReadTags.filter((t) => {
+      // Keys, not identifiers. An item is the pair, so the same item guid
+      // under another feed guid is a different entry and is NOT ours to
+      // reclaim.
+      const inactiveKeyAt = new Map();
+      for (const e of parseTags(inactiveReadTags).entries) {
+        inactiveKeyAt.set(e.index, e.key);
+      }
+      mergedInactive = inactiveReadTags.filter((t, i) => {
         if (t[0] !== 'i') return true;
-        return !returning.has(t[1]);
+        return !returning.has(inactiveKeyAt.get(i));
       });
       // Skip anything the active half ALREADY holds. An entry can sit in both
       // halves at once — see vector 15 — and concatenating the claimed-back
@@ -805,11 +933,12 @@ export function plan({
       // group for the same feed and double-counts it for every reader. Only
       // reachable from the both-halves state, which is why no vector below 15
       // caught it.
-      const already = new Set(
-        mergedActive.filter((t) => t[0] === 'i').map((t) => t[1]),
-      );
+      const already = new Set(parseTags(mergedActive).entries.map((e) => e.key));
       const claimedBack = inactiveReadTags.filter(
-        (t) => t[0] === 'i' && returning.has(t[1]) && !already.has(t[1]),
+        (t, i) =>
+          t[0] === 'i' &&
+          returning.has(inactiveKeyAt.get(i)) &&
+          !already.has(inactiveKeyAt.get(i)),
       );
       mergedActive = mergeHalf(
         [...mergedActive, ...claimedBack],
@@ -868,30 +997,15 @@ export function plan({
   // and we claim every entry in it, another writer's included; nothing backs
   // the claim next cycle, so rule 3's "in your baseline, absent locally" row
   // fires on the whole half at once.
+  //
+  // Claims are ENTRY KEYS. A feed favorite is an ordinary entry now, so it
+  // needs no claim of its own: its presence on the list is the favorite, and
+  // removing it is an ordinary removal.
   const activeTags = goingPrivate ? privateTags ?? [] : publicTags;
-  const heldLocally = idsOf(local);
-  const entryClaims = activeTags
-    .filter((t) => t[0] === 'i')
-    .map((t) => t[1])
-    .filter((id) => heldLocally.has(id) || activeBaseline.includes(id));
-
-  // A FEED FAVORITE IS ITS OWN CLAIM. The entry and the marker are two
-  // different assertions now — a group can be on the list because this device
-  // placed a track under it while another app is the one saying the show is
-  // favorited — and a baseline that records only the identifier reads the next
-  // cycle's `placement` as "mine, and I removed it" against the wrong thing.
-  const favoritedLocally = new Set(
-    (local ?? []).filter((g) => (g.favorited ?? null) === true).map((g) => g.id),
-  );
-  const favClaims = activeTags
-    .filter((t) => t[0] === 'i' && markerOf(t) === FAV)
-    .map((t) => FAV_CLAIM + t[1])
-    .filter(
-      (c) =>
-        favoritedLocally.has(c.slice(FAV_CLAIM.length)) || activeBaseline.includes(c),
-    );
-
-  const activeClaims = [...entryClaims, ...favClaims];
+  const heldLocally = keysOf(local);
+  const activeClaims = parseTags(activeTags)
+    .entries.map((e) => e.key)
+    .filter((key) => heldLocally.has(key) || activeBaseline.includes(key));
 
   const carriedInactive = inactiveBaseline.filter(
     (id) => !activeClaims.includes(id),
