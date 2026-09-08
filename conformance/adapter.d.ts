@@ -99,10 +99,23 @@ export interface PlanInput {
    *
    * NULL means they have no stored setting yet, so this writer follows the
    * list: the `visibility` tag if it has one, otherwise whichever half holds
-   * entries. When the list cannot say either — no tag, and both halves empty
-   * or both populated — `plan` must return `publish: null` and your app must
-   * ask. Publishing on a guess is how a favorite someone hid in another app
-   * becomes a relay-indexed `i` tag. Vector 16.
+   * entries. When the list cannot say either, there are two answers.
+   *
+   * A list that is genuinely empty — no tag, no `i` tag, `content === ''` —
+   * is PUBLIC. Nobody has chosen anything and nothing can be disclosed, and
+   * this is where every new user starts. `plan` publishes into the tags and
+   * states no mode, because a `visibility` tag records a user's choice and a
+   * default is the absence of one.
+   *
+   * Anywhere else, `plan` must return `publish: null` and your app must ask:
+   * entries in both halves, or a `content` this writer cannot account for.
+   * There the guess is about entries somebody already hid, and publishing one
+   * as a relay-indexed `i` tag cannot be taken back.
+   *
+   * The default is a tiebreak for a writer with no preference, never something
+   * the list infers — an inferred mode outranks this field, so a default
+   * living there would publish the first favorite of a user who chose Private
+   * in plaintext. Vector 16.
    */
   mode: 'public' | 'private' | null;
   /**

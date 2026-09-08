@@ -815,18 +815,56 @@ test('16. The stated mode outranks whatever the halves happen to hold', () => {
   );
   assert.deepEqual(ids(decodePrivate(seeded.publish.content)), [FEED_A]);
 
-  // And with no tag, the same emptiness is a QUESTION. Publishing on a guess
-  // is the disclosure; the writer must ask.
+  // And with no tag, emptiness IS an answer: public is the default. Nobody has
+  // chosen a mode — not the event, and not this writer — which is where every
+  // new user starts, and the alternative is an "ask the user" flow in front of
+  // a brand-new account's first favorite.
   const untagged = plan({
     read: ev([ALT], ''),
     local: [feed(FEED_A, 'podcast')],
     baseline: base(),
     mode: null,
   });
+  assert.ok(untagged.publish, 'an empty untagged list defaults to public');
+  assert.deepEqual(ids(untagged.publish.tags), [FEED_A]);
+  assert.equal(untagged.publish.content, '', 'the default must not encrypt');
+  assert.ok(
+    !untagged.publish.tags.some((t) => t[0] === 'visibility'),
+    'the default is a behavior, not a declaration: it states no mode',
+  );
+
+  // It is a TIEBREAK for a writer with no preference, never an inference the
+  // list makes. An inferred mode outranks a writer's standing setting, so a
+  // default living there would answer public for a writer set to Private and
+  // publish its first favorite in plaintext — the same disclosure, reached
+  // from the other side.
+  const privateWriter = plan({
+    read: ev([ALT], ''),
+    local: [feed(FEED_A, 'podcast')],
+    baseline: base(),
+    mode: 'private',
+  });
+  assert.deepEqual(
+    ids(privateWriter.publish.tags),
+    [],
+    'the default overrode a writer whose own setting is private',
+  );
+  assert.deepEqual(ids(decodePrivate(privateWriter.publish.content)), [FEED_A]);
+
+  // And it applies only where there is genuinely nothing. A `content` this
+  // writer cannot account for is somebody's half: an empty tag list is not an
+  // empty LIST, and defaulting there puts `i` tags beside ciphertext, which
+  // splits a list somebody else owns.
+  const opaqueUntagged = plan({
+    read: ev([ALT], seal('{"not":"a list"}')),
+    local: [feed(FEED_A, 'podcast')],
+    baseline: base(),
+    mode: null,
+  });
   assert.equal(
-    untagged.publish,
+    opaqueUntagged.publish,
     null,
-    'an empty untagged list has no mode to infer — asking is the only safe answer',
+    'defaulted to public over a half this writer could not read',
   );
 
   // FIXTURE 2 — the tag says public and the private half still holds entries.

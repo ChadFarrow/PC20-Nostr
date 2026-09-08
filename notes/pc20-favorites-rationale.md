@@ -309,7 +309,7 @@ A resolved lookup beating the stored medium is also what prices the one
 positional tag left: reordering the array costs a wrong label that corrects
 itself, rather than a wrong feed that nothing corrects.
 
-## There is no safe default for visibility
+## Where the default is safe, and where it is not
 <a id="no-safe-default"></a>
 
 **Why a tag, when the encryption already says it.** Almost. "Whichever half
@@ -318,11 +318,40 @@ and it is what both existing implementations do. It cannot answer for a list
 that has none — a new account, or one whose last favorite was just removed —
 and that is not an edge case, it is where every user starts.
 
-An app that guesses `public` there and publishes their next favorite has
-written a relay-indexed `i` tag for someone who chose Private in another app an
-hour ago, and `i` cannot be taken back. Guessing `private` is wrong the other
-way round and merely annoying. There is no safe default, so the event has to
-say.
+This document used to say there was no safe default, and that every writer had
+to ask there. The rule was right about the danger and wrong about the price. An
+"ask the user" flow sits in front of a brand-new account's first favorite, in
+every app, forever; an app that does not offer a private half at all has no
+question it can honestly put; and the state it protects — nobody anywhere has
+ever chosen a mode — is not the state the danger lives in.
+
+**So the default is public, and it is narrow.** It applies when there is no
+`visibility` tag, no `i` tag, and `content` is the empty string. Nothing has
+been chosen and nothing can be disclosed, because there is nothing there. The
+default writes no tag: a tag states a user's choice, and a default is the
+absence of one.
+
+Two neighbouring states keep the old rule, and each is a way the default turns
+back into the disclosure it replaced.
+
+- **A `content` this writer cannot account for is somebody's half.** An empty
+  tag list is not an empty list. Default there and the next publish puts `i`
+  tags beside ciphertext, splitting a list under the rule that says a list is
+  wholly in one half. This is why emptiness is tested on the `content` STRING
+  rather than on whether entries came back from it — a decode returns nothing
+  both for a half that is empty and for one this writer cannot read, and only
+  the first is safe. Vector 30's rule that an emptied half encodes to `''` is
+  what makes the string trustworthy.
+- **The default is a tiebreak, never an inference.** An inferred mode outranks
+  a writer's own standing setting, deliberately: acting on the setting is one
+  app silently overruling another. Put the default in the inference and it
+  inherits that rank, so a writer whose user chose Private meets a fresh list,
+  finds "the list says public", and publishes their first favorite in
+  plaintext. Same disclosure, arrived at from the other side. It is an answer
+  for a writer that has no preference either, and nothing more.
+
+A list holding entries in both halves still asks. There the guess is not about
+a favorite nobody has made yet — it is about entries somebody already hid.
 
 The second thing the tag buys is a **direction to fold in**. Before it, a list
 found with entries in both halves was ambiguous: you could carry it, which is

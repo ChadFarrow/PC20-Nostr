@@ -52,8 +52,9 @@ work:
 Both are pure, so the suite needs no relay, no signer and no clock. A failure
 is your merge, never your test environment.
 
-Three things in that contract carry most of the weight, and each is a bug
-somebody has already shipped:
+These carry most of the weight, and each is a bug somebody has already
+shipped. The spec states rules about bytes; this is the shape of the code that
+keeps you from breaking them, which is why it lives here and not there:
 
 - **`read: null` is not an empty list.** `null` means the read is not
   trustworthy; `{tags: [], content: ''}` means the relay answered and has
@@ -71,6 +72,17 @@ somebody has already shipped:
   guid is unique inside its feed and is not globally unique, so a baseline
   keyed on the identifier alone cannot tell two items in two feeds apart and
   removing one removes both.
+- **Make the read part of the same call.** Do not expose a "publish my
+  favorites" entry point at all — `plan` takes `read` for exactly this reason.
+  A caller that *can* publish without reading eventually will, and under
+  wholesale replacement that is the whole list.
+- **Do not give the carried `content` a default.** A default is how a `""`
+  gets written back by habit: one caller that omits the argument compiles,
+  type-checks and deletes another app's data. Building a list from scratch is
+  the only case with nothing to carry, and it can say so at the call site.
+- **Capture `content` on the read.** An implementation that never reads the
+  field has nothing to put back even in principle, which is the state both
+  existing implementations were in when this was found.
 
 If your app's shapes differ, adapt in the shim rather than editing the vectors.
 The vectors are the spec; the shim is yours.
@@ -97,7 +109,7 @@ One line each. The full statement of every vector is in
 | 13 | A user left 97% private, or a private entry disclosed as a relay-indexed `i` tag |
 | 14 | Deleting the half you do not write into — invisible for one whole cycle |
 | 15 | A list stuck with entries in both halves: tidied away, or converged into a duplicated `i` tag |
-| 16 | An empty list with no mode to infer — the favorite guessed into the wrong half |
+| 16 | A stated mode ignored on an empty list; a public default that outranks a writer set to private, or that fires over a half it cannot read |
 | 17 | A list declared public while the entries in it stayed encrypted |
 | 18 | Two apps reordering entries at each other forever; a new entry splitting a medium run in two, or landing at the end of the run instead of its band |
 | 19 | A duplicate feed entry folded in a way that loses an item, or loses the favorite |
@@ -135,6 +147,9 @@ breaking the reference on purpose and confirming the right one fails:
 | Walk `i`/`k` in pairs | 7 |
 | Record the baseline inside `plan` | 10 |
 | Infer the mode from emptiness, ignoring `visibility` | **16** |
+| Withhold the publish on an empty untagged list instead of defaulting to public | **16** |
+| Fold the public default into the inferred mode, so it outranks a writer's setting | **16**, 22, 24 |
+| Judge a list empty by its entries rather than by `content === ''` | **16** |
 | Let a standing preference restate a mode you cannot honour | **17** |
 | Re-encode an opaque private half as an empty array | **17** |
 | Append a known group's new items to the end of the event | **18** |

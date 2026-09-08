@@ -831,26 +831,44 @@ export function plan({
   const stated = statedVisibility(read.tags);
   const opaque = readPrivate === null;
 
-  // The fallback for a list with no tag: whichever half holds entries. It
-  // answers for every list that has any, and it cannot answer for one that has
-  // none — which is the gap the tag exists to close.
+  // The fallback for a list with no tag: whichever half holds entries.
   const hasPublicEntries = readTags.some((t) => t[0] === 'i');
   const hasPrivateEntries = (readPrivate ?? []).some((t) => t[0] === 'i');
+
   const inferred =
     hasPublicEntries && !hasPrivateEntries
       ? 'public'
       : hasPrivateEntries && !hasPublicEntries
         ? 'private'
-        : null; // both, or neither — a question, not an answer
+        : null; // both, or neither — not something the halves can answer
+
+  // Is there genuinely nothing here? Note what this test is NOT.
+  // `hasPrivateEntries` is false both for a half that is empty and for one we
+  // could not decode, so it cannot stand alone — an opaque `content` would
+  // read as empty and the next publish would put `i` tags beside ciphertext,
+  // splitting a list somebody else owns. The empty STRING is the only content
+  // that means "there is no other half", which is why vector 30 requires an
+  // emptied half to encode to exactly that.
+  const listEmpty = !hasPublicEntries && readContent === '';
 
   // `mode: null` is a writer with no stored preference: it follows the list.
-  // If the list cannot say either, it must ASK — publishing on a guess is how
-  // a favorite someone hid becomes a relay-indexed `i` tag.
+  // When the list cannot say either, PUBLIC is the default — but only on a
+  // list that is genuinely empty, where nobody has chosen anything and every
+  // new user starts. Anywhere else the guess is a disclosure: entries in both
+  // halves, or a `content` we cannot account for, means somebody has already
+  // hidden something, and an `i` tag cannot be taken back. Ask there.
+  //
+  // The default is deliberately NOT folded into `inferred`. An inferred mode
+  // outranks this writer's standing setting (see `effective` below), so a
+  // default sitting there would answer 'public' for a writer whose own setting
+  // is Private and publish its first favorite in plaintext — the disclosure
+  // this rule exists to prevent, arrived at from the other side. It is a
+  // tiebreak for a writer that has no preference either, and nothing more.
   const listMode = stated ?? inferred;
-  if (mode === null && listMode === null) {
+  if (mode === null && listMode === null && !listEmpty) {
     return { publish: null, baselineIfLanded: base };
   }
-  const wanted = mode ?? listMode;
+  const wanted = mode ?? listMode ?? 'public';
 
   // CHANGING A STATED MODE TAKES TWO THINGS, and neither is this writer's
   // standing preference.
