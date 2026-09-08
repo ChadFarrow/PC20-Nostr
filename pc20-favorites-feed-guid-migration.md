@@ -308,7 +308,7 @@ no other app will restate it.
 
 | | now | needs |
 |---|---|---|
-| stablekraft-app | `PublishedRecord { feeds, items }` (`:416`) | `items` keyed by feed guid **and** item guid, per half |
+| stablekraft-app | `PublishedRecord { feeds, items }` (`:416`) | `items` keyed by feed guid **and** item guid, per place |
 | boostmebitch | `FavoritesBaseline { feeds, items, privateFeeds?, privateItems? }` (`:301`) | the same, on both `items` and `privateItems` |
 
 An existing baseline holding bare item guids is not wrong, it is
@@ -379,7 +379,7 @@ it was changed rather than either app.
 
 Neither app can *originate* an artist favorite: `parseShowGuid` in each is
 show-prefix only, so a publisher identifier never becomes a local entry. That
-is the optional half — carrying one is mandatory, offering the feature is not —
+is the optional part — carrying one is mandatory, offering the feature is not —
 and it is the one assertion in vector 28 that an app without artist favorites
 is expected to fail.
 

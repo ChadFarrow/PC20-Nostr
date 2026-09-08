@@ -16,7 +16,7 @@ export interface FavoritesEvent {
   kind?: 10333;
   tags: string[][];
   /**
-   * The private half, or ''. NEVER a literal on a republish — see rule 4.
+   * The encrypted entries, or ''. NEVER a literal on a republish — see rule 4.
    * Vector 12 is the one that catches a default parameter here.
    */
   content: string;
@@ -53,7 +53,8 @@ export interface LocalGroup {
 }
 
 /**
- * What this device last agreed with the relay on, PER HALF.
+ * What this device last agreed with the relay on, FOR EACH PLACE AN ENTRY CAN
+ * SIT — the plaintext tags, and the encrypted `content`.
  *
  * Two sets, not one. Moving an entry public -> private is a removal on one
  * side and an addition on the other; against a single shared baseline those
@@ -92,13 +93,13 @@ export interface PlanInput {
   read: FavoritesEvent | null;
   /** This device's favorites. */
   local: LocalGroup[];
-  /** This device's claims, per half. */
+  /** This device's claims, one set for the tags and one for `content`. */
   baseline: Baseline;
   /**
-   * Which half this writer feeds — the user's privacy setting in your app.
+   * Where this writer puts entries — the user's privacy setting in your app.
    *
    * NULL means they have no stored setting yet, so this writer follows the
-   * list: the `visibility` tag if it has one, otherwise whichever half holds
+   * list: the `visibility` tag if it has one, otherwise whichever place holds
    * entries. When the list cannot say either, there are two answers.
    *
    * A list that is genuinely empty — no tag, no `i` tag, `content === ''` —
@@ -108,7 +109,7 @@ export interface PlanInput {
    * default is the absence of one.
    *
    * Anywhere else, `plan` must return `publish: null` and your app must ask:
-   * entries in both halves, or a `content` this writer cannot account for.
+   * entries in both places, or a `content` this writer cannot account for.
    * There the guess is about entries somebody already hid, and publishing one
    * as a relay-indexed `i` tag cannot be taken back.
    *
@@ -119,11 +120,11 @@ export interface PlanInput {
    */
   mode: 'public' | 'private' | null;
   /**
-   * Can this writer decrypt the private half?
+   * Can this writer decrypt a private list?
    *
    * False for a signer with no NIP-44 — a NIP-55 app-to-app signer, a
    * read-only login — and it is a normal state for a real user, not an error.
-   * A writer that cannot see a half may not move what is in it and may not
+   * A writer that cannot read `content` may not move what is in it and may not
    * restate the mode; it carries `content` and says so on screen. Vector 17.
    *
    * Distinct from a payload your codec cannot parse, which `decodePrivate`
@@ -137,7 +138,7 @@ export interface PlanInput {
    * Only a choice may write the `visibility` tag for the first time or change
    * one that is already there. A standing setting that merely disagrees with
    * the list is two apps holding different answers about one shared event, and
-   * letting whichever loaded last win is how a list flips halves on a page
+   * letting whichever loaded last win is how a list flips mode on a page
    * load with nothing on screen. Ask instead.
    *
    * It is also what licenses the private → public whole-list move, together
@@ -174,12 +175,12 @@ export interface PlanResult {
    * Two models exist and both conform. A writer whose local state is a
    * DATABASE the merge never writes (StableKraft) is unchanged by a cycle:
    * foreign entries are carried and never held. A writer whose local state
-   * is a CACHE OF THE MERGE (Boost Me Bitch) paints the active half whole —
+   * is a CACHE OF THE MERGE (Boost Me Bitch) paints the active place whole —
    * an entry adopted that way is held from then on, claimed in the baseline,
    * and removed by this device only if the user unfavorites it here. The
    * multi-cycle vectors feed this back in as the next cycle's `local`, so
    * each model is tested against what it actually does; the disclosure rules
-   * hold either way, because neither model adopts out of the INACTIVE half
+   * hold either way, because neither model adopts out of the INACTIVE place
    * beyond what its baseline claims.
    */
   holds?: LocalGroup[];
@@ -279,9 +280,9 @@ export interface FavoritesAdapter {
    * Optional. Features the spec makes OPTIONAL TO OFFER while carrying them
    * stays mandatory — omit it entirely and every vector runs.
    *
-   * A vector covering such a feature has two halves. The carrying half is
+   * A vector covering such a feature has two parts. The carrying part is
    * mandatory and always runs: the entry parses, survives your republish
-   * whole, and lands in its band. The originating half needs local state your
+   * whole, and lands in its band. The originating part needs local state your
    * app can never hold if it does not offer the feature, so declaring the flag
    * skips exactly that and nothing else.
    *
@@ -301,10 +302,10 @@ export interface FavoritesAdapter {
   plan(input: PlanInput): PlanResult;
 
   /**
-   * The private half decoded, or NULL when this writer cannot read the bytes.
+   * A private list decoded, or NULL when this writer cannot read the bytes.
    *
    * `null` is not an error. It is the ordinary case rule 4 is about: another
-   * app's half, which you carry verbatim and never parse. Vector 12.
+   * app's encrypted list, which you carry verbatim and never parse. Vector 12.
    *
    * `null` ALSO for bytes you can open that are not a tag array — see
    * `decodePlaintext`. Vector 23.
@@ -321,7 +322,7 @@ export interface FavoritesAdapter {
    * A NIP-55 signer URL-decodes the whole `nostrsigner:` URI and only then
    * splits it on `?`, and item guids are routinely permalink URLs. Vector 22.
    *
-   * `plan` refuses to publish a private half whose plaintext exceeds 60,000
+   * `plan` refuses to publish a private list whose plaintext exceeds 60,000
    * UTF-8 bytes — NIP-44 v2's 65,535-byte cliff, less what NIP-44 adds on the
    * way to `content`. Past it the list reads back as EMPTY on an older
    * signer, not as an error. Vector 24.

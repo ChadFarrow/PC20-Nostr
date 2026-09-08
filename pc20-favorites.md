@@ -11,9 +11,9 @@ what the format does; syncing is the use it was built for, not the only one.
 
 **Writing is the part with teeth.** Any app may write it too, and the event is
 replaceable, so a writer that publishes without reading first does not lose a
-race — it deletes every entry the other apps added, silently, on someone
-else's device, with no undo. [Merging](#merging) is what makes wholesale
-replacement safe, and for a writer it is not optional.
+race — it deletes every entry the other apps added, silently, on someone else's
+device, with no undo. [Merging](#merging) is what makes wholesale replacement
+safe, and for a writer it is not optional.
 ([why](notes/pc20-favorites-rationale.md#blind-publish))
 
 This document is rules. The reasons, the measurements and the history are in
@@ -91,8 +91,8 @@ there, the user chose it.
 Position 1 is the feed, position 2 is the item, and **nothing is defined past
 position 2.** Every entry names its own feed, so no reader reconstructs it from
 position and no reorder can move it
-([why](notes/pc20-favorites-rationale.md#entry-names-its-feed)); an item guid is
-unique only inside its feed, so it is not an address on its own
+([why](notes/pc20-favorites-rationale.md#entry-names-its-feed)); an item guid
+is unique only inside its feed, so it is not an address on its own
 ([why](notes/pc20-favorites-rationale.md#item-guid-not-an-address)). The two
 positions are `<podcast:remoteItem>`'s two attributes, restated as one tag
 ([why](notes/pc20-favorites-rationale.md#remoteitem)).
@@ -124,14 +124,13 @@ entry above. Every list published before this revision looks like that.
 ([why](notes/pc20-favorites-rationale.md#legacy-items))
 
 - **A reader MUST accept both forms.**
-- **A writer rewrites such a tag on its next publish**, replacing the whole
-  tag — position 1 included — from the feed it just read positionally. The
-  rewrite must be idempotent, or the list republishes on every load.
-  (Vector 27)
+- **A writer rewrites such a tag on its next publish**, replacing the whole tag
+  — position 1 included — from the feed it just read positionally. The rewrite
+  must be idempotent, or the list republishes on every load. (Vector 27)
 - **An item with no feed entry above it is unresolvable by anyone.** Carry it
   as it arrived, render what you can, and never delete it. Never invent or
-  borrow a feed guid: a wrong one resolves to the wrong thing. Emit it in
-  [band 0](#bands). (Vector 20)
+  borrow a feed guid: a wrong one resolves to the wrong thing. Emit it in [band
+  0](#bands). (Vector 20)
 
 ## `medium`
 
@@ -153,7 +152,7 @@ Keep same-medium entries contiguous. A medium must not open a second run.
 | tag | where |
 |---|---|
 | `alt` | first, exactly once; regenerated rather than carried, discarded on read (Vector 21) |
-| `visibility` | not positional; put it next to `alt` |
+| `visibility` | **second, immediately after `alt`** — the mode is declared before any entry |
 | `medium` | opens a run; applies until the next one |
 | `i` | inside its run, by band |
 | `k` | at the end, one per distinct kind; order among them unspecified |
@@ -161,8 +160,14 @@ Keep same-medium entries contiguous. A medium must not open a second run.
 Emit one `k` per distinct kind, not one per `i`. **A reader MUST accept both
 layouts and MUST ignore `k` when parsing entries**, deriving the kind from the
 identifier. A reader that walks `i`/`k` in pairs shows an empty library rather
-than an error. (Vector 7)
-([why](notes/pc20-favorites-rationale.md#trailing-k))
+than an error. (Vector 7) ([why](notes/pc20-favorites-rationale.md#trailing-k))
+
+`visibility` goes second, immediately after `alt`, so **the mode is marked at
+the top of the list** and a reader knows it before parsing a single entry. A
+**reader MUST accept it anywhere** in the tag array and never depend on that
+position: an older list may carry it elsewhere, and
+[rule 5](#5-publish-only-when-the-bytes-change) is what stops the difference
+costing a republish. (Vector 21)
 
 ### Bands
 
@@ -181,82 +186,87 @@ run, emit entries in four bands:
   what you read, and not at the end of the event, which opens a second run for
   a medium that already has one. (Vector 18)
 - **A run holding a tag you cannot classify is emitted as read**, in wire
-  order. A tag with no kind has no band; do not invent a place for it.
-  (Vector 4)
+  order. A tag with no kind has no band; do not invent a place for it. (Vector
+  4)
 - **A duplicate feed entry is well-formed.** Fold it or carry it; neither can
   move an item. (Vector 19)
 
 ## Public and private
 
-**Supporting the private half is optional; carrying `content` is not.** An app
+**Supporting private lists is optional; carrying `content` is not.** An app
 that never encrypts anything conforms, provided it republishes the bytes it
 read — [rule 4](#4-carry-what-you-cannot-read). Such an app writes into the
-tags and needs nothing from [The private half](#the-private-half); what it
-still owes is the last three rules below.
+tags and needs nothing from [Private lists](#private-lists); what it still owes
+is the last three rules below.
 
-A list is **wholly** in the plaintext tags or **wholly** in the encrypted
-`content`. It is never split, and no entry is in both.
+**A list is public or private. It is never both, and never partly.** A public
+list's entries are the plaintext `i` tags; a private list's are the encrypted
+`content`. No entry is in both, and a list that arrives with entries in both
+places is broken — carried, then repaired, never tidied away.
 
 `["visibility","public"]` or `["visibility","private"]` states the mode of the
-whole list, and any app may change it. It is multi-letter on purpose: relays
-index single-letter tags, and a `#v=private` filter would enumerate the pubkeys
-keeping a private list.
+whole list, and any app may change it. It is marked at the top, right after
+`alt`, so the list says what it is before it says what is on it. It is
+multi-letter on purpose: relays index single-letter tags, and a `#v=private`
+filter would enumerate the pubkeys keeping a private list.
 
 - **An empty, untagged list is public.** No `visibility` tag, no `i` tag, and
   `content` the empty string: publish into the tags. Nobody has chosen a mode,
   and this is where every new user starts. The default writes **no** tag — it
   is a behavior, not a declaration. (Vector 16)
-- **Otherwise infer the mode from the halves:** entries in exactly one half
-  means that half is the mode. **Entries in both halves, or a `content` you
-  cannot read: publish nothing.** A default there discloses entries somebody
-  already hid, and an `i` tag cannot be taken back. You SHOULD ask the user;
-  what you must not do is guess.
+- **Otherwise the entries say which:** entries only in the tags means public,
+  entries only in `content` means private. **Entries in both, or a `content`
+  you cannot read: publish nothing.** A default there discloses entries
+  somebody already hid, and an `i` tag cannot be taken back. You SHOULD ask the
+  user; what you must not do is guess.
   ([why](notes/pc20-favorites-rationale.md#no-safe-default))
 - **The tag is written on a user's choice and carried thereafter.** A writer's
   standing setting never stamps it onto a list that has none.
-- **Changing the mode requires being able to read BOTH halves.** An app whose
-  signer has no NIP-44 carries `content` verbatim and does not restate the
-  mode. It SHOULD say on screen that it cannot open the other half.
+- **Changing the mode requires reading BOTH the tags and `content`.** An app
+  whose signer has no NIP-44 carries `content` verbatim and does not restate
+  the mode. It SHOULD say on screen that it cannot open the encrypted entries.
   (Vector 17)
-- **A writer that can read both, and finds the tag and the entries
-  disagreeing, converges toward the tag** — one copy of each entry, other half
-  emptied. An entry that was in both halves is emitted **once**.
+- **A writer that can read both, and finds the tag and the entries disagreeing,
+  converges toward the tag** — one copy of each entry, where the tag says, and
+  nothing left where it does not. An entry found in both is emitted **once**.
   (Vectors 15, 16)
 - **With no tag the move is asymmetric:** public → private may move another
   app's entries; private → public may move **only** what your baseline claims,
   because an `i` tag is a disclosure and cannot be undone. (Vector 13)
-- **Show the private half whatever your own last choice was** — but rendering
-  is not adopting. Out of the private half, adopt only what your baseline
+- **Show a private list's entries whatever your own last choice was** — but
+  rendering is not adopting. Out of `content`, adopt only what your baseline
   already claims.
   ([why](notes/pc20-favorites-rationale.md#privacy-belongs-to-the-list))
 - There is no third value. "Not on Nostr" is a local choice: withdraw what your
   baseline claims and publish nothing further.
 
-## The private half
+## Private lists
 
-A tag array, stringified, encrypted to your own key with
-[NIP-44](https://github.com/nostr-protocol/nips/blob/master/44.md), in
+A private list's entries are a tag array, stringified, encrypted to your own
+key with [NIP-44](https://github.com/nostr-protocol/nips/blob/master/44.md), in
 `content`. The `medium` and [band](#bands) rules apply inside it unchanged.
 
 **Ship it in this order.** Land [the carry rule](#4-carry-what-you-cannot-read)
-in every writer first, and only then let any of them start writing a private
-half. An app must also read and render that half before anything moves entries
-into it on its behalf, or the move is indistinguishable from a deletion on that
-app's screen. ([why](notes/pc20-favorites-rationale.md#private-half-sequencing))
+in every writer first, and only then let any of them start writing an encrypted
+list. An app must also read and render encrypted entries before anything moves
+entries into `content` on its behalf, or the move is indistinguishable from a
+deletion on that app's screen.
+([why](notes/pc20-favorites-rationale.md#private-list-sequencing))
 
-- **A half you cannot read is a degraded read, never an empty one.** That
-  covers a decrypt that failed and a plaintext that is not a tag array: `{}`,
-  a string, and an array holding a non-string all decode to null, while `[]`
-  is a genuinely empty list. Carry `content` byte for byte and publish nothing
+- **A `content` you cannot read is a degraded read, never an empty one.** That
+  covers a decrypt that failed and a plaintext that is not a tag array: `{}`, a
+  string, and an array holding a non-string all decode to null, while `[]` is a
+  genuinely empty list. Carry `content` byte for byte and publish nothing
   derived from it; you SHOULD say so on screen. (Vector 23)
-- **No `?` in the plaintext** — write its six-character JSON escape,
-  `\u003f`. A NIP-55 signer splits the decoded URI on `?`, and the truncated
-  request comes back as "signer not installed". (Vector 22)
-- **Refuse to publish a plaintext past 60,000 bytes.** A signer built to
-  NIP-44 v2 as first published rejects more, and the list then reads back as
-  empty rather than as an error. (Vector 24)
-- **A half holding no entries is `content: ''`** — not the encryption of an
-  empty array, and not of a `medium` run you emptied. (Vector 30)
+- **No `?` in the plaintext** — write its six-character JSON escape, `\u003f`.
+  A NIP-55 signer splits the decoded URI on `?`, and the truncated request
+  comes back as "signer not installed". (Vector 22)
+- **Refuse to publish a plaintext past 60,000 bytes.** A signer built to NIP-44
+  v2 as first published rejects more, and the list then reads back as empty
+  rather than as an error. (Vector 24)
+- **When nothing is private, `content` is the empty string** — not the
+  encryption of an empty array, and not of a `medium` run you emptied. Prune a
+  run you emptied, on either side. (Vector 30)
 - **Compare decrypted arrays, never ciphertext.** NIP-44 draws a fresh nonce
   per encryption, so a ciphertext comparison republishes on every load forever.
 
@@ -286,7 +296,7 @@ And three things not to assume:
   one saved episode puts that show into the index.
 - **A kind:1 boost note tags the episode at position 1; this list tags the
   feed.** A filter written for one does not find the other.
-- **You cannot read somebody else's private half.** `content` is encrypted to
+- **You cannot read somebody else's private list.** `content` is encrypted to
   the author's own key, so it opens for that person's apps and for nobody else.
   A list kept private looks empty to you, and that is the point — an empty list
   is not evidence of an empty library.
@@ -314,8 +324,8 @@ trustworthy = event_in_hand OR (reached > 0 AND answered == reached)
 `reached` excludes relays that never connected, or one dead default degrades
 every read forever. **An aggregate EOSE from a relay library is not proof:**
 libraries fold failed connections into the same callback and synthesize EOSE on
-a timer. A withheld publish SHOULD be visible in the UI: it renders
-identically to "your favorites are gone". (Vector 2)
+a timer. A withheld publish SHOULD be visible in the UI: it renders identically
+to "your favorites are gone". (Vector 2)
 ([why](notes/pc20-favorites-rationale.md#trustworthy-read))
 
 ### 2. Keep a baseline
@@ -340,13 +350,13 @@ theirs to agree.
   address, or an older format's baseline.
 - **Losing it is safe; guessing is not.** An empty baseline yields no removals,
   so the next publish is a pure union.
-- **With two halves, answer per half.** The half you write into is recomputed;
-  **the half you did not publish into has its claims carried, never
-  recomputed** — recompute and [the removal row](#3-the-merge) fires on the
-  whole half at once. (Vector 14)
-- **Retire a carried claim when the entry is gone from that half AND you no
-  longer hold it.** Either alone keeps it. A half you could not read is a half
-  you did not edit. (Vector 31)
+- **Answer separately for the tags and for `content`.** Whichever you published
+  into is recomputed; **claims for the other are carried, never recomputed** —
+  recompute them and [the removal row](#3-the-merge) fires on all of them at
+  once. (Vector 14)
+- **Retire a carried claim when the entry is gone from there AND you no longer
+  hold it.** Either alone keeps it. A `content` you could not read is one you
+  did not edit. (Vector 31)
 
 ### 3. The merge
 
@@ -364,13 +374,12 @@ names them**, in which case another app removed them and re-adding is a
 resurrection loop. (Vectors 8, 9)
 
 Run those rows against **every** entry, feeds and items alike: unfavoriting an
-item whose feed you dropped still propagates, and dropping a feed favorite never
-touches an item. (Vectors 11, 26) Match on the whole key. Emit each run in
-[band order](#bands). **Moving the list between halves is a merge, not a
-copy** — the rows run on both halves that cycle like any other, and claiming an
-entry
-back on the baseline alone does not keep a removal, it **publishes** it.
-(Vector 29)
+item whose feed you dropped still propagates, and dropping a feed favorite
+never touches an item. (Vectors 11, 26) Match on the whole key. Emit each run
+in [band order](#bands). **Changing a list's mode is a merge, not a copy** —
+the rows run on the tags and on `content` that cycle like any other, and
+claiming an entry back on the baseline alone does not keep a removal, it
+**publishes** it. (Vector 29)
 
 ### 4. Carry what you cannot read
 
@@ -378,10 +387,9 @@ An identifier kind outside your table, a tag type you have no meaning for, a
 `k` naming a kind you never emit, a malformed guid — carry the **whole tag**,
 every element, not a value re-rendered from your own model. A writer that
 rebuilds entries as `["i", id]` strips every item of the guid that makes it
-resolvable, and position 3 is undefined — exactly where a newer writer puts
-the next thing. (Vector 27) An unparseable
-entry must not end a legacy run. (Vector 4)
-([why](notes/pc20-favorites-rationale.md#carry-rule))
+resolvable, and position 3 is undefined — exactly where a newer writer puts the
+next thing. (Vector 27) An unparseable entry must not end a legacy run. (Vector
+4) ([why](notes/pc20-favorites-rationale.md#carry-rule))
 
 > **`content` is carried too. Republish `event.content` byte for byte, unless
 > you encrypted the bytes you are replacing it with.**
@@ -405,12 +413,12 @@ the event since. (Vectors 3, 7)
 
 ## What it does not do
 
-Alternatives considered are in
-[the rationale](notes/pc20-favorites-rationale.md#what-this-format-does-not-do).
+Alternatives considered are in [the
+rationale](notes/pc20-favorites-rationale.md#what-this-format-does-not-do).
 
-- **One event holds everything**, so a large list risks relay size caps
-  (~128 KB on nos.lol), reached at ~90 KB of entries once encrypted. Item
-  favorites fill it an order of magnitude faster than feed favorites.
+- **One event holds everything**, so a large list risks relay size caps (~128
+  KB on nos.lol), reached at ~90 KB of entries once encrypted. Item favorites
+  fill it an order of magnitude faster than feed favorites.
 - **No fallback URL.** Position 2 holds the item, so an entry is guids and
   nothing else. An unresolvable entry is still somebody's favorite: carry it
   and render what you can.
@@ -429,5 +437,5 @@ Alternatives considered are in
 
 ---
 
-Why each rule exists: [the rationale](notes/pc20-favorites-rationale.md).
-The vectors: [conformance/vectors.md](conformance/vectors.md).
+Why each rule exists: [the rationale](notes/pc20-favorites-rationale.md). The
+vectors: [conformance/vectors.md](conformance/vectors.md).

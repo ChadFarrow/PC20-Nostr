@@ -85,7 +85,7 @@ keeps you from breaking them, which is why it lives here and not there:
   existing implementations were in when this was found.
 - **`capabilities` is optional, and its default is ON.** Export it only to
   declare a feature the spec makes optional to OFFER — today just
-  `artistFavorites`. It skips the originating half of that feature's vector and
+  `artistFavorites`. It skips the originating part of that feature's vector and
   nothing else; carrying is mandatory and still runs. An adapter that exports
   nothing is tested in full, because silence must never skip a check.
 
@@ -110,25 +110,25 @@ One line each. The full statement of every vector is in
 | 9 | The resurrection loop: an entry another app deleted returning on every load |
 | 10 | A lost publish made permanent by recording its baseline anyway |
 | 11 | Removing a feed favorite dragging somebody's saved items out with it |
-| 12 | Blanking `content` over another app's private half |
+| 12 | Blanking `content` over another app's encrypted entries |
 | 13 | A user left 97% private, or a private entry disclosed as a relay-indexed `i` tag |
-| 14 | Deleting the half you do not write into — invisible for one whole cycle |
-| 15 | A list stuck with entries in both halves: tidied away, or converged into a duplicated `i` tag |
-| 16 | A stated mode ignored on an empty list; a public default that outranks a writer set to private, or that fires over a half it cannot read |
+| 14 | Deleting what you do not write into — invisible for one whole cycle |
+| 15 | A list stuck with entries in both places: tidied away, or converged into a duplicated `i` tag |
+| 16 | A stated mode ignored on an empty list; a public default that outranks a writer set to private, or that fires over a `content` it cannot read |
 | 17 | A list declared public while the entries in it stayed encrypted |
 | 18 | Two apps reordering entries at each other forever; a new entry splitting a medium run in two, or landing at the end of the run instead of its band |
 | 19 | A duplicate feed entry folded in a way that loses an item, or loses the favorite |
 | 20 | An item naming no feed deleted as junk, handed a feed guid nobody knows, or banded in behind an album and given that album's |
-| 21 | A foreign `alt` carried beside ours, or ours not first |
+| 21 | A foreign `alt` carried beside ours, ours not first, or the mode not marked at the top |
 | 22 | A literal `?` in the plaintext, breaking every private publish through a NIP-55 signer |
 | 23 | A non-array plaintext read as "empty", so the next republish erases it |
-| 24 | A private half past the NIP-44 v2 cliff, read back as empty on an older signer |
+| 24 | A private list past the NIP-44 v2 cliff, read back as empty on an older signer |
 | 25 | A feed the user never favorited written to the list; two items sharing an item guid folded into one |
 | 26 | Unfavoriting a feed taking its saved item with it, or deleting a favorite another app made |
 | 27 | Entries rebuilt as `['i', id]`, stripping the feed guid that makes an item resolvable at all |
 | 28 | An artist entry given a feed guid, or made an item of the entry above it; an app claiming `artistFavorites: false` that originates one anyway |
 | 29 | A removal suspended while the list changes mode — lost for one cycle, then for good |
-| 30 | An emptied `medium` run left behind, so an empty private half reads as one somebody owns |
+| 30 | An emptied `medium` run left behind, so an empty `content` reads as one somebody owns |
 | 31 | A baseline claim outliving its entry, so the next app to write that entry has it deleted |
 
 ## The suite is mutation-tested
@@ -139,7 +139,7 @@ breaking the reference on purpose and confirming the right one fails:
 | Break the reference this way | Vectors that catch it |
 |---|---|
 | Hardcode `content: ''` on republish | **12, 13** |
-| Recompute the inactive half's baseline claims | **14** |
+| Recompute the inactive place's baseline claims | **14** |
 | Publish local state, ignore the read | 1, 3, 4, 8, 9, 11, 13, 14 |
 | Compare against your own last publish, not the read | 1, 2, 3, 4, 6, 8, 10, 11, 12 |
 | Never compare at all — always publish | 3, 8, 9 |
@@ -156,7 +156,7 @@ breaking the reference on purpose and confirming the right one fails:
 | Fold the public default into the inferred mode, so it outranks a writer's setting | **16**, 22, 24 |
 | Judge a list empty by its entries rather than by `content === ''` | **16** |
 | Let a standing preference restate a mode you cannot honour | **17** |
-| Re-encode an opaque private half as an empty array | **17** |
+| Re-encode an opaque `content` as an empty array | **17** |
 | Append a known group's new items to the end of the event | **18** |
 | Put local items ahead of the ones read | **18** |
 | Emit band 3 before band 2 | 1, 2, 7, 10, **18**, 28 |
@@ -165,13 +165,15 @@ breaking the reference on purpose and confirming the right one fails:
 | Put an item that names no feed in band 3 | **20** |
 | Band a run that holds a tag you cannot classify | **4** |
 | Declare `artistFavorites: false` from an adapter that originates one | **28** |
+| Append `visibility` after the entries instead of second | **21** |
+| Emit `visibility` ahead of `alt` | **21** |
 | Skip a duplicate feed group | **19** |
 | Drop an item that has no group above it | **20** |
 | Compare against the read as it arrived instead of reframed | **7**, 17 |
 | Carry the `alt` you read | **21** |
 | Hand the signer a plaintext with a literal `?` | **22** |
 | Read a non-array plaintext as an empty list | **23** |
-| Publish a private half past 60,000 bytes | **24** |
+| Publish a private list past 60,000 bytes | **24** |
 | Rebuild `i` tags as `['i', id]` on emit, dropping half the pair | **6, 25, 27** |
 | Read an item's feed from the entry above it, ignoring position 1 | **5, 25, 26** |
 | Drop the legacy path, so a two-element item names no feed | **4, 27** |
@@ -184,10 +186,10 @@ breaking the reference on purpose and confirming the right one fails:
 | Let an artist entry be an item of the entry above it | **28** |
 | Write a feed guid onto an artist entry | **28** |
 | Adopt every entry read on the outer merge of a whole-list move | **29** |
-| Adopt every entry read on the merge of the half being moved from | **29** |
-| Claim an entry back out of the other half on your baseline alone | **29** |
+| Adopt every entry read on the merge of the place being moved from | **29** |
+| Claim an entry back out of the other place on your baseline alone | **29** |
 | Keep a `medium` run the claim-back emptied | **30** |
-| Carry a claim for an entry you removed from that half | **31** |
+| Carry a claim for an entry you removed from that place | **31** |
 | Retire a carried claim on absence alone, ignoring what you hold | **31** |
 
 The first two rows are not hypothetical. They are the two defects that reached
@@ -204,9 +206,9 @@ For code a real site runs, see
 with its trade-offs in
 [`../catalog/comparisons/favorites-10333.md`](../catalog/comparisons/favorites-10333.md).
 
-One simplification: the reference's private half uses a reversible,
+One simplification: the reference's encrypted entries use a reversible,
 unauthenticated codec rather than NIP-44. The vectors only care whether a
-writer can read a half or not, and a fake codec models that without making the
+writer can read `content` or not, and a fake codec models that without making the
 suite depend on a crypto library. Real NIP-44 differs in one way that matters —
 it draws a fresh nonce per encryption, so identical entries produce different
 ciphertext every time. Compare **decrypted arrays**, never ciphertext, or rule

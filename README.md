@@ -74,7 +74,7 @@ an artist, and one track from an album they do not follow — look like this:
 One favorite, one tag. An item names the feed it came from at position 1 and
 itself at position 2, so nothing on the list is there for structural reasons
 and you can count the user's choices by counting the lines. `content` is empty
-only because this list has no private half; it is carried verbatim, never
+only because nothing on this list is private; it is carried verbatim, never
 assumed.
 
 Adding it to a third? The spec is about 360 lines of rules; the reasons are in

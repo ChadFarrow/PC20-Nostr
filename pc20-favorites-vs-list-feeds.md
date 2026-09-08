@@ -221,9 +221,9 @@ only when the bytes change.
 A list feed has one writer with file access. It needs none of those rules, and
 a reader who comes from RSS should not read them as complexity for its own
 sake. **They are the cost of the transport, not of the data.** Removals and a
-private half are the other two things the event can express and the feed
+private lists are the other two things the event can express and the feed
 cannot: nothing in RSS removes an entry from somebody else's copy, and nothing
-encrypts half a channel to its author.
+encrypts part of a channel to its author.
 
 ## Ordering means two different things
 
@@ -267,7 +267,7 @@ feed is readable by anyone holding its URL, and discoverable if it is indexed,
 but there is no equivalent query that starts from a track and returns the
 people who saved it.
 
-The optional private half in `content` has no counterpart in RSS at all.
+The optional encrypted `content` has no counterpart in RSS at all.
 
 ## If you convert between them
 
@@ -284,7 +284,7 @@ once.
 - **An entry above the first `medium` tag has an unknown medium.** Leave the
   `medium` attribute off. Filling it in turns an absence into a claim, and no
   other app has a reason to correct it.
-- **Do not export a private half.** Entries in `content` are there because
+- **Do not export a private list.** Entries in `content` are there because
   somebody chose to hide them, and a list feed is a public document.
 - **A guid is not enough on its own.** The event stores no `feedUrl` and no
   `title`, so anything the Podcast Index cannot resolve converts to a
