@@ -102,7 +102,7 @@ otherwise. An unattended payment has no message, so in practice it is empty.
 
 This is `<podcast:remoteItem feedGuid="…" itemGuid="…"/>` written as one tag,
 and it is the same shape
-[kind 10333](pc20-favorites.md#one-favorite-one-tag) uses: the required
+[kind 10333](pc20-favorites.md#2-entries) uses: the required
 `feedGuid` at position 1, the optional `itemGuid` at position 2, each as a full
 NIP-73 identifier rather than a bare guid. **An item guid is not an address on
 its own** — it is unique only inside its feed,

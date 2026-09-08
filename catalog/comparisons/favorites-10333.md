@@ -115,7 +115,7 @@ Both apps keep one order now (vector 18). Two things have changed under them
 since, and neither is reflected in the code read at the SHAs above: an entry
 names its own feed, so order carries no meaning left to corrupt; and the spec
 prescribes the order rather than asking each writer to preserve what it read —
-[Tag order](../../pc20-favorites.md#tag-order), four bands per `medium` run.
+[Tag order](../../pc20-favorites.md#4-tag-order), four bands per `medium` run.
 Whether either app emits the bands is unverified here.
 
 **2. The append pass and resurrection. FIXED in stablekraft-app#236.** boostmebitch
