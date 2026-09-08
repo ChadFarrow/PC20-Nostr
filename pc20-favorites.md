@@ -25,10 +25,9 @@ Kind **`10333`**, a plain (non-`d`-tagged) replaceable event: exactly one per
 pubkey. Republishing the full tag list replaces the previous version wholesale,
 and that replacement *is* the sync mechanism.
 
-`10333` is **self-assigned, not NIP-allocated.** Relay filters are kind-scoped,
-so a later NIP landing on it would put two unrelated event types into every
-query either app makes. Confirm there is still no collision.
-([why](notes/pc20-favorites-rationale.md#kind-choice))
+`10333` is **self-assigned, not NIP-allocated**, and relay filters are
+kind-scoped, so a collision costs every query either app makes. Confirm there
+is still none. ([why](notes/pc20-favorites-rationale.md#kind-choice))
 
 ```json
 {
@@ -110,15 +109,19 @@ app that does offer it owes the `k` tag, or `#k` discovery misses every artist
 favorite it publishes. (Vector 28)
 ([why](notes/pc20-favorites-rationale.md#artist-entries))
 
-**Legacy lists.** Every list published before this revision writes items as two
-elements, with the feed carried by the entry above, so **a reader MUST accept
-both forms.** A writer rewrites such a tag on its next publish — the **whole
-tag**, position 1 included — from the feed it just read positionally, and the
-rewrite must be idempotent. (Vector 27) An item with no feed entry above it is
-unresolvable by anyone: carry it as it arrived, render what you can, never
-delete it, and never invent or borrow a feed guid, because a wrong one resolves
-to the wrong thing. Emit it in [band 0](#bands). (Vector 20)
+**Legacy lists** write items as two elements, with the feed carried by the
+entry above. Every list published before this revision looks like that.
 ([why](notes/pc20-favorites-rationale.md#legacy-items))
+
+- **A reader MUST accept both forms.**
+- **A writer rewrites such a tag on its next publish**, replacing the whole
+  tag — position 1 included — from the feed it just read positionally. The
+  rewrite must be idempotent, or the list republishes on every load.
+  (Vector 27)
+- **An item with no feed entry above it is unresolvable by anyone.** Carry it
+  as it arrived, render what you can, and never delete it. Never invent or
+  borrow a feed guid: a wrong one resolves to the wrong thing. Emit it in
+  [band 0](#bands). (Vector 20)
 
 ## `medium`
 
@@ -199,8 +202,6 @@ keeping a private list.
 - **With no tag the move is asymmetric:** public → private may move another
   app's entries; private → public may move **only** what your baseline claims,
   because an `i` tag is a disclosure and cannot be undone. (Vector 13)
-- **A failed decrypt is a degraded read, not an empty half.** Carry the
-  ciphertext, publish nothing derived from it, say so on screen.
 - **Show the private half whatever your own last choice was** — but rendering
   is not adopting. Out of the private half, adopt only what your baseline
   already claims.
@@ -208,23 +209,26 @@ keeping a private list.
 - There is no third value. "Not on Nostr" is a local choice: withdraw what your
   baseline claims and publish nothing further.
 
+## The private half
+
+A tag array, stringified, encrypted to your own key with
+[NIP-44](https://github.com/nostr-protocol/nips/blob/master/44.md), in
+`content`. The `medium` and [band](#bands) rules apply inside it unchanged.
+
 **Ship it in this order.** Land [the carry rule](#4-carry-what-you-cannot-read)
 in every writer first, and only then let any of them start writing a private
 half. An app must also read and render that half before anything moves entries
 into it on its behalf, or the move is indistinguishable from a deletion on that
 app's screen. ([why](notes/pc20-favorites-rationale.md#private-half-sequencing))
 
-**The bytes.** The private half is a tag array, stringified, encrypted to your
-own key with
-[NIP-44](https://github.com/nostr-protocol/nips/blob/master/44.md), in
-`content`. The `medium` and [band](#bands) rules apply inside it unchanged.
-
+- **A half you cannot read is a degraded read, never an empty one.** That
+  covers a decrypt that failed and a plaintext that is not a tag array: `{}`,
+  a string, and an array holding a non-string all decode to null, while `[]`
+  is a genuinely empty list. Carry `content` byte for byte, publish nothing
+  derived from it, and say so on screen. (Vector 23)
 - **No `?` in the plaintext** — write its six-character JSON escape,
   `\u003f`. A NIP-55 signer splits the decoded URI on `?`, and the truncated
   request comes back as "signer not installed". (Vector 22)
-- **A plaintext that is not a tag array is an unreadable half**, not an empty
-  one: `{}`, a string, and an array holding a non-string all decode to null,
-  while `[]` is an empty list. (Vector 23)
 - **Refuse to publish a plaintext past 60,000 bytes.** A signer built to
   NIP-44 v2 as first published rejects more, and the list then reads back as
   empty rather than as an error. (Vector 24)
