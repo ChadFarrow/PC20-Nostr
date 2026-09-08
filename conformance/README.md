@@ -84,7 +84,7 @@ Numbering matches the spec exactly.
 | 4 | Dropping a tag, `k` value or identifier written by a newer app; an unreadable position 2 read as a feed favorite |
 | 5 | Items reattached to the wrong feed; an unknown medium defaulted to `podcast` |
 | 6 | An entry kind read off position 1 alone, so `podcast:item:guid` never reaches the event; and `podcast:item:guid:https` — a `k` value no relay filter matches |
-| 7 | A reader that walks `i`/`k` in pairs, showing an empty library and no error |
+| 7 | A reader that walks `i`/`k` in pairs, showing an empty library and no error; a writer that compares the read as it arrived and republishes a list nothing changed about |
 | 8 | A baseline ignored, so removals either never propagate or delete everything |
 | 9 | The resurrection loop: an entry another app deleted returning on every load |
 | 10 | A lost publish made permanent by recording its baseline anyway |
@@ -132,13 +132,14 @@ breaking the reference on purpose and confirming the right one fails:
 | Re-encode an opaque private half as an empty array | **17** |
 | Append a known group's new items to the end of the event | **18** |
 | Put local items ahead of the ones read | **18** |
-| Emit band 3 before band 2 | 1, 2, 10, **18**, 28 |
+| Emit band 3 before band 2 | 1, 2, 7, 10, **18**, 28 |
 | Append a new entry at the end of the run instead of its band | **18**, 28 |
 | Skip the by-feed grouping inside band 3 | **18** |
 | Put an item that names no feed in band 3 | **20** |
 | Band a run that holds a tag you cannot classify | **4** |
 | Skip a duplicate feed group | **19** |
 | Drop an item that has no group above it | **20** |
+| Compare against the read as it arrived instead of reframed | **7**, 17 |
 | Carry the `alt` you read | **21** |
 | Hand the signer a plaintext with a literal `?` | **22** |
 | Read a non-array plaintext as an empty list | **23** |

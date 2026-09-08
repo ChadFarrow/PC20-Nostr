@@ -788,8 +788,25 @@ does not destroy data.
 
 ### 5. Publish only when the bytes change
 
-Compare your merged tag array against the array you read, byte for byte. If
-they match, publish nothing.
+Compare your merged tag array against the array you read — **put through your
+own framing first**, not as it arrived. Regenerate `alt`, `visibility` and the
+trailing `k` tags on both sides, then compare byte for byte. If they match,
+publish nothing.
+
+**Normalising first is not tidiness, because two conforming events differ.**
+A reader MUST accept a `k` beside every `i`, and a writer MUST emit one `k`
+per distinct kind at the end. Both layouts are legal, they mean the same list,
+and they differ byte for byte. The position of `alt`, the position of
+`visibility` and the order of the `k` tags are free in the same way. Compare
+the read as it arrived and every one of those reports a change on a list you
+have no reason to touch — and if the other app compares raw too, neither of
+you ever stops. That is the failure this rule exists to prevent, reached by
+following it literally. ([Vector 7](#test-vectors).)
+
+What you normalise is exactly what carries no meaning. `medium` is positional
+and stays where it is, [band order](#tag-order) is prescribed so both writers
+reach it anyway, and an entry you cannot parse is carried untouched — so a
+genuine difference still shows up as one.
 
 Compare against **the read**, not against a digest of your own last publish —
 only the former notices that another app has edited the event since. This is
@@ -914,9 +931,15 @@ from a table rather than from splitting a string, so an item guid of
 form. Pin both, from one list: a writer that reads position 1 alone passes the
 string half on its own.
 
-**7. Both `k` layouts parse identically.** One `k` per distinct kind and a
-`k` paired with every `i` describe the same list; a reader that treats them
-differently silently loses every entry written by the other revision.
+**7. Both `k` layouts parse identically, and neither provokes a republish.**
+One `k` per distinct kind and a `k` paired with every `i` describe the same
+list; a reader that treats them differently silently loses every entry written
+by the other revision. Then pin the writer's half from the same fixture: hold
+exactly what the paired layout holds, claim it in your baseline, and publish
+nothing. The two layouts differ byte for byte while meaning the same thing, so
+a writer comparing the read as it ARRIVED rather than [put through its own
+framing](#5-publish-only-when-the-bytes-change) republishes a list nothing had
+changed — on every load, forever, if the other app does the same.
 
 **8. An entry you removed disappears; an entry you never published does not.**
 The same input — on the list, absent from your local state — must produce

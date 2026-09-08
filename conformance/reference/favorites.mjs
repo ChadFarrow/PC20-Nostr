@@ -970,10 +970,19 @@ export function plan({
   // different ciphertext every time and a bytes comparison always differs —
   // every load republishes, forever. The fake codec here is deterministic and
   // would hide that, so the comparison is written the way a real one must be.
-  // Compare against the read FRAMED AS IT WAS — its own `visibility`, not
-  // ours. Otherwise a list that predates the tag differs from itself forever
-  // and every load republishes. A list that genuinely lacks the tag does
-  // differ, once, and that publish is the migration.
+  // RULE 5, AND THE COMPARISON IS AGAINST THE READ PUT BACK THROUGH `frame`,
+  // never against `read.tags` as it arrived. Two conforming events differ:
+  // a reader must accept a `k` beside every `i` while a writer must emit one
+  // `k` per distinct kind at the end, and the positions of `alt` and
+  // `visibility` and the order of the `k` tags are free besides. Compare the
+  // raw bytes and reading a list the other app wrote reports a change every
+  // time, on a list nothing has changed about — and if that app compares raw
+  // too, neither ever stops. Vector 7.
+  //
+  // Framed AS IT WAS, though: its own `visibility`, not ours. Otherwise a list
+  // that predates the tag differs from itself forever and every load
+  // republishes. A list that genuinely lacks the tag does differ, once, and
+  // that publish is the migration.
   const unchanged =
     sameTags(publicTags, frame(readTags, carriedKinds, stated)) &&
     JSON.stringify(privateTags ?? readPrivate) === JSON.stringify(readPrivate);

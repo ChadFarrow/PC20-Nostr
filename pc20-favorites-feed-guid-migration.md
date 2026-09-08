@@ -406,11 +406,12 @@ rows that matter here:
 | derive an entry's `k` kind from position 1 alone | 6 |
 | read an unrecognised position 2 as a feed favorite | 4 |
 | write a feed entry for a feed you hold only to supply a feed guid | 25 |
-| emit band 3 before band 2 | 1, 2, 10, 18, 28 |
+| emit band 3 before band 2 | 1, 2, 7, 10, 18, 28 |
 | append a new entry at the end of the run instead of its band | 18, 28 |
 | skip the by-feed grouping inside band 3 | 18 |
 | put an item that names no feed in band 3 | 20 |
 | band a run that holds a tag you cannot classify | 4 |
+| compare against the read as it arrived, not reframed | 7, 17 |
 
 Every row above was produced by breaking the reference implementation on
 purpose and recording what went red, not by reasoning about it.
