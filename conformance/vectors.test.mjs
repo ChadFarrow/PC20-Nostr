@@ -1,10 +1,10 @@
 /**
- * The 30 test vectors of ../pc20-favorites.md, executable.
+ * The 31 test vectors of ../pc20-favorites.md, executable.
  *
  * The spec states them as behaviors "so they can be written against any test
  * runner". This is that, for one runner, driven through the pure functions
  * described in ./adapter.d.ts. Point ADAPTER at your own implementation and
- * the same 30 run against it.
+ * the same 31 run against it.
  *
  * Two ways to point it. Edit the import below, or leave this file alone and
  * set `PC20_FAVORITES_ADAPTER` to the path of your shim — which is what lets
@@ -1949,5 +1949,96 @@ test('30. An empty half is an empty string', () => {
     ids(decodePrivate(hidden.publish.content)),
     [FEED_B, FEED_A],
     'the private half did not receive the entries',
+  );
+});
+
+test('31. A carried claim retires with the entry it names', () => {
+  // Rule 2 says the inactive half's claims are CARRIED, never recomputed, and
+  // that is what stops a writer claiming another app's entries. It does not
+  // mean a claim outlives the entry. A writer edits the inactive half too —
+  // the claim-back takes entries out of it, a whole-list move empties it — and
+  // a claim left behind by either can no longer be satisfied. The one thing it
+  // can still do is rule 3's third row, so the next app to write that entry
+  // back into that half has it deleted.
+  const local = [feed(FEED_A, 'podcast')];
+
+  // 1. The claim-back. FEED_B is claimed in the private half and unfavorited
+  // here, so it is removed from that half — and the claim goes with it.
+  const took = plan({
+    read: ev(
+      [ALT, ['medium', 'podcast'], ['i', FEED_A], K_FEED],
+      encodePrivate([['medium', 'podcast'], ['i', FEED_B]]),
+    ),
+    local,
+    baseline: base([FEED_A], [FEED_B]),
+    mode: 'public',
+  });
+  assert.ok(took.publish, 'the claim-back is a change and must publish');
+  assert.deepEqual(
+    took.baselineIfLanded.private,
+    [],
+    'we still claim an entry we removed from that half',
+  );
+
+  // A second app now writes FEED_B back into the private half. It is theirs.
+  const theirs = ev(took.publish.tags, encodePrivate([['medium', 'podcast'], ['i', FEED_B]]));
+  const next = plan({
+    read: theirs,
+    local,
+    baseline: took.baselineIfLanded,
+    mode: 'public',
+  });
+  assert.deepEqual(
+    ids(decodePrivate((next.publish ?? theirs).content)),
+    [FEED_B],
+    'a stale claim deleted the second app entry on the very next cycle',
+  );
+
+  // 2. The same rule on a whole-list move, where the half is emptied outright
+  // rather than edited entry by entry.
+  const moved = plan({
+    read: ev([ALT, VIS_PUBLIC, ['medium', 'podcast'], ['i', FEED_A], ['i', FEED_B], K_FEED]),
+    local,
+    baseline: base([FEED_A, FEED_B]),
+    mode: 'private',
+    userChose: true,
+  });
+  assert.ok(moved.publish, 'going private is a change and must publish');
+  assert.deepEqual(
+    moved.baselineIfLanded.public,
+    [],
+    'we still claim the public half after emptying it',
+  );
+
+  const alsoTheirs = ev(
+    [ALT, VIS_PRIVATE, ['medium', 'podcast'], ['i', FEED_B], K_FEED],
+    moved.publish.content,
+  );
+  const after = plan({
+    read: alsoTheirs,
+    local,
+    baseline: moved.baselineIfLanded,
+    mode: 'private',
+  });
+  const landed = after.publish ?? alsoTheirs;
+  assert.ok(
+    ids(landed.tags).concat(ids(decodePrivate(landed.content))).includes(FEED_B),
+    'a stale claim on the emptied half deleted the second app entry',
+  );
+
+  // 3. AND THE CLAIM MUST NOT RETIRE WHILE WE STILL HOLD THE ENTRY. Here a
+  // second app removed FEED_A from the private half and we still favorite it.
+  // That claim is the resurrection guard — pass 2 re-adds what we hold, and
+  // the baseline is the only thing that stops it — so presence in the half is
+  // not on its own the test.
+  const guarded = plan({
+    read: ev([ALT, ['medium', 'podcast'], ['i', FEED_B], K_FEED]),
+    local,
+    baseline: base([FEED_A], [FEED_A]),
+    mode: 'public',
+  });
+  assert.ok(
+    guarded.baselineIfLanded.private.includes(FEED_A),
+    'we dropped the claim that stops us re-adding what another app removed',
   );
 });

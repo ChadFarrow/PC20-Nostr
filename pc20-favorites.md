@@ -688,6 +688,20 @@ other apps never see it, and no two writers need theirs to agree.
   Carrying instead keeps the claims made while that half *was* the one you
   wrote into, so moving an entry between halves still works.
 
+  **Carrying a claim is not keeping it alive past its entry.** You edit the
+  inactive half too: taking an entry back out of it removes one, and a
+  whole-list move empties it outright. A claim left behind by either can never
+  be satisfied again, and the one thing it can still do is fire rule 3's
+  removal row — so the next app to write that entry into that half has it
+  deleted, silently, on someone else's device. Retire a carried claim when
+  BOTH are true: the entry is no longer in that half, and you no longer hold
+  it. Either one alone keeps it. An entry still in the half has a live claim,
+  and an entry you still hold keeps its claim wherever it sits, because there
+  the claim is also what stops you re-adding what another app removed. Note
+  what this is not: it only ever removes claims, so it cannot claim an entry
+  that is not yours. A half you could not read is a half you did not edit, and
+  its claims are carried untouched. ([Vector 31](#test-vectors).)
+
   Two things make this hard to catch. The damage needs **two cycles** — the
   first publish emits correct bytes and only the baseline recorded beside it
   is wrong — and the first cycle need not publish at all, because a writer
@@ -1212,6 +1226,18 @@ another app owns, and refuses to change the mode on top of it; that refusal is
 right, and an empty half that encodes to ciphertext makes it fire on nothing.
 The second half of this vector is the one that matters — a byte-count
 assertion alone does not say what the leftover costs.
+
+**31. A carried claim retires with the entry it names.** Three parts, and the
+third is what keeps the first two from becoming an over-correction. Take an
+entry back out of the inactive half — unfavorite one your baseline claims
+there — and pin that the claim goes with it; then have a second writer put
+that entry back into that half and pin that your next cycle leaves it alone.
+Repeat on a whole-list move, where the half is emptied outright rather than
+edited entry by entry: same rule, same second writer, same outcome. Then pin
+the opposite: a second writer removes an entry from the inactive half that you
+STILL HOLD, and the claim must survive, because that claim is what stops you
+re-adding what somebody else deleted. A test that retires on absence alone
+passes the first two and fails this one.
 
 ## Open questions / not yet resolved
 

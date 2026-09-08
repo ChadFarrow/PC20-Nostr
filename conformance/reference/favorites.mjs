@@ -1,7 +1,7 @@
 /**
  * AUTHORED. This file has never served traffic.
  *
- * It exists so `../vectors.test.mjs` has something to run against — 30
+ * It exists so `../vectors.test.mjs` has something to run against — 31
  * assertions nobody has watched go green are prose in a new costume. It is a
  * worked example of the rules in `../../pc20-favorites.md`, not a
  * recommendation and not an extraction. If you want code a real site runs,
@@ -1082,8 +1082,37 @@ export function plan({
     .entries.map((e) => e.key)
     .filter((key) => heldLocally.has(key) || activeBaseline.includes(key));
 
+  // A claim on the half we did not publish into is CARRIED, never recomputed
+  // — recompute it and we claim every entry in that half, another writer's
+  // included. Carrying it is not the same as keeping it alive past the entry
+  // it names, and this writer removes entries from the INACTIVE half too: the
+  // claim-back takes them out of it, and a whole-list move empties it
+  // outright. A claim left behind by either cannot be satisfied on any later
+  // cycle, and the one thing it can still do is rule 3's third row — so the
+  // moment a second app writes that entry back into that half, we delete it,
+  // silently, on someone else's device. Vector 31.
+  //
+  // It retires only when there is nothing left for it to do. An entry still
+  // IN the half has a live claim. An entry we still HOLD keeps its claim in
+  // whichever half it sits, because there the claim is also the resurrection
+  // guard — pass 2 re-adds what we hold, and the baseline is the only thing
+  // that stops it. Neither one true means we removed the entry and already
+  // published the removal, so the claim is spent.
+  //
+  // A half we could not read is a half we did not edit. Its claims are
+  // carried untouched, because presence is not a question we can ask of
+  // bytes we cannot open.
+  const inactiveTags = goingPrivate ? publicTags : privateTags;
+  const inactiveStillHas =
+    inactiveTags === null
+      ? null
+      : new Set(parseTags(inactiveTags).entries.map((e) => e.key));
   const carriedInactive = inactiveBaseline.filter(
-    (id) => !activeClaims.includes(id),
+    (id) =>
+      !activeClaims.includes(id) &&
+      (inactiveStillHas === null ||
+        inactiveStillHas.has(id) ||
+        heldLocally.has(id)),
   );
 
   const baselineIfLanded = goingPrivate

@@ -1,6 +1,6 @@
 # Conformance suite
 
-The 30 test vectors of [`../pc20-favorites.md`](../pc20-favorites.md), as code
+The 31 test vectors of [`../pc20-favorites.md`](../pc20-favorites.md), as code
 you can run against your own implementation.
 
 The spec states them as behaviors "so they can be written against any test
@@ -108,6 +108,7 @@ Numbering matches the spec exactly.
 | 28 | An artist entry given a feed guid, or made an item of the entry above it |
 | 29 | A removal suspended while the list changes mode — lost for one cycle, then for good |
 | 30 | An emptied `medium` run left behind, so an empty private half reads as one somebody owns |
+| 31 | A baseline claim outliving its entry, so the next app to write that entry has it deleted |
 
 ## The suite is mutation-tested
 
@@ -161,6 +162,8 @@ breaking the reference on purpose and confirming the right one fails:
 | Adopt every entry read on the merge of the half being moved from | **29** |
 | Claim an entry back out of the other half on your baseline alone | **29** |
 | Keep a `medium` run the claim-back emptied | **30** |
+| Carry a claim for an entry you removed from that half | **31** |
+| Retire a carried claim on absence alone, ignoring what you hold | **31** |
 
 The first two rows are not hypothetical. They are the two defects that reached
 production on 2026-08-25, and they are why this directory exists.
@@ -168,7 +171,7 @@ production on 2026-08-25, and they are why this directory exists.
 ## `reference/`
 
 An **authored** implementation — it has never served traffic. It exists so the
-30 assertions have something to run against, and as a worked example to read
+31 assertions have something to run against, and as a worked example to read
 beside the spec. It is not a recommendation and not an extraction.
 
 For code a real site runs, see
