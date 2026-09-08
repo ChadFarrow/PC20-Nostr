@@ -443,6 +443,28 @@ test('7. Both `k` layouts parse identically', () => {
     shape(parseTags(trailing)),
     'a reader walking `i`/`k` in pairs shows an empty library, not an error',
   );
+
+  // THE WRITER'S HALF OF THE SAME FACT. Both layouts are legal — a reader must
+  // accept the paired one, a writer must emit the trailing one — so they
+  // differ byte for byte while meaning the same list. Rule 5 therefore
+  // compares the read PUT THROUGH YOUR OWN FRAMING, not the read as it
+  // arrived. Compare it raw and reading a list the other app wrote reports a
+  // change every single time, on a list nothing has changed about; if that app
+  // compares raw too, neither of you ever stops. Vector 3 does not catch this,
+  // because a writer reading its OWN output normalises by construction.
+  const held = [feed(FEED_A, 'podcast', [ITEM_A1], true)];
+  const claimed = base([FEED_A, claim(ITEM_A1, FEED_A)]);
+
+  assert.equal(
+    plan({ read: ev([ALT, ...paired]), local: held, baseline: claimed, mode: 'public' }).publish,
+    null,
+    'reading the other `k` layout republished a list nothing had changed',
+  );
+  assert.equal(
+    plan({ read: ev([ALT, ...trailing]), local: held, baseline: claimed, mode: 'public' }).publish,
+    null,
+    'reading our own `k` layout republished a list nothing had changed',
+  );
 });
 
 test('8. An entry you removed disappears; an entry you never published does not', () => {
