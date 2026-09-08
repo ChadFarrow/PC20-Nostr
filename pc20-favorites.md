@@ -178,6 +178,12 @@ run, emit entries in four bands:
 
 ## Public and private
 
+**Supporting the private half is optional; carrying `content` is not.** An app
+that never encrypts anything conforms, provided it republishes the bytes it
+read — [rule 4](#4-carry-what-you-cannot-read). Such an app writes into the
+tags and needs nothing from [The private half](#the-private-half); what it
+still owes is the last three rules below.
+
 A list is **wholly** in the plaintext tags or **wholly** in the encrypted
 `content`. It is never split, and no entry is in both.
 
@@ -186,10 +192,15 @@ whole list, and any app may change it. It is multi-letter on purpose: relays
 index single-letter tags, and a `#v=private` filter would enumerate the pubkeys
 keeping a private list.
 
-- **Absent, infer it:** entries in exactly one half means that half is the
-  mode. Entries in **both halves, or in neither: ask the user and publish
-  nothing until they answer.**
-  ([why](notes/pc20-favorites-rationale.md#no-safe-default))
+- **An empty, untagged list is public.** No `visibility` tag, no `i` tag, and
+  `content` the empty string: publish into the tags. Nobody has chosen a mode,
+  and this is where every new user starts. The default writes **no** tag — it
+  is a behavior, not a declaration. (Vector 16)
+- **Otherwise infer the mode from the halves:** entries in exactly one half
+  means that half is the mode. **Entries in both halves, or a `content` you
+  cannot read: ask the user and publish nothing until they answer.** A default
+  there discloses entries somebody already hid, and an `i` tag cannot be taken
+  back. ([why](notes/pc20-favorites-rationale.md#no-safe-default))
 - **The tag is written on a user's choice and carried thereafter.** A writer's
   standing setting never stamps it onto a list that has none.
 - **Changing the mode requires being able to read BOTH halves.** An app whose

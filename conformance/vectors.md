@@ -156,18 +156,28 @@ says so. Measured: 284 public, 287 encrypted, 284 in both, on an account whose
 every screen said it was fine. Vector 13 pins the switch; this pins what the
 next reader owes the result.
 
-**16. The stated mode outranks whatever the halves happen to hold.** Two
-fixtures, and the first is the one nothing else can reach. Read a list with
+**16. The stated mode outranks whatever the halves happen to hold, and an
+empty list is public.** Four fixtures. Read a list with
 `["visibility","private"]`, **no entries in either half**, and publish one
 local favorite: it must land in `content`, not in the tags. Every rule above
-answers this from emptiness, and emptiness has no answer — an implementation
-that infers the mode discloses that favorite as a relay-indexed `i` tag, on
-the account of a user who chose Private somewhere else. Then the converging
-half: read a list with `["visibility","public"]` whose `content` still decodes
-to entries, and a writer that can read both halves must emit each of them
-once, in the tags, with the private half emptied. The tag is the consent that
-licenses that move; without the tag, vector 13's conservative
-rule still applies and the same fixture must NOT move them.
+answers this from emptiness, and the tag is what stops an implementation
+disclosing that favorite as a relay-indexed `i` tag on the account of a user
+who chose Private somewhere else. Then the **default**: the same empty list
+with NO tag, and a writer with no preference of its own, publishes into the
+tags and states no mode — nobody has chosen, which is where every new user
+starts. Pin the two things that keep the default from spreading, because
+without them it becomes the disclosure it replaced. A writer whose own setting
+is Private meets the same empty list and its setting stands: the default is a
+tiebreak, never something the list infers, or it outranks that setting and
+publishes the first favorite in plaintext. And a `content` this writer cannot
+account for is somebody's half, so an empty tag list is not an empty LIST —
+default there and the next publish puts `i` tags beside ciphertext, splitting a
+list somebody else owns. Then the converging half: read a list with
+`["visibility","public"]` whose `content` still decodes to entries, and a
+writer that can read both halves must emit each of them once, in the tags,
+with the private half emptied. The tag is the consent that licenses that move;
+without the tag, vector 13's conservative rule still applies and the same
+fixture must NOT move them.
 
 **17. A writer that cannot read a half may not restate the mode.** Same
 `["visibility","private"]` list, `content` this writer's codec cannot decode,
