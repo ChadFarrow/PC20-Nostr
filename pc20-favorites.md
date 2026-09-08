@@ -3,11 +3,18 @@
 Favorite a show or a track in one Podcasting 2.0 app, and it is favorited in
 every other app you sign into. One flat list, one event.
 
-**Any app may read and write it, and the event is replaceable.** So a writer
-that publishes without reading first does not lose a race — it deletes every
-entry the other apps added, silently, on someone else's device, with no undo.
-[Merging](#merging) is what makes wholesale replacement safe, and it is not
-optional. ([why](notes/pc20-favorites-rationale.md#blind-publish))
+**It is also just a list.** The entries are Podcasting 2.0 guids on a public
+Nostr event, so any app may read one and do what it likes with it — render,
+count, recommend, import — without ever writing. Sharing guids between apps is
+what the format does; syncing is the use it was built for, not the only one.
+[If you only read](#if-you-only-read) is where that starts and stops.
+
+**Writing is the part with teeth.** Any app may write it too, and the event is
+replaceable, so a writer that publishes without reading first does not lose a
+race — it deletes every entry the other apps added, silently, on someone
+else's device, with no undo. [Merging](#merging) is what makes wholesale
+replacement safe, and for a writer it is not optional.
+([why](notes/pc20-favorites-rationale.md#blind-publish))
 
 This document is rules. The reasons, the measurements and the history are in
 [the rationale](notes/pc20-favorites-rationale.md), and every rule links its
@@ -253,10 +260,46 @@ app's screen. ([why](notes/pc20-favorites-rationale.md#private-half-sequencing))
 - **Compare decrypted arrays, never ciphertext.** NIP-44 draws a fresh nonce
   per encryption, so a ciphertext comparison republishes on every load forever.
 
+## If you only read
+
+Reading a list is not the same job as keeping one in sync. A recommender, a
+counter, a public profile view, a one-way importer — none of them publish, so
+none of them owe [Merging](#merging) anything. That section exists to stop a
+writer destroying another writer's entries; it costs a reader nothing.
+
+What a reader owes is short, and every line of it is above:
+
+- **Accept both `i` forms** — the three-element one, and the legacy two.
+  ([Entries](#entries))
+- **Accept both `k` layouts, and ignore `k` when parsing entries.** Derive the
+  kind from the identifier instead. ([Tag order](#tag-order))
+- **Take an entry's kind from its LAST identifier**, from a known-kinds table,
+  never by splitting the string. ([Entries](#entries))
+- **Treat `medium` as a hint.** A resolved lookup wins. ([`medium`](#medium))
+- **Render what you cannot resolve, and do not drop it.** An entry is guids and
+  nothing else, and one nobody can look up is still somebody's favorite.
+
+And three things not to assume:
+
+- **`#i` for a feed guid returns the feed favorite and every item favorite
+  under it.** Relays index position 1 only, so there is no per-item filter, and
+  one saved episode puts that show into the index.
+- **A kind:1 boost note tags the episode at position 1; this list tags the
+  feed.** A filter written for one does not find the other.
+- **You cannot read somebody else's private half.** `content` is encrypted to
+  the author's own key, so it opens for that person's apps and for nobody else.
+  A list kept private looks empty to you, and that is the point — an empty list
+  is not evidence of an empty library.
+
+If you never publish, you can stop here.
+
+---
+
 ## Merging
 
-A writer's job is not "serialize my favorites". It is **read the current event,
-fold your changes into it, and write everything else back untouched.**
+Everything below is for writers. A writer's job is not "serialize my
+favorites". It is **read the current event, fold your changes into it, and
+write everything else back untouched.**
 
 ### 1. Read first, and never publish on a read you do not trust
 

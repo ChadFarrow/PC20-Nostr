@@ -23,10 +23,18 @@ do not rewrite existing prose into STE.
 A **reference repo with four parts**, none of which is an application.
 
 1. **The favorites spec.** `pc20-favorites.md` — an app-neutral format for
-   syncing a user's podcast and music favorites between Podcasting 2.0 apps
-   over Nostr, as a single replaceable event at kind 10333. The audience is an
-   implementer of a *third* app who has only this document. This part is
-   **prose only**; there is nothing to build, lint or test in it.
+   sharing Podcasting 2.0 guids between apps over Nostr, as a single
+   replaceable event at kind 10333. The audience is an implementer of a *third*
+   app who has only this document. This part is **prose only**; there is
+   nothing to build, lint or test in it.
+
+   **There are two audiences, and the second is the bigger one.** Syncing a
+   user's favorites is what the format was built for, and it is the half with
+   the destructive failure modes. But the event is public and the entries are
+   guids, so an app may read a list and render, count, recommend or import it
+   without ever writing — and a reader owes nothing to `Merging`. Do not let a
+   rewrite fold the reader back into the writer: `If you only read` is a map
+   of rules stated elsewhere, never a place to put a new one.
 
    **It is rules and nothing else, and short is the point.** Three files
    carry the format between them, and a paragraph belongs in exactly one:

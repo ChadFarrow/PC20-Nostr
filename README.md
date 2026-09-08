@@ -42,8 +42,11 @@ collision before you depend on either.
 
 ### Normative — implement against these
 
-**[pc20-favorites.md](pc20-favorites.md)** syncs a user's favorites between
+**[pc20-favorites.md](pc20-favorites.md)** shares Podcasting 2.0 guids between
 apps over Nostr, as one replaceable event at kind 10333. Two apps ship it.
+Syncing a user's favorites is what it was built for; the event is public, so
+any app may read one and render, count or import it without ever writing —
+and a read-only app can stop at the spec's `If you only read` section.
 Four favorites — a podcast, one episode of a podcast the user does not follow,
 an artist, and one track from an album they do not follow — look like this:
 
