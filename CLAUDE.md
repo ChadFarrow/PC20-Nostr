@@ -36,11 +36,11 @@ A **reference repo with four parts**, none of which is an application.
    `claude/new-relay-type-draft-6osmum`. Read its privacy section first.
    Per-track receipts under a listener's own key are a public timestamped
    listening history, and "share my boosts" is not consent for that.
-3. **The conformance suite.** `conformance/` — the favorites spec's 29 test
+3. **The conformance suite.** `conformance/` — the favorites spec's 31 test
    vectors, executable. `node --test conformance/vectors.test.mjs` (name the
    file, not the directory: `node --test conformance/` fails to resolve on
    Node 22). Zero dependencies, no build step. An implementer points the
-   adapter at their own merge and runs the same 29. The reference under
+   adapter at their own merge and runs the same 31. The reference under
    `conformance/reference/` is **authored** — it has never served traffic, and
    it is there so the assertions have something to run against.
 4. **The catalog.** `catalog/` — working features from ChadFarrow's
@@ -355,10 +355,15 @@ and read the other one.
   device claims and no longer holds, which is a removal the user made. That is
   not a removal delayed by a cycle. The baseline written beside the move cannot
   claim an entry the device does not hold, so nothing later can drop it, and
-  the favorite comes back on every device for good. The reference shipped this
-  at both merge sites and the flag doing it had no other effect: the ordinary
-  rule already carries an entry you neither hold nor claim, so "adopt
-  everything" only ever meant "suppress removals". Vector 29, issue #37.
+  the favorite comes back on every device for good. THREE passes move entries
+  between halves and the rule is the same in all three: the two whole-list
+  moves, where the flag doing it had no other effect — the ordinary rule
+  already carries an entry you neither hold nor claim, so "adopt everything"
+  only ever meant "suppress removals" — and the claim-back, where an app takes
+  back what its own baseline names. A claim is not a favorite. The claim-back
+  is the one that is worse than a stale entry: it PUBLISHES the removal, as an
+  `i` tag relays index, on the one path that exists because a disclosure cannot
+  be undone. Vector 29, issues #37 and #39.
 - **"Only when the bytes change" means the REFRAMED bytes.** Compare your
   merged array against the read put back through your own framing —
   regenerated `alt`, its own `visibility`, regenerated trailing `k` — never
@@ -396,6 +401,14 @@ and read the other one.
   removal test deletes the whole half at once. It takes two cycles to appear —
   the first publish emits correct bytes and only the baseline beside them is
   wrong — so every single-cycle test passes over it.
+  CARRYING A CLAIM IS NOT KEEPING IT ALIVE PAST ITS ENTRY, though. A writer
+  edits the inactive half too — the claim-back removes entries from it, a
+  whole-list move empties it — and a claim left behind by either can never be
+  satisfied again, so the only thing it still does is fire the removal row on
+  the next app that writes that entry there. Retire it when the entry is gone
+  from that half AND you no longer hold it; either alone keeps it, because an
+  entry you hold needs its claim as the resurrection guard. Retiring only ever
+  removes claims, so it cannot claim what is not yours. Vector 31, issue #41.
 - **A normative rule needs a vector, and a vector needs a case.** A new
   "you must do X" in `pc20-favorites.md` earns a numbered entry under **Test
   vectors**, and that entry earns a case in `conformance/vectors.test.mjs`
@@ -405,7 +418,7 @@ and read the other one.
   implementer learns the expensive way.
 - **A vector that no mutation can kill is not a vector.** Before adding one,
   break the reference on purpose and confirm yours is what fails.
-  `conformance/README.md` carries the matrix; every one of the 29 is killed by
+  `conformance/README.md` carries the matrix; every one of the 31 is killed by
   at least one mutation, and the first two rows of that table are the defects
   that actually reached production on 2026-08-25.
 - **The feed-guid migration has shipped data behind it, unlike the marker.**

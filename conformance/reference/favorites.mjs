@@ -1,7 +1,7 @@
 /**
  * AUTHORED. This file has never served traffic.
  *
- * It exists so `../vectors.test.mjs` has something to run against — 29
+ * It exists so `../vectors.test.mjs` has something to run against — 31
  * assertions nobody has watched go green are prose in a new costume. It is a
  * worked example of the rules in `../../pc20-favorites.md`, not a
  * recommendation and not an extraction. If you want code a real site runs,
@@ -452,6 +452,31 @@ const keysOf = (localGroups) => {
  */
 const itemTag = (itemId, feedGuid) =>
   feedGuid === null ? ['i', itemId] : ['i', feedIdOf(feedGuid), itemId];
+
+/**
+ * Drop a `medium` run left with nothing under it.
+ *
+ * `mergeHalf` already refuses to emit one — "a byte change for nothing" — but
+ * the claim-back below builds its half with a filter of its own, and a filter
+ * that only inspects `i` tags keeps the run that held the entry it just took
+ * back. That leftover is not cosmetic. `encodePrivate` returns `''` only for
+ * an EMPTY array, so one stray tag is the difference between a half that
+ * encodes to nothing and a half that encodes to real ciphertext — and a
+ * signer with no NIP-44 reads ciphertext it cannot open as a private half
+ * another writer owns. It then declines to change the mode on top of bytes it
+ * cannot see, which is correct, and leaves a user who asked for private on a
+ * public list with nothing on screen saying why. Vector 30.
+ *
+ * The test is `mergeHalf`'s, deliberately: only an `i` tag keeps a run alive,
+ * because only an entry is what a `medium` labels.
+ */
+const pruneEmptyRuns = (tags) =>
+  (tags ?? []).filter((tag, index) => {
+    if (tag[0] !== 'medium') return true;
+    const next = tags.findIndex((t, i) => i > index && t[0] === 'medium');
+    const end = next === -1 ? tags.length : next;
+    return tags.some((t, i) => i > index && i < end && t[0] === 'i');
+  });
 
 /**
  * Rule 3, over ONE half's tag array.
@@ -942,14 +967,31 @@ export function plan({
       // Keys, not identifiers. An item is the pair, so the same item guid
       // under another feed guid is a different entry and is NOT ours to
       // reclaim.
+      //
+      // AND WE MUST STILL HOLD IT. `returning` is a claim, not a favorite: an
+      // entry our baseline names and the user has since unfavorited is rule
+      // 3's third row, and it fires while claiming back like anywhere else.
+      // Skip the test and the removal is not merely kept, it is DISCLOSED —
+      // published as an `i` tag relays index, by the one branch that exists
+      // because a disclosure cannot be taken back. Nor is there a second
+      // chance at it: `activeClaims` below cannot claim what we do not hold,
+      // so the baseline we land still names it in the half it just left, and
+      // no later cycle can drop it. Vector 29, fourth case.
+      const heldHere = keysOf(local);
       const inactiveKeyAt = new Map();
       for (const e of parseTags(inactiveReadTags).entries) {
         inactiveKeyAt.set(e.index, e.key);
       }
-      mergedInactive = inactiveReadTags.filter((t, i) => {
-        if (t[0] !== 'i') return true;
-        return !returning.has(inactiveKeyAt.get(i));
-      });
+      // Pruned, because this is the one half built without `mergeHalf`.
+      // Claiming back the last entry of a run leaves the run, and a half
+      // holding nothing but a `medium` tag still encodes to ciphertext.
+      // Vector 30.
+      mergedInactive = pruneEmptyRuns(
+        inactiveReadTags.filter((t, i) => {
+          if (t[0] !== 'i') return true;
+          return !returning.has(inactiveKeyAt.get(i));
+        }),
+      );
       // Skip anything the active half ALREADY holds. An entry can sit in both
       // halves at once — see vector 15 — and concatenating the claimed-back
       // ones unconditionally emits that identifier twice, which opens a second
@@ -961,6 +1003,7 @@ export function plan({
         (t, i) =>
           t[0] === 'i' &&
           returning.has(inactiveKeyAt.get(i)) &&
+          heldHere.has(inactiveKeyAt.get(i)) &&
           !already.has(inactiveKeyAt.get(i)),
       );
       mergedActive = mergeHalf(
@@ -1039,8 +1082,37 @@ export function plan({
     .entries.map((e) => e.key)
     .filter((key) => heldLocally.has(key) || activeBaseline.includes(key));
 
+  // A claim on the half we did not publish into is CARRIED, never recomputed
+  // — recompute it and we claim every entry in that half, another writer's
+  // included. Carrying it is not the same as keeping it alive past the entry
+  // it names, and this writer removes entries from the INACTIVE half too: the
+  // claim-back takes them out of it, and a whole-list move empties it
+  // outright. A claim left behind by either cannot be satisfied on any later
+  // cycle, and the one thing it can still do is rule 3's third row — so the
+  // moment a second app writes that entry back into that half, we delete it,
+  // silently, on someone else's device. Vector 31.
+  //
+  // It retires only when there is nothing left for it to do. An entry still
+  // IN the half has a live claim. An entry we still HOLD keeps its claim in
+  // whichever half it sits, because there the claim is also the resurrection
+  // guard — pass 2 re-adds what we hold, and the baseline is the only thing
+  // that stops it. Neither one true means we removed the entry and already
+  // published the removal, so the claim is spent.
+  //
+  // A half we could not read is a half we did not edit. Its claims are
+  // carried untouched, because presence is not a question we can ask of
+  // bytes we cannot open.
+  const inactiveTags = goingPrivate ? publicTags : privateTags;
+  const inactiveStillHas =
+    inactiveTags === null
+      ? null
+      : new Set(parseTags(inactiveTags).entries.map((e) => e.key));
   const carriedInactive = inactiveBaseline.filter(
-    (id) => !activeClaims.includes(id),
+    (id) =>
+      !activeClaims.includes(id) &&
+      (inactiveStillHas === null ||
+        inactiveStillHas.has(id) ||
+        heldLocally.has(id)),
   );
 
   const baselineIfLanded = goingPrivate

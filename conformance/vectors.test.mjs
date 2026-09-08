@@ -1,10 +1,10 @@
 /**
- * The 29 test vectors of ../pc20-favorites.md, executable.
+ * The 31 test vectors of ../pc20-favorites.md, executable.
  *
  * The spec states them as behaviors "so they can be written against any test
  * runner". This is that, for one runner, driven through the pure functions
  * described in ./adapter.d.ts. Point ADAPTER at your own implementation and
- * the same 29 run against it.
+ * the same 31 run against it.
  *
  * Two ways to point it. Edit the import below, or leave this file alone and
  * set `PC20_FAVORITES_ADAPTER` to the path of your shim — which is what lets
@@ -1849,4 +1849,196 @@ test('29. A whole-list move is not an exemption from rule 3', () => {
     'the removed entry returned, or our own entry was dropped, on the second cycle',
   );
   assert.equal(again.publish, null, 'the move is not idempotent: it republishes forever');
+
+  // 4. The claim-back, which is the third path that moves entries between
+  // halves and the only one where getting this wrong DISCLOSES the removal.
+  // No `visibility` tag and both halves populated, so the list cannot state
+  // its own mode and this writer is not licensed to move anyone else's
+  // entries: it takes back only what its own baseline claims. A claim is not
+  // a favorite, though. FEED_B is claimed in the private half and unfavorited
+  // here, so it is a removal, and taking it back publishes it as an `i` tag
+  // relays index — on the one branch that exists because a disclosure cannot
+  // be undone.
+  const back = plan({
+    read: ev(
+      [ALT, ['medium', 'podcast'], ['i', FEED_A], K_FEED],
+      encodePrivate([['medium', 'podcast'], ['i', FEED_B]]),
+    ),
+    local,
+    baseline: base([FEED_A], [FEED_B]),
+    mode: 'public',
+  });
+  assert.ok(back.publish, 'the claim-back is a change and must publish');
+  assert.deepEqual(
+    ids(back.publish.tags),
+    [FEED_A],
+    'an entry we claimed and no longer hold was claimed back into the PUBLIC half',
+  );
+  assert.deepEqual(
+    ids(decodePrivate(back.publish.content)),
+    [],
+    'the removed entry stayed in the private half',
+  );
+
+  // And the second cycle again, for the same reason as above: the baseline we
+  // land cannot claim what we do not hold, so a removal that survives this
+  // path survives every later one too.
+  const backAgain = plan({
+    read: back.publish,
+    local: back.holds ?? local,
+    baseline: back.baselineIfLanded,
+    mode: 'public',
+  });
+  assert.deepEqual(
+    ids((backAgain.publish ?? back.publish).tags),
+    [FEED_A],
+    'the removed entry returned, or ours was dropped, on the second cycle',
+  );
+  assert.equal(backAgain.publish, null, 'the claim-back never reaches a fixed point');
+});
+
+test('30. An empty half is an empty string', () => {
+  // Claiming back the last entry of a `medium` run must take the run with it.
+  // `encodePrivate` returns `''` only for an EMPTY array, so one leftover tag
+  // is the difference between a half that encodes to nothing and a half that
+  // encodes to real ciphertext — and ciphertext is what tells the next writer
+  // somebody owns this half.
+  const cleared = plan({
+    read: ev(
+      [ALT, ['medium', 'podcast'], ['i', FEED_B], K_FEED],
+      encodePrivate([['medium', 'podcast'], ['i', FEED_A]]),
+    ),
+    local: [feed(FEED_A, 'podcast')],
+    baseline: base([], [FEED_A]),
+    mode: 'public',
+  });
+  assert.ok(cleared.publish, 'the claim-back is a change and must publish');
+  assert.deepEqual(
+    ids(cleared.publish.tags),
+    [FEED_B, FEED_A],
+    'the entry we claimed back did not reach the public half',
+  );
+  assert.equal(
+    cleared.publish.content,
+    '',
+    'a half holding no entries still encoded to ciphertext',
+  );
+
+  // THE COST OF GETTING IT WRONG IS SOMEBODY ELSE'S PRIVACY CHOICE. A signer
+  // with no NIP-44 cannot open those bytes, so it reads them as a private half
+  // another writer owns and refuses to change the mode on top of what it
+  // cannot see. That refusal is correct. It is the empty half claiming to be
+  // occupied that is not, and the user who asked for private is left on a
+  // public list with nothing on screen saying why.
+  const both = [feed(FEED_A, 'podcast'), feed(FEED_B, 'podcast')];
+  const hidden = plan({
+    read: cleared.publish,
+    local: both,
+    baseline: base([FEED_A, FEED_B]),
+    mode: 'private',
+    userChose: true,
+    canReadPrivate: false,
+  });
+  assert.ok(hidden.publish, 'the user asked for private and nothing was published');
+  assert.ok(
+    hidden.publish.tags.some((t) => t[0] === 'visibility' && t[1] === 'private'),
+    'the list did not go private: the empty half read as one somebody owns',
+  );
+  assert.deepEqual(ids(hidden.publish.tags), [], 'entries were left in the public half');
+  assert.deepEqual(
+    ids(decodePrivate(hidden.publish.content)),
+    [FEED_B, FEED_A],
+    'the private half did not receive the entries',
+  );
+});
+
+test('31. A carried claim retires with the entry it names', () => {
+  // Rule 2 says the inactive half's claims are CARRIED, never recomputed, and
+  // that is what stops a writer claiming another app's entries. It does not
+  // mean a claim outlives the entry. A writer edits the inactive half too —
+  // the claim-back takes entries out of it, a whole-list move empties it — and
+  // a claim left behind by either can no longer be satisfied. The one thing it
+  // can still do is rule 3's third row, so the next app to write that entry
+  // back into that half has it deleted.
+  const local = [feed(FEED_A, 'podcast')];
+
+  // 1. The claim-back. FEED_B is claimed in the private half and unfavorited
+  // here, so it is removed from that half — and the claim goes with it.
+  const took = plan({
+    read: ev(
+      [ALT, ['medium', 'podcast'], ['i', FEED_A], K_FEED],
+      encodePrivate([['medium', 'podcast'], ['i', FEED_B]]),
+    ),
+    local,
+    baseline: base([FEED_A], [FEED_B]),
+    mode: 'public',
+  });
+  assert.ok(took.publish, 'the claim-back is a change and must publish');
+  assert.deepEqual(
+    took.baselineIfLanded.private,
+    [],
+    'we still claim an entry we removed from that half',
+  );
+
+  // A second app now writes FEED_B back into the private half. It is theirs.
+  const theirs = ev(took.publish.tags, encodePrivate([['medium', 'podcast'], ['i', FEED_B]]));
+  const next = plan({
+    read: theirs,
+    local,
+    baseline: took.baselineIfLanded,
+    mode: 'public',
+  });
+  assert.deepEqual(
+    ids(decodePrivate((next.publish ?? theirs).content)),
+    [FEED_B],
+    'a stale claim deleted the second app entry on the very next cycle',
+  );
+
+  // 2. The same rule on a whole-list move, where the half is emptied outright
+  // rather than edited entry by entry.
+  const moved = plan({
+    read: ev([ALT, VIS_PUBLIC, ['medium', 'podcast'], ['i', FEED_A], ['i', FEED_B], K_FEED]),
+    local,
+    baseline: base([FEED_A, FEED_B]),
+    mode: 'private',
+    userChose: true,
+  });
+  assert.ok(moved.publish, 'going private is a change and must publish');
+  assert.deepEqual(
+    moved.baselineIfLanded.public,
+    [],
+    'we still claim the public half after emptying it',
+  );
+
+  const alsoTheirs = ev(
+    [ALT, VIS_PRIVATE, ['medium', 'podcast'], ['i', FEED_B], K_FEED],
+    moved.publish.content,
+  );
+  const after = plan({
+    read: alsoTheirs,
+    local,
+    baseline: moved.baselineIfLanded,
+    mode: 'private',
+  });
+  const landed = after.publish ?? alsoTheirs;
+  assert.ok(
+    ids(landed.tags).concat(ids(decodePrivate(landed.content))).includes(FEED_B),
+    'a stale claim on the emptied half deleted the second app entry',
+  );
+
+  // 3. AND THE CLAIM MUST NOT RETIRE WHILE WE STILL HOLD THE ENTRY. Here a
+  // second app removed FEED_A from the private half and we still favorite it.
+  // That claim is the resurrection guard — pass 2 re-adds what we hold, and
+  // the baseline is the only thing that stops it — so presence in the half is
+  // not on its own the test.
+  const guarded = plan({
+    read: ev([ALT, ['medium', 'podcast'], ['i', FEED_B], K_FEED]),
+    local,
+    baseline: base([FEED_A], [FEED_A]),
+    mode: 'public',
+  });
+  assert.ok(
+    guarded.baselineIfLanded.private.includes(FEED_A),
+    'we dropped the claim that stops us re-adding what another app removed',
+  );
 });

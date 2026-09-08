@@ -66,14 +66,14 @@ and you can count the user's choices by counting the lines. `content` is empty
 only because this list has no private half; it is carried verbatim, never
 assumed.
 
-Adding it to a third? Run the spec's 29 test vectors against your own code:
+Adding it to a third? Run the spec's 31 test vectors against your own code:
 
 ```bash
 node --test conformance/vectors.test.mjs
 ```
 
 No dependencies and no build step — point the adapter at your merge and the
-same 29 run against it. → **[conformance/](conformance/)**. Both existing apps
+same 31 run against it. → **[conformance/](conformance/)**. Both existing apps
 found their defects by shipping instead; one of them logged fifteen, and the
 worst passed every check the other fourteen added.
 

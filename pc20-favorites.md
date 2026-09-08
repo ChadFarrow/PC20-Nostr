@@ -539,7 +539,7 @@ to stop on the strength of one device's setting.
 The private half is a tag array, stringified, encrypted to the author's own
 key with NIP-44, and put in `content`. The
 [medium rules](#tag-order)
-apply inside it unchanged. Four rules govern the bytes, and each one is a
+apply inside it unchanged. Five rules govern the bytes, and each one is a
 defect an implementation shipped before it was written down here.
 
 - **The plaintext carries no `?`.** Write the character as its six-character
@@ -568,6 +568,17 @@ defect an implementation shipped before it was written down here.
   about 1.5×. Refusing costs the user one favorite and a message; publishing
   costs them the whole list on whichever app hits the cliff, with nothing on
   screen saying why. About 500 favorites fit. ([Vector 24](#test-vectors).)
+- **A half holding no entries is the empty string.** Emit `content: ''`, not
+  the encryption of an empty array and not the encryption of the `medium` tags
+  that used to label entries. A `medium` run left with nothing under it is not
+  cosmetic: it makes an empty half encode to real ciphertext, and ciphertext is
+  how the next writer knows somebody owns this half. A signer with no NIP-44
+  cannot open those bytes, so it reads them as a private half it must not
+  disturb and declines to change the mode on top of what it cannot see — which
+  is the correct rule, reached on false evidence. The user asks for private,
+  the app agrees the request is legitimate, the list stays public, and nothing
+  on screen says why. So prune a run you emptied, on whichever side you emptied
+  it. ([Vector 30](#test-vectors).)
 - **Compare decrypted arrays, never ciphertext.** NIP-44 draws a fresh nonce
   per encryption, so identical entries produce different bytes every time, and
   a ciphertext comparison republishes on every load, forever. Compare the
@@ -677,6 +688,20 @@ other apps never see it, and no two writers need theirs to agree.
   Carrying instead keeps the claims made while that half *was* the one you
   wrote into, so moving an entry between halves still works.
 
+  **Carrying a claim is not keeping it alive past its entry.** You edit the
+  inactive half too: taking an entry back out of it removes one, and a
+  whole-list move empties it outright. A claim left behind by either can never
+  be satisfied again, and the one thing it can still do is fire rule 3's
+  removal row — so the next app to write that entry into that half has it
+  deleted, silently, on someone else's device. Retire a carried claim when
+  BOTH are true: the entry is no longer in that half, and you no longer hold
+  it. Either one alone keeps it. An entry still in the half has a live claim,
+  and an entry you still hold keeps its claim wherever it sits, because there
+  the claim is also what stops you re-adding what another app removed. Note
+  what this is not: it only ever removes claims, so it cannot claim an entry
+  that is not yours. A half you could not read is a half you did not edit, and
+  its claims are carried untouched. ([Vector 31](#test-vectors).)
+
   Two things make this hard to catch. The damage needs **two cycles** — the
   first publish emits correct bytes and only the baseline recorded beside it
   is wrong — and the first cycle need not publish at all, because a writer
@@ -734,7 +759,12 @@ someone else's data while looking correct:
   later cycle can drop it, and the favorite the user deleted is back for good
   on every device. The same slip on the half you are moving INTO makes an
   unfavorite on a private list publish nothing at all, because the merged bytes
-  match the read and rule 5 stops there. ([Vector 29](#test-vectors).)
+  match the read and rule 5 stops there. It applies to the third pass too, the
+  one that takes back only what your own baseline names when you are not
+  licensed to move anyone else's entries: A CLAIM IS NOT A FAVORITE. Claim an
+  entry back on the baseline alone and you do not keep a removal, you PUBLISH
+  it — an `i` tag relays index, emitted by the one path that exists because a
+  disclosure cannot be undone. ([Vector 29](#test-vectors).)
 
 ### 4. Carry what you can't read
 
@@ -1169,17 +1199,45 @@ included, is what an app that DOES offer them owes — without the `k`, `#k`
 discovery misses every artist favorite it ever publishes.
 
 **29. A removal survives a change of mode.** Unfavorite an entry your baseline
-claims, and pin that it goes in all three places a mode change puts it. On a
+claims, and pin that it goes in all four places a mode change puts it. On a
 list already private: hold one of two private entries, publish, and the other
 is dropped — a merge carrying "it is only changing places" logic on this path
 publishes NOTHING here, because the bytes it builds match the ones it read.
 On the half being moved INTO: a licensed private → public move with the removed
 entry in the public half, which must not come back on the way past. And on the
 half being moved FROM: going private with the removed entry in the public half,
-which must not ride the move across. Run the last one for TWO cycles. The
-baseline written by the first cannot claim an entry the device does not hold,
-so a removal that survives the move survives every cycle after it as well —
-one cycle shows a stale entry, two show that nothing can ever remove it.
+which must not ride the move across. And on the claim-back: no `visibility`
+tag with BOTH halves populated, so the writer may take back only what its own
+baseline names, with the removed entry among what it claims — which must be
+dropped from both halves rather than published in the open. Run the last two
+for TWO cycles. The baseline written by the first cannot claim an entry the
+device does not hold, so a removal that survives either survives every cycle
+after it as well — one cycle shows a stale entry, two show that nothing can
+ever remove it.
+
+**30. An empty half is an empty string.** Take back the last entry of a
+`medium` run — a list with no `visibility` tag and both halves populated, one
+private entry your baseline claims and you still hold, moving to the public
+half — and pin that `content` comes back as `''` rather than as the encryption
+of the run that entry left behind. Then hand the result to a second writer whose
+signer has NO NIP-44, holding both feeds, and have its user choose private. It
+must reach private. A writer that cannot decrypt reads any ciphertext as a half
+another app owns, and refuses to change the mode on top of it; that refusal is
+right, and an empty half that encodes to ciphertext makes it fire on nothing.
+The second half of this vector is the one that matters — a byte-count
+assertion alone does not say what the leftover costs.
+
+**31. A carried claim retires with the entry it names.** Three parts, and the
+third is what keeps the first two from becoming an over-correction. Take an
+entry back out of the inactive half — unfavorite one your baseline claims
+there — and pin that the claim goes with it; then have a second writer put
+that entry back into that half and pin that your next cycle leaves it alone.
+Repeat on a whole-list move, where the half is emptied outright rather than
+edited entry by entry: same rule, same second writer, same outcome. Then pin
+the opposite: a second writer removes an entry from the inactive half that you
+STILL HOLD, and the claim must survive, because that claim is what stops you
+re-adding what somebody else deleted. A test that retires on absence alone
+passes the first two and fails this one.
 
 ## Open questions / not yet resolved
 
