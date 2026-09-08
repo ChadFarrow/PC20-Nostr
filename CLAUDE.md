@@ -176,10 +176,22 @@ today, at those two SHAs. The sentence to avoid is still the general one.
 
 `catalog/comparisons/favorites-10333.md` tracks where the two currently agree
 and differ, read at a recorded commit. Update it rather than restating a
-divergence here — and re-read both apps first, because that page is now stale:
-it is read at `boostmebitch@1f26ba0` and `stablekraft-app@db2eb22f`, and both
-have moved (`edffe3c`, `fbb6612a`) with hundreds of lines changed under
-`lib/nostr/` in each.
+divergence here.
+
+**Its code claims are current; its conclusions are not.** Checked 2026-09-07:
+the page reads `boostmebitch@76e1fe6` and `stablekraft-app@95d0a2fa`, and the
+three files it actually reads — `lib/nostr/favorites-list.ts`,
+`lib/nostr/favorites-single-list.ts`, `lib/nostr/favorites-privacy.ts` — are
+byte-identical at those SHAs and at today's `origin/HEAD` (`c483ae8`,
+`4722dd8`), despite 57 and 17 commits landing in between. An earlier revision
+of this file named two different SHAs and said hundreds of lines had moved
+under `lib/nostr/`; both claims were wrong, which is what a SHA in an entry is
+for.
+
+What HAS moved is the spec beneath them. Neither app has adopted the feed guid
+on the item, the banded runs, or the reframed rule 5, so the page compares two
+codebases against a document they now trail. Re-read before trusting a
+conclusion, not because the code drifted but because the standard did.
 
 ## The implementation repos are read-only
 
@@ -334,8 +346,24 @@ and read the other one.
   load-bearing — read before every publish, never publish on a read you
   don't trust, keep a private per-device baseline to tell a foreign entry
   from one you removed, carry what you can't parse — `content` included, not
-  only tags — and publish only when the bytes change. A change that weakens
-  any of those needs to say which data gets destroyed instead.
+  only tags — and publish only when the bytes change, NORMALISED first (see
+  below). A change that weakens any of those needs to say which data gets
+  destroyed instead.
+- **"Only when the bytes change" means the REFRAMED bytes.** Compare your
+  merged array against the read put back through your own framing —
+  regenerated `alt`, its own `visibility`, regenerated trailing `k` — never
+  against the array as it arrived. Two conforming events differ: a reader must
+  accept a `k` beside every `i` while a writer must emit one `k` per distinct
+  kind at the end, and the positions of `alt` and `visibility` and the order of
+  the `k` tags are free besides. Compare raw and every load of a list the other
+  app wrote reports a change on a list nothing changed about; if that app
+  compares raw too, neither ever stops — the failure rule 5 exists to prevent,
+  reached by obeying its first sentence. Normalise exactly what carries no
+  meaning: `medium` stays positional, band order is prescribed so both writers
+  reach it anyway, and an unparseable entry is carried untouched, so a real
+  difference still shows as one. The document said the wrong thing here for its
+  whole life and the reference was right the whole time; that drift is why the
+  comparison site now carries a comment naming the case.
 - **`content` is carried, not only tags.** §4 covers the whole event. A
   writer that has never heard of a private half still republishes the bytes
   it read, verbatim — it has nothing to parse, only bytes to put back.
