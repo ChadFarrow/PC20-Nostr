@@ -103,9 +103,9 @@ a favorite, publish, and it must come back byte-identical. Pin the inverse in
 the same breath — a list built from scratch is legitimately empty — or a
 writer that simply never touches the field passes on a technicality.
 
-Both existing implementations passed every vector above it while blanking
-`content` on the first favorite anyone toggled, because none of them looked
-at that field. That is what makes this one worth stating separately.
+A writer can pass every vector above this one while blanking `content` on the
+first favorite anyone toggles, because none of them look at that field. That
+is what makes this one worth stating separately.
 
 **13. Going private takes the whole list, and coming back does not.** Read a
 list holding entries you did not write and cannot resolve, choose Private,
@@ -124,12 +124,12 @@ where the ones in the half you do not publish into are not yours. Run a full
 cycle, feed the baseline it recorded back in, and run a second. The foreign
 entries must still be there after the second. One cycle cannot see this: the
 first publish emits correct bytes and only the baseline beside them is wrong,
-so every single-cycle vector above passes over it. One implementation shipped
-it in both directions at once: the same writer, in public mode, published an
-empty `content` over a private half it was carrying, and in private mode
-published an empty tag list over a public one. Whichever half a writer does
-not feed is the half at risk, so a writer with only one half is not exempt —
-it is simply not yet in a position to notice.
+so every single-cycle vector above passes over it. It fails in both directions
+from one mistake: the same writer, in public mode, publishes an empty
+`content` over a private half it was carrying, and in private mode publishes
+an empty tag list over a public one. Whichever half a writer does not feed is
+the half at risk, so a writer with only one half is not exempt — it is simply
+not yet in a position to notice.
 
 Pin the control in the same fixture, or a writer that never claims anything
 passes: a list adopted off the relay must still enter the baseline for the

@@ -11,7 +11,10 @@ optional. ([why](notes/pc20-favorites-rationale.md#blind-publish))
 
 This document is rules. The reasons, the measurements and the history are in
 [the rationale](notes/pc20-favorites-rationale.md), and every rule links its
-own with a `(why)`. The 31 test vectors are stated in
+own with a `(why)`. Every **MUST** here is a claim about bytes, so another app
+can check it. The few **SHOULD**s are about what the user sees — no other app
+can observe those, and they still decide whether somebody trusts their own
+library. The 31 test vectors are stated in
 [conformance/vectors.md](conformance/vectors.md) and are code you can run
 against your own merge:
 
@@ -198,14 +201,16 @@ keeping a private list.
   is a behavior, not a declaration. (Vector 16)
 - **Otherwise infer the mode from the halves:** entries in exactly one half
   means that half is the mode. **Entries in both halves, or a `content` you
-  cannot read: ask the user and publish nothing until they answer.** A default
-  there discloses entries somebody already hid, and an `i` tag cannot be taken
-  back. ([why](notes/pc20-favorites-rationale.md#no-safe-default))
+  cannot read: publish nothing.** A default there discloses entries somebody
+  already hid, and an `i` tag cannot be taken back. You SHOULD ask the user;
+  what you must not do is guess.
+  ([why](notes/pc20-favorites-rationale.md#no-safe-default))
 - **The tag is written on a user's choice and carried thereafter.** A writer's
   standing setting never stamps it onto a list that has none.
 - **Changing the mode requires being able to read BOTH halves.** An app whose
-  signer has no NIP-44 carries `content` verbatim, does not restate the mode,
-  and **says on screen that it cannot open the other half.** (Vector 17)
+  signer has no NIP-44 carries `content` verbatim and does not restate the
+  mode. It SHOULD say on screen that it cannot open the other half.
+  (Vector 17)
 - **A writer that can read both, and finds the tag and the entries
   disagreeing, converges toward the tag** — one copy of each entry, other half
   emptied. An entry that was in both halves is emitted **once**.
@@ -235,8 +240,8 @@ app's screen. ([why](notes/pc20-favorites-rationale.md#private-half-sequencing))
 - **A half you cannot read is a degraded read, never an empty one.** That
   covers a decrypt that failed and a plaintext that is not a tag array: `{}`,
   a string, and an array holding a non-string all decode to null, while `[]`
-  is a genuinely empty list. Carry `content` byte for byte, publish nothing
-  derived from it, and say so on screen. (Vector 23)
+  is a genuinely empty list. Carry `content` byte for byte and publish nothing
+  derived from it; you SHOULD say so on screen. (Vector 23)
 - **No `?` in the plaintext** — write its six-character JSON escape,
   `\u003f`. A NIP-55 signer splits the decoded URI on `?`, and the truncated
   request comes back as "signer not installed". (Vector 22)
@@ -255,10 +260,9 @@ fold your changes into it, and write everything else back untouched.**
 
 ### 1. Read first, and never publish on a read you do not trust
 
-Do not expose a "publish my favorites" entry point at all — make the read part
-of the same call, so no caller can skip it. A relay query returning nothing
-means either "nobody has it" or "nothing answered in time", and acting on the
-second republishes the whole list as empty. Count relays yourself:
+A relay query returning nothing means either "nobody has it" or "nothing
+answered in time", and acting on the second republishes the whole list as
+empty. Count relays yourself:
 
 ```
 trustworthy = event_in_hand OR (reached > 0 AND answered == reached)
@@ -267,7 +271,7 @@ trustworthy = event_in_hand OR (reached > 0 AND answered == reached)
 `reached` excludes relays that never connected, or one dead default degrades
 every read forever. **An aggregate EOSE from a relay library is not proof:**
 libraries fold failed connections into the same callback and synthesize EOSE on
-a timer. **Withholding a publish must be visible in the UI** — it renders
+a timer. A withheld publish SHOULD be visible in the UI: it renders
 identically to "your favorites are gone". (Vector 2)
 ([why](notes/pc20-favorites-rationale.md#trustworthy-read))
 
@@ -330,20 +334,18 @@ back on the baseline alone does not keep a removal, it **publishes** it.
 An identifier kind outside your table, a tag type you have no meaning for, a
 `k` naming a kind you never emit, a malformed guid — carry the **whole tag**,
 every element, not a value re-rendered from your own model. A writer that
-rebuilds entries as `["i", id]` type-checks, renders correctly, and strips
-every item of the guid that makes it resolvable; position 3 is undefined and is
-exactly where a newer writer puts the next thing. (Vector 27) An unparseable
+rebuilds entries as `["i", id]` strips every item of the guid that makes it
+resolvable, and position 3 is undefined — exactly where a newer writer puts
+the next thing. (Vector 27) An unparseable
 entry must not end a legacy run. (Vector 4)
 ([why](notes/pc20-favorites-rationale.md#carry-rule))
 
 > **`content` is carried too. Republish `event.content` byte for byte, unless
 > you encrypted the bytes you are replacing it with.**
 
-Do not give that value a default: a default is how a `""` gets written back by
-habit, and one caller that omits the argument compiles, type-checks and deletes
-another app's data. Capture it on the read, or you have nothing to put back
-even in principle. **Carrying is mandatory; using `content` is optional** —
-that combination is the only one that does not destroy data. (Vector 12)
+**Carrying is mandatory; using `content` is optional** — that combination is
+the only one that does not destroy data. An `event.content` you never read is
+one you cannot put back. (Vector 12)
 
 ### 5. Publish only when the bytes change
 
