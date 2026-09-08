@@ -1,7 +1,7 @@
 /**
  * AUTHORED. This file has never served traffic.
  *
- * It exists so `../vectors.test.mjs` has something to run against — 28
+ * It exists so `../vectors.test.mjs` has something to run against — 29
  * assertions nobody has watched go green are prose in a new costume. It is a
  * worked example of the rules in `../../pc20-favorites.md`, not a
  * recommendation and not an extraction. If you want code a real site runs,
@@ -465,17 +465,27 @@ const itemTag = (itemId, feedGuid) =>
  * names it — that is another app's removal, and re-adding it is a
  * resurrection loop.
  *
- * `adoptAll` is the public → private whole-list move: every entry travels,
- * including ones this device neither holds nor claims (Open questions, "The
- * choice belongs to the LIST"). It only ever reduces exposure.
+ * `append: false` turns that second pass off, and is what the whole-list move
+ * between halves needs — the move reads the half it is emptying, where an entry
+ * this device holds is already on the list and appending it again would open a
+ * second `medium` run for it. The three rows above still run: `append` decides
+ * what is ADDED, never what is kept.
+ *
+ * There used to be an `adoptAll` flag here instead, and it was the wrong shape.
+ * Row 2 already carries an entry this device neither holds nor claims, so the
+ * flag's only effect was to suppress row 3 — every removal, silently, on both
+ * move branches. The moving side never wanted an exemption from rule 3; it
+ * wanted pass 2 off, which it got by being handed `[]` for `localGroups`, at
+ * the cost of the `held` set row 3 needs to tell a removal from another app's
+ * entry.
  *
  * There is no feed-survival rule any more. A feed entry held nothing up, so
  * dropping one never took another app's items with it.
  */
-function mergeHalf(readTags, localGroups, baselineIds, { adoptAll = false } = {}) {
+function mergeHalf(readTags, localGroups, baselineIds, { append = true } = {}) {
   const held = keysOf(localGroups);
   const claimed = new Set(baselineIds ?? []);
-  const keep = (key) => adoptAll || held.has(key) || !claimed.has(key);
+  const keep = (key) => held.has(key) || !claimed.has(key);
 
   const parsed = parseTags(readTags);
   const decision = new Map(); // tag index -> true/false
@@ -556,7 +566,11 @@ function mergeHalf(readTags, localGroups, baselineIds, { adoptAll = false } = {}
     out.splice(lastOfRun + 1, 0, ...tags);
   };
 
-  for (const g of localGroups ?? []) {
+  // `append: false` skips this pass and only this pass. The caller is merging
+  // the half it is about to empty, where an entry we hold is already on the
+  // list; what we hold is appended once, by the merge that owns the half it is
+  // moving INTO.
+  for (const g of append ? (localGroups ?? []) : []) {
     const kind = kindOf(g.id);
     const standalone = isStandaloneKind(kind);
     const feed = standalone ? null : feedGuidOf(g.id);
@@ -875,17 +889,26 @@ export function plan({
   } else if (goingPrivate) {
     // public → private takes the WHOLE list, ours and theirs. It only ever
     // reduces exposure, and it is reversible by any app that can decrypt.
-    // No local state on the moving side: `moving` is what the OTHER half
-    // holds. Merging `local` into an empty public half here appended our own
-    // groups a second time, under a second `medium` run — a byte change on
-    // every private-mode cycle, so the list never reached a fixed point.
-    const moving = mergeHalf(inactiveReadTags, [], inactiveBaseline, {
-      adoptAll: true,
+    // Nothing needs an exemption from rule 3 to make that happen: another
+    // app's entry is not in OUR baseline for the half it is leaving, so row 2
+    // carries it, and it is not in our baseline for the half it is entering
+    // either, so row 2 carries it again.
+    //
+    // `append: false`, not `[]` for the local state. Pass 2 is what had to go —
+    // merging `local` into an empty public half appended our own groups a
+    // second time, under a second `medium` run, a byte change on every
+    // private-mode cycle, so the list never reached a fixed point. Handing this
+    // merge `[]` turned pass 2 off and took the `held` set with it, and row 3
+    // needs that set: without it every entry looks unheld, so an entry we
+    // claim here and no longer hold — an unfavorite, made in this app — rode
+    // the move into the private half instead of being dropped. There is no
+    // second chance at it either. Our new private baseline cannot claim what
+    // we do not hold, so no later cycle can remove it. Vector 29.
+    const moving = mergeHalf(inactiveReadTags, local, inactiveBaseline, {
+      append: false,
     });
     mergedActive = dedupeEntries(
-      mergeHalf([...activeReadTags, ...moving], local, activeBaseline, {
-        adoptAll: true,
-      }),
+      mergeHalf([...activeReadTags, ...moving], local, activeBaseline),
     );
     mergedInactive = [];
   } else if (licensedPublic && inactiveReadTags.some((t) => t[0] === 'i')) {
@@ -895,16 +918,16 @@ export function plan({
     // written — or the user is choosing it right now, in an app that can see
     // everything it is about to disclose. Either way the whole list moves and
     // each entry is emitted once.
-    // No local state on the moving side: `moving` is what the OTHER half
+    // `append: false` on the moving side: `moving` is what the OTHER half
     // holds, not our own favorites a second time. The outer merge appends
-    // those once, where they belong.
-    const moving = mergeHalf(inactiveReadTags, [], inactiveBaseline, {
-      adoptAll: true,
+    // those once, where they belong. Rule 3 runs on both merges — see the
+    // going-private branch above for what suppressing it cost, and vector 29
+    // for the case in this direction.
+    const moving = mergeHalf(inactiveReadTags, local, inactiveBaseline, {
+      append: false,
     });
     mergedActive = dedupeEntries(
-      mergeHalf([...activeReadTags, ...moving], local, activeBaseline, {
-        adoptAll: true,
-      }),
+      mergeHalf([...activeReadTags, ...moving], local, activeBaseline),
     );
     mergedInactive = [];
   } else {
