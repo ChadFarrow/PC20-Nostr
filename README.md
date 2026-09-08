@@ -30,9 +30,17 @@ taken from a site. Both say so in their first line.
 
 ## The specs
 
-Both are proposals with real failure modes behind them, not settled practice.
-Both use self-assigned kinds — check the registry for a collision before you
-depend on either.
+Four documents at the root discuss the favorites format, and **only the two
+under Normative define anything an implementation has to match.** The other two
+are background: they record how a decision was reached and what each app has to
+change, and an implementation written against them will not interoperate. If
+you are implementing, read the normative pair and stop there.
+
+Both normative specs are proposals with real failure modes behind them, not
+settled practice. Both use self-assigned kinds — check the registry for a
+collision before you depend on either.
+
+### Normative — implement against these
 
 **[pc20-favorites.md](pc20-favorites.md)** syncs a user's favorites between
 apps over Nostr, as one replaceable event at kind 10333. Two apps ship it.
@@ -109,6 +117,11 @@ earlier of the two by a wide margin. Its privacy section is the part to
 read first: per-track receipts under a listener's own key are a public
 timestamped listening history, and "share my boosts" is not consent for it.
 
+### Background — not specs, do not implement against these
+
+Neither defines wire format. They exist so the normative pair can stay short:
+the reasoning lives here rather than inside the spec.
+
 **[pc20-favorites-vs-list-feeds.md](pc20-favorites-vs-list-feeds.md)** puts the
 favorites spec beside the format Podcasting 2.0 already has for the same
 payload: a `musicL` feed of `<podcast:remoteItem>`s. Spec against spec, no
@@ -118,7 +131,8 @@ proposal, and it prices what each side pays for its choice.
 is what the two shipping apps each have to change so an item entry carries the
 guid of its feed. Both rebuild `i` tags from their own model today, which
 strips that guid — and an item guid is not an address on its own, so the first
-stage is work in both repos and it comes before either may write one.
+stage is work in both repos and it comes before either may write one. It is a
+work plan for two named repos, not a rule any third app has to follow.
 
 ## Working on this repo
 
