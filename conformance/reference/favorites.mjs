@@ -942,6 +942,17 @@ export function plan({
       // Keys, not identifiers. An item is the pair, so the same item guid
       // under another feed guid is a different entry and is NOT ours to
       // reclaim.
+      //
+      // AND WE MUST STILL HOLD IT. `returning` is a claim, not a favorite: an
+      // entry our baseline names and the user has since unfavorited is rule
+      // 3's third row, and it fires while claiming back like anywhere else.
+      // Skip the test and the removal is not merely kept, it is DISCLOSED —
+      // published as an `i` tag relays index, by the one branch that exists
+      // because a disclosure cannot be taken back. Nor is there a second
+      // chance at it: `activeClaims` below cannot claim what we do not hold,
+      // so the baseline we land still names it in the half it just left, and
+      // no later cycle can drop it. Vector 29, fourth case.
+      const heldHere = keysOf(local);
       const inactiveKeyAt = new Map();
       for (const e of parseTags(inactiveReadTags).entries) {
         inactiveKeyAt.set(e.index, e.key);
@@ -961,6 +972,7 @@ export function plan({
         (t, i) =>
           t[0] === 'i' &&
           returning.has(inactiveKeyAt.get(i)) &&
+          heldHere.has(inactiveKeyAt.get(i)) &&
           !already.has(inactiveKeyAt.get(i)),
       );
       mergedActive = mergeHalf(

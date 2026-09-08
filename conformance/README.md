@@ -158,6 +158,7 @@ breaking the reference on purpose and confirming the right one fails:
 | Write a feed guid onto an artist entry | **28** |
 | Adopt every entry read on the outer merge of a whole-list move | **29** |
 | Adopt every entry read on the merge of the half being moved from | **29** |
+| Claim an entry back out of the other half on your baseline alone | **29** |
 
 The first two rows are not hypothetical. They are the two defects that reached
 production on 2026-08-25, and they are why this directory exists.

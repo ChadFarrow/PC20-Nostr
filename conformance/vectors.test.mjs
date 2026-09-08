@@ -1849,4 +1849,50 @@ test('29. A whole-list move is not an exemption from rule 3', () => {
     'the removed entry returned, or our own entry was dropped, on the second cycle',
   );
   assert.equal(again.publish, null, 'the move is not idempotent: it republishes forever');
+
+  // 4. The claim-back, which is the third path that moves entries between
+  // halves and the only one where getting this wrong DISCLOSES the removal.
+  // No `visibility` tag and both halves populated, so the list cannot state
+  // its own mode and this writer is not licensed to move anyone else's
+  // entries: it takes back only what its own baseline claims. A claim is not
+  // a favorite, though. FEED_B is claimed in the private half and unfavorited
+  // here, so it is a removal, and taking it back publishes it as an `i` tag
+  // relays index — on the one branch that exists because a disclosure cannot
+  // be undone.
+  const back = plan({
+    read: ev(
+      [ALT, ['medium', 'podcast'], ['i', FEED_A], K_FEED],
+      encodePrivate([['medium', 'podcast'], ['i', FEED_B]]),
+    ),
+    local,
+    baseline: base([FEED_A], [FEED_B]),
+    mode: 'public',
+  });
+  assert.ok(back.publish, 'the claim-back is a change and must publish');
+  assert.deepEqual(
+    ids(back.publish.tags),
+    [FEED_A],
+    'an entry we claimed and no longer hold was claimed back into the PUBLIC half',
+  );
+  assert.deepEqual(
+    ids(decodePrivate(back.publish.content)),
+    [],
+    'the removed entry stayed in the private half',
+  );
+
+  // And the second cycle again, for the same reason as above: the baseline we
+  // land cannot claim what we do not hold, so a removal that survives this
+  // path survives every later one too.
+  const backAgain = plan({
+    read: back.publish,
+    local: back.holds ?? local,
+    baseline: back.baselineIfLanded,
+    mode: 'public',
+  });
+  assert.deepEqual(
+    ids((backAgain.publish ?? back.publish).tags),
+    [FEED_A],
+    'the removed entry returned, or ours was dropped, on the second cycle',
+  );
+  assert.equal(backAgain.publish, null, 'the claim-back never reaches a fixed point');
 });

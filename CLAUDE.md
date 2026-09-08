@@ -355,10 +355,15 @@ and read the other one.
   device claims and no longer holds, which is a removal the user made. That is
   not a removal delayed by a cycle. The baseline written beside the move cannot
   claim an entry the device does not hold, so nothing later can drop it, and
-  the favorite comes back on every device for good. The reference shipped this
-  at both merge sites and the flag doing it had no other effect: the ordinary
-  rule already carries an entry you neither hold nor claim, so "adopt
-  everything" only ever meant "suppress removals". Vector 29, issue #37.
+  the favorite comes back on every device for good. THREE passes move entries
+  between halves and the rule is the same in all three: the two whole-list
+  moves, where the flag doing it had no other effect — the ordinary rule
+  already carries an entry you neither hold nor claim, so "adopt everything"
+  only ever meant "suppress removals" — and the claim-back, where an app takes
+  back what its own baseline names. A claim is not a favorite. The claim-back
+  is the one that is worse than a stale entry: it PUBLISHES the removal, as an
+  `i` tag relays index, on the one path that exists because a disclosure cannot
+  be undone. Vector 29, issues #37 and #39.
 - **"Only when the bytes change" means the REFRAMED bytes.** Compare your
   merged array against the read put back through your own framing —
   regenerated `alt`, its own `visibility`, regenerated trailing `k` — never
