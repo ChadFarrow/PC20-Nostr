@@ -1,6 +1,6 @@
 # Conformance suite
 
-The 28 test vectors of [`../pc20-favorites.md`](../pc20-favorites.md), as code
+The 29 test vectors of [`../pc20-favorites.md`](../pc20-favorites.md), as code
 you can run against your own implementation.
 
 The spec states them as behaviors "so they can be written against any test
@@ -106,6 +106,7 @@ Numbering matches the spec exactly.
 | 26 | Unfavoriting a feed taking its saved item with it, or deleting a favorite another app made |
 | 27 | Entries rebuilt as `['i', id]`, stripping the feed guid that makes an item resolvable at all |
 | 28 | An artist entry given a feed guid, or made an item of the entry above it |
+| 29 | A removal suspended while the list changes mode — lost for one cycle, then for good |
 
 ## The suite is mutation-tested
 
@@ -155,6 +156,8 @@ breaking the reference on purpose and confirming the right one fails:
 | Write a feed entry for a feed you hold only to supply a feed guid | **25** |
 | Let an artist entry be an item of the entry above it | **28** |
 | Write a feed guid onto an artist entry | **28** |
+| Adopt every entry read on the outer merge of a whole-list move | **29** |
+| Adopt every entry read on the merge of the half being moved from | **29** |
 
 The first two rows are not hypothetical. They are the two defects that reached
 production on 2026-08-25, and they are why this directory exists.
@@ -162,7 +165,7 @@ production on 2026-08-25, and they are why this directory exists.
 ## `reference/`
 
 An **authored** implementation — it has never served traffic. It exists so the
-28 assertions have something to run against, and as a worked example to read
+29 assertions have something to run against, and as a worked example to read
 beside the spec. It is not a recommendation and not an extraction.
 
 For code a real site runs, see

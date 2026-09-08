@@ -36,11 +36,11 @@ A **reference repo with four parts**, none of which is an application.
    `claude/new-relay-type-draft-6osmum`. Read its privacy section first.
    Per-track receipts under a listener's own key are a public timestamped
    listening history, and "share my boosts" is not consent for that.
-3. **The conformance suite.** `conformance/` — the favorites spec's 28 test
+3. **The conformance suite.** `conformance/` — the favorites spec's 29 test
    vectors, executable. `node --test conformance/vectors.test.mjs` (name the
    file, not the directory: `node --test conformance/` fails to resolve on
    Node 22). Zero dependencies, no build step. An implementer points the
-   adapter at their own merge and runs the same 28. The reference under
+   adapter at their own merge and runs the same 29. The reference under
    `conformance/reference/` is **authored** — it has never served traffic, and
    it is there so the assertions have something to run against.
 4. **The catalog.** `catalog/` — working features from ChadFarrow's
@@ -349,6 +349,16 @@ and read the other one.
   only tags — and publish only when the bytes change, NORMALISED first (see
   below). A change that weakens any of those needs to say which data gets
   destroyed instead.
+- **A move between halves runs rule 3 like any other cycle.** The pass that
+  reads one half and emits it into the other looks like a copy, and a writer
+  that codes it as one keeps every entry it reads — including the one this
+  device claims and no longer holds, which is a removal the user made. That is
+  not a removal delayed by a cycle. The baseline written beside the move cannot
+  claim an entry the device does not hold, so nothing later can drop it, and
+  the favorite comes back on every device for good. The reference shipped this
+  at both merge sites and the flag doing it had no other effect: the ordinary
+  rule already carries an entry you neither hold nor claim, so "adopt
+  everything" only ever meant "suppress removals". Vector 29, issue #37.
 - **"Only when the bytes change" means the REFRAMED bytes.** Compare your
   merged array against the read put back through your own framing —
   regenerated `alt`, its own `visibility`, regenerated trailing `k` — never
@@ -395,7 +405,7 @@ and read the other one.
   implementer learns the expensive way.
 - **A vector that no mutation can kill is not a vector.** Before adding one,
   break the reference on purpose and confirm yours is what fails.
-  `conformance/README.md` carries the matrix; every one of the 28 is killed by
+  `conformance/README.md` carries the matrix; every one of the 29 is killed by
   at least one mutation, and the first two rows of that table are the defects
   that actually reached production on 2026-08-25.
 - **The feed-guid migration has shipped data behind it, unlike the marker.**

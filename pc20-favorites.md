@@ -700,7 +700,7 @@ baseline names them**, in which case another app removed them and re-adding
 is a resurrection loop: the entry returns on every load, forever, on every
 device.
 
-Three consequences worth stating outright, because each is a way to delete
+Four consequences worth stating outright, because each is a way to delete
 someone else's data while looking correct:
 
 - **Run the three rows against every entry, feeds and items alike.** They are
@@ -723,6 +723,18 @@ someone else's data while looking correct:
   that, because the loop needs two apps imposing DIFFERENT orders. Getting it
   wrong now costs churn and contiguity; it used to cost an item its feed.
   ([Vector 18](#test-vectors).)
+- **Moving the list between halves is a merge, not a copy.** [Changing the
+  mode](#the-list-is-public-or-private-and-the-event-says-which) reads one half
+  and emits it into the other, and it is tempting to write that pass as "keep
+  everything, it is only changing places". Do not: the three rows run on both
+  halves, on that cycle like any other. An entry your baseline for either half
+  claims and you no longer hold is a removal the user made, and a move that
+  keeps it does not delay that removal by a cycle — it ends it. The baseline
+  you write next cannot claim an entry you do not hold, so nothing on any
+  later cycle can drop it, and the favorite the user deleted is back for good
+  on every device. The same slip on the half you are moving INTO makes an
+  unfavorite on a private list publish nothing at all, because the merged bytes
+  match the read and rule 5 stops there. ([Vector 29](#test-vectors).)
 
 ### 4. Carry what you can't read
 
@@ -1155,6 +1167,19 @@ an artist to belong to. Everything to here is mandatory for every app, whether
 or not it offers artist favorites. The last part is not: origination, `k` tag
 included, is what an app that DOES offer them owes — without the `k`, `#k`
 discovery misses every artist favorite it ever publishes.
+
+**29. A removal survives a change of mode.** Unfavorite an entry your baseline
+claims, and pin that it goes in all three places a mode change puts it. On a
+list already private: hold one of two private entries, publish, and the other
+is dropped — a merge carrying "it is only changing places" logic on this path
+publishes NOTHING here, because the bytes it builds match the ones it read.
+On the half being moved INTO: a licensed private → public move with the removed
+entry in the public half, which must not come back on the way past. And on the
+half being moved FROM: going private with the removed entry in the public half,
+which must not ride the move across. Run the last one for TWO cycles. The
+baseline written by the first cannot claim an entry the device does not hold,
+so a removal that survives the move survives every cycle after it as well —
+one cycle shows a stale entry, two show that nothing can ever remove it.
 
 ## Open questions / not yet resolved
 
