@@ -91,7 +91,7 @@ real ones". The margin is kept small on purpose, because
 That third one has a concrete consequence for kind 10333. The favorites event
 is plain-replaceable and carries no `d` tag, so an *addressable* event that
 happens to share kind 10333 — which is possible precisely because the kind is
-[self-assigned, not NIP-allocated](../../pc20-favorites.md#core-architecture)
+[self-assigned, not NIP-allocated](../../pc20-favorites.md#the-event)
 — passes stablekraft's intake and can be laundered into the user's favorites.
 boostmebitch passes `dTag: ''` explicitly, and `''` matches an absent `d`.
 

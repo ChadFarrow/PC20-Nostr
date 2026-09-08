@@ -1,10 +1,13 @@
 # Conformance suite
 
-The 31 test vectors of [`../pc20-favorites.md`](../pc20-favorites.md), as code
-you can run against your own implementation.
+The 31 test vectors that pin
+[`../pc20-favorites.md`](../pc20-favorites.md), as code you can run against
+your own implementation. They are stated as behaviors in
+[`vectors.md`](vectors.md) beside this file.
 
-The spec states them as behaviors "so they can be written against any test
-runner". Until now that meant every implementer hand-translated them and hoped.
+Behaviors rather than fixtures means they can be written against any test
+runner. Until this directory existed that meant every implementer
+hand-translated them and hoped.
 Both existing apps found their defects by shipping instead — one of them
 records fifteen, and notes that the worst passed every check the other fourteen
 added.
@@ -74,7 +77,8 @@ The vectors are the spec; the shim is yours.
 
 ## What each vector catches
 
-Numbering matches the spec exactly.
+One line each. The full statement of every vector is in
+[`vectors.md`](vectors.md), and the numbering matches it exactly.
 
 | # | What it catches |
 |---|---|
@@ -189,6 +193,6 @@ ciphertext every time. Compare **decrypted arrays**, never ciphertext, or rule
 
 ## Adding a vector
 
-A new normative rule in the spec needs a vector, and a new vector needs a case
-here. That is what stops the gap this directory closed from reopening the next
+A new normative rule in the spec needs a numbered entry in
+[`vectors.md`](vectors.md), and that entry needs a case here. That is what stops the gap this directory closed from reopening the next
 time an app discovers a defect the hard way.

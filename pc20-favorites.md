@@ -1,48 +1,34 @@
 # Cross-app Podcast Favorites on Nostr
 
-A user's favorites should follow them between apps. This document specifies
-how a Podcasting 2.0 app stores a user's podcast and music favorites on
-Nostr, so that favoriting something in one app makes it favorited in every
-other app the same person signs into: one flat list, one event.
+Favorite a show or a track in one Podcasting 2.0 app, and it is favorited in
+every other app you sign into. One flat list, one event.
 
-**Any app may read and write it.** There is no primary writer, no ownership
-and no out-of-band coordination — a user signed into three apps across two
-devices has five writers, all equal, none aware of the others. That is the
-point of the format, and it is also the source of every rule in
-[Merging](#merging) below.
+**Any app may read and write it, and the event is replaceable.** So a writer
+that publishes without reading first does not lose a race — it deletes every
+entry the other apps added, silently, on someone else's device, with no undo.
+[Merging](#merging) is what makes wholesale replacement safe, and it is not
+optional. ([why](notes/pc20-favorites-rationale.md#blind-publish))
 
-Those rules are not optional. The event is replaceable, so a writer that
-publishes what it holds without reading first does not merely lose a race: it
-deletes every entry the other four writers added, silently, on someone else's
-device, with no undo and nothing on screen anywhere. **A blind publish is
-data loss, not a conflict.**
+This document is rules. The reasons, the measurements and the history are in
+[the rationale](notes/pc20-favorites-rationale.md), and every rule links its
+own with a `(why)`. The 31 test vectors are stated in
+[conformance/vectors.md](conformance/vectors.md) and are code you can run
+against your own merge:
 
-## Core Architecture
+```bash
+node --test conformance/vectors.test.mjs
+```
 
-A single custom kind **`10333`** ("PC 2.0 Favorites") — a plain
-(non-`d`-tagged) replaceable event, so there is exactly one per pubkey.
-Republishing the full tag list replaces the previous version wholesale; that
-replacement *is* the sync mechanism.
+## The event
 
-This is a dedicated kind rather than NIP-78 app-data, chosen to avoid
-ambiguity with generic app-data or bookmark-list consumers that might render
-or interpret kind 30078 differently. As of this writing, kind `10333` is
-unclaimed in the [Nostr kind registry](https://github.com/nostr-protocol/nips/blob/master/README.md),
-but it is self-assigned, not registered via any NIP — confirm there's still
-no collision before depending on it in production, and treat this doc as the
-canonical claim on it.
+Kind **`10333`**, a plain (non-`d`-tagged) replaceable event: exactly one per
+pubkey. Republishing the full tag list replaces the previous version wholesale,
+and that replacement *is* the sync mechanism.
 
-Self-assignment is not free, and the cost is worth naming: a kind collision
-is worse than a `d`-tag collision, because relay filters are kind-scoped, so
-a later NIP landing on 10333 would put two unrelated event types into every
-query either app makes.
-
-## Data Structure
-
-Entries are [NIP-73](https://github.com/nostr-protocol/nips/blob/master/73.md)
-identifiers, one `i` tag each, grouped by medium to avoid repeating it per
-entry. `k` tags name the identifier *kinds* the event contains — **one per
-distinct kind, at the end**, not one per entry.
+`10333` is **self-assigned, not NIP-allocated.** Relay filters are kind-scoped,
+so a later NIP landing on it would put two unrelated event types into every
+query either app makes. Confirm there is still no collision.
+([why](notes/pc20-favorites-rationale.md#kind-choice))
 
 ```json
 {
@@ -72,642 +58,233 @@ distinct kind, at the end**, not one per entry.
 }
 ```
 
-Six favorites, six `i` tags. The user favorited one podcast, saved one episode
-of a podcast they did not favorite, favorited one album, saved two tracks from
-an album they did not favorite, and favorited one artist. You can count their
-choices by counting the lines.
+Six favorites, six `i` tags: one podcast, one episode of a podcast they do not
+follow, one artist, one album, and two tracks from an album they do not follow.
+You can count the user's choices by counting the lines.
 
-`content` is empty **on a list with no private entries**, which is what this
-example shows. It is not a constant: it is the one free slot in the event, and
-[rule 4](#4-carry-what-you-cant-read) requires you to republish whatever you
-found there byte for byte. Copying the `""` above into a writer is how another
-app's data gets deleted.
+`content` is empty here **only because this list has no private entries.** It
+is not a constant — see [rule 4](#4-carry-what-you-cannot-read).
 
-### One favorite, one tag
+## Entries
 
-Every `i` tag on this list is a thing the user chose. Nothing is here for
-structural reasons, so a reader never has to work out whether an entry is a
-favorite or scaffolding — it is on the list, so it is a favorite.
+One `i` tag per favorite, holding
+[NIP-73](https://github.com/nostr-protocol/nips/blob/master/73.md) identifiers
+with their prefixes. Nothing is on the list for structural reasons: if it is
+there, the user chose it.
 
-An `i` tag is `["i", feedId, itemId]`, and this document counts those
-positions from zero: the tag name is at position 0, the feed's NIP-73
-identifier at **position 1**, and on an item entry the item's NIP-73
-identifier at **position 2**. Both positions hold a full identifier, prefix
-included. Nothing is defined past position 2.
-
-- **A feed entry is `["i", "podcast:guid:<feedGuid>"]`.** Two elements. The
-  user favorited that feed. It says nothing about any item.
-- **An item entry is
-  `["i", "podcast:guid:<feedGuid>", "podcast:item:guid:<itemGuid>"]`.**
-  Three elements. Position 1 is the FEED, exactly as on a feed entry; position
-  2 is the item.
-- **An artist entry is `["i", "podcast:publisher:guid:<guid>"]`.** Two
-  elements. It belongs to no feed. See [An artist is a favorite that belongs to
-  no feed](#an-artist-is-a-favorite-that-belongs-to-no-feed).
-
-A feed is a feed whatever its medium: an album is a feed and a track is an item
-in it, so music needs no third kind of guid.
-
-**This is `<podcast:remoteItem>`, restated as one tag.** A favorite is a remote
-item, and the [namespace](https://podcasting2.org/docs/podcast-namespace/tags/remote-item)
-has already answered both questions this layout asks:
-
-> **feedGuid** (required): The `<podcast:guid>` of the remote feed being
-> pointed to.
->
-> **itemGuid** (optional): If this remote item element is intended to point to
-> an `<item>` in the remote feed, this attribute should contain the value of
-> the `<guid>` of that `<item>`.
-
-The required half names the feed; the optional half narrows it to one item. So
-the order is the namespace's order, and **the element count is the whole
-difference between a feed favorite and an item favorite** — their position 1 is
-byte-for-byte the same string. That is not a coincidence to work around, it is
-the same statement `remoteItem` makes with a present-or-absent attribute.
-
-**One thing this format does NOT copy from `remoteItem`: position 2 carries
-the `podcast:item:guid:` prefix.** The attribute holds a bare `<guid>`; this
-tag holds a full NIP-73 identifier, for about 18 bytes an entry — roughly 4 KB
-on a list of 227 items. What that buys is a tag whose two halves each say what
-they are, which is the same reason position 1 is not a bare feed guid either.
-A converter to and from a list feed strips or adds the prefix, and that is the
-whole of the difference.
-
-Three things follow for a reader, and all three are load-bearing:
-
-- **Tell them apart by length, never by position 1.** A dedupe, a baseline or
-  a lookup keyed on position 1 alone folds a feed favorite together with every
-  item favorite under that feed, and one of them disappears. ([Vector
-  25](#test-vectors).)
-- **An entry's kind comes from the whole entry, not from position 1.** A
-  three-element `podcast:guid:` entry declares `podcast:item:guid` in the
-  trailing `k` tags, even though position 1 says `podcast:guid`. Read position
-  1 alone and `podcast:item:guid` never reaches the event, so `#k` discovery
-  stops finding item favorites. ([Vector 6](#test-vectors).)
-- **A position 2 you cannot read makes the entry unreadable, not a feed
-  favorite.** Nothing but `podcast:item:guid:` is defined there today. If a
-  later revision puts another kind of identifier at position 2, an app that
-  ignores what it does not recognise silently republishes that entry as a
-  favorite of the whole feed. Carry the tag whole instead. ([Vector
-  4](#test-vectors).)
-
-**A note on names, because three of them mean one thing.** `<podcast:guid>`,
-`remoteItem`'s `feedGuid`, and the Podcast Index `podcastguid` parameter are
-three names for the same value: the channel-level UUIDv5 seeded with the feed
-URL. `itemGuid` is a different kind of identifier — a plain RSS
-`<item><guid>`, with no global scope; the [`<podcast:guid>`
-page](https://podcasting2.org/docs/podcast-namespace/tags/guid) is
-channel-level only and never mentions item guids. And `podcast:guid` and
-`podcast:item:guid` are **NIP-73 identifier kinds, not namespace tags** —
-`podcast:item:guid` does not exist at podcasting2.org, so do not go looking for
-it there.
-
-**An item guid is not an address on its own, and an item entry therefore
-cannot be one element.** [`<podcast:guid>`](https://podcasting2.org/docs/podcast-namespace/tags/guid)
-is a UUIDv5 seeded with the feed URL, assigned once and kept for the life of
-the podcast even when that URL changes. An item's `<guid>` is unique only
-*inside* its feed. The Podcast Index reflects this exactly: `/episodes/byguid`
-takes the item guid **plus** a `feedid`, `feedurl` or `podcastguid`, and its
-own documentation says the item guid "may not be globally unique". It does not
-merely fail to find such a lookup, it refuses to attempt one:
-
-```
-GET /api/1.0/episodes/byguid?guid=cc59b81e-28a0-4e55-a457-54285c06830a
-
-{"status":"false", "id":null, "url":null, "podcastGuid":null,
- "guid":"cc59b81e-28a0-4e55-a457-54285c06830a",
- "description":"This call requires either a valid `feedid`, `feedurl` or
-  `podcastguid` argument. "}
-```
-
-So an item entry stripped of its feed is not a mislabelled favorite, it is an
-unresolvable one — nobody can ever look it up again.
-
-Two consequences follow, and both are load-bearing:
-
-- **Identity is the pair.** The same item guid under two different feed guids
-  is two different items, and a writer that dedupes or claims on the item guid
-  alone folds them into one and deletes a favorite. ([Vector
-  25](#test-vectors).)
-- **A generic NIP-73 consumer resolves position 1**, which on an item entry is
-  the feed. It renders the show where a specific episode was meant. That is a
-  deliberate trade, priced in [What this format does not
-  do](#what-this-format-does-not-do).
-
-### The three states, and what each costs
-
-```json
-["i", "podcast:guid:<feedGuid>"]
-
-["i", "podcast:guid:<feedGuid>", "podcast:item:guid:<itemGuid>"]
-
-["i", "podcast:guid:<feedGuid>"],
-["i", "podcast:guid:<feedGuid>", "podcast:item:guid:<itemGuid>"]
-```
-
-They favorited the feed and saved no items. They saved one item from a feed
-they have not favorited. They did both. The third is two tags because the user
-made two separate choices, not because an item needs a feed entry beside it.
-
-The middle case is the one that pays for this layout. An earlier revision could
-not write it at all: an item named only itself, so the only way to record where
-it came from was to open a feed entry above it — and that put feeds on the list
-the user had never favorited. On the first real list published in this format,
-**114 of 196 feed entries were that**, and a brief revision of this document
-put a marker at position 2, `fav` or `placement`, to tell them apart. A feed
-entry now appears only when the user favorited the feed, so there is nothing
-left to label and the slot went to the item guid, which is the value that was
-actually missing.
-
-Read the third case again and note what makes it two tags rather than one:
-`remoteItem` says the same thing the same way. `feedGuid` alone is the feed;
-`feedGuid` with `itemGuid` is one item in it. Two statements, two tags, one
-shared position 1.
-
-### Tag order
-
-Only `medium` carries meaning, and that is what frees the rest of the order to
-be prescribed.
-
-**An entry names its own feed, so no reader has to reconstruct it from
-position.** This is the rule the format's first revision got wrong and paid
-for. An item used to belong to the most recently opened feed entry above it, so
-any client that sorted, deduped, or rebuilt the tag array silently reattached
-every item to the wrong feed, and nothing else in the format recovered the
-association.
-
-**`medium` is still positional, and is now the only thing that MEANS
-anything.** It is a running value: it applies to every entry after it until the
-next `medium` tag.
-
-- **An entry before any `medium` tag has an UNKNOWN medium.** Do not default it
-  to `podcast` or to anything else. A writer whose feed never declared
-  `<podcast:medium>` has nowhere else to put it, and inventing a
-  `["medium", "unknown"]` tag writes a value no reader has been told about.
-- A resolved lookup beats the stored medium anyway ([Medium is a
-  hint](#medium-is-a-hint-not-a-source-of-truth)), so reordering the array
-  costs a wrong label that corrects itself, rather than a wrong feed that
-  nothing corrects.
-
-#### Where every tag goes
-
-| tag | position |
+| tag | meaning |
 |---|---|
-| `alt` | **first, exactly once**, and regenerated rather than carried |
-| `visibility` | not positional. Put it next to `alt` |
-| `medium` | opens a run and applies until the next one. Keep same-medium entries contiguous |
-| `i` | inside its run, by band — below |
-| `k` | **at the end**, one per distinct kind. Order among them is unspecified |
+| `["i","podcast:guid:F"]` | feed favorite — a podcast or an album |
+| `["i","podcast:guid:F","podcast:item:guid:X"]` | item `X` of feed `F` — an episode or a track |
+| `["i","podcast:publisher:guid:P"]` | artist; belongs to no feed |
+| `["i","podcast:item:guid:X"]` | **legacy** item; feed from the entry above |
 
-**Inside one `medium` run, entries are emitted in four bands.**
+Position 1 is the feed, position 2 is the item, and **nothing is defined past
+position 2.** Every entry names its own feed, so no reader reconstructs it from
+position and no reorder can move it
+([why](notes/pc20-favorites-rationale.md#entry-names-its-feed)); an item guid is
+unique only inside its feed, so it is not an address on its own
+([why](notes/pc20-favorites-rationale.md#item-guid-not-an-address)). The two
+positions are `<podcast:remoteItem>`'s two attributes, restated as one tag
+([why](notes/pc20-favorites-rationale.md#remoteitem)).
+
+Four rules, all load-bearing:
+
+- **Tell a feed entry from an item entry by LENGTH, never by position 1.**
+  Their position 1 is byte-for-byte the same string, so keying on it folds them
+  together and one disappears. (Vector 25)
+- **An entry's kind is the kind of its LAST identifier** — position 2 when
+  there is one. Read position 1 alone and `podcast:item:guid` never reaches the
+  `k` tags, so `#k` discovery stops finding item favorites. (Vector 6)
+- **A position 2 you cannot read makes the entry unreadable, not a feed
+  favorite.** Carry it whole; reading it as one turns a newer writer's entry
+  into a followed show. (Vector 4)
+- **Derive kinds from a known-kinds table, never by splitting the string.**
+  Item guids are routinely permalink URLs, so "everything before the last
+  colon" yields `podcast:item:guid:https` — a `k` value no relay filter
+  matches. (Vector 6)
+
+**An artist entry is bare and belongs to no feed.** It is never an item of the
+entry above it. Carrying one is mandatory; offering the feature is not — and an
+app that does offer it owes the `k` tag, or `#k` discovery misses every artist
+favorite it publishes. (Vector 28)
+([why](notes/pc20-favorites-rationale.md#artist-entries))
+
+**Legacy lists.** Every list published before this revision writes items as two
+elements, with the feed carried by the entry above, so **a reader MUST accept
+both forms.** A writer rewrites such a tag on its next publish — the **whole
+tag**, position 1 included — from the feed it just read positionally, and the
+rewrite must be idempotent. (Vector 27) An item with no feed entry above it is
+unresolvable by anyone: carry it as it arrived, render what you can, never
+delete it, and never invent or borrow a feed guid, because a wrong one resolves
+to the wrong thing. Emit it in [band 0](#bands). (Vector 20)
+([why](notes/pc20-favorites-rationale.md#legacy-items))
+
+## `medium`
+
+A **running value**: it applies to every entry after it until the next `medium`
+tag. It is the only tag whose position carries meaning.
+
+- **An entry before any `medium` tag is UNKNOWN.** Do not default it to
+  `podcast`, and do not invent a `["medium","unknown"]` tag.
+- **Publish only a medium the feed declared** in `<podcast:medium>`. An app's
+  internal classification carries a default, and a guess here is sticky — no
+  other app has reason to correct it.
+- **It is a hint, not truth.** A Podcast Index lookup on the guid wins whenever
+  they disagree. ([why](notes/pc20-favorites-rationale.md#medium-hint))
+
+Keep same-medium entries contiguous. A medium must not open a second run.
+
+## Tag order
+
+| tag | where |
+|---|---|
+| `alt` | first, exactly once; regenerated rather than carried, discarded on read (Vector 21) |
+| `visibility` | not positional; put it next to `alt` |
+| `medium` | opens a run; applies until the next one |
+| `i` | inside its run, by band |
+| `k` | at the end, one per distinct kind; order among them unspecified |
+
+Emit one `k` per distinct kind, not one per `i`. **A reader MUST accept both
+layouts and MUST ignore `k` when parsing entries**, deriving the kind from the
+identifier. A reader that walks `i`/`k` in pairs shows an empty library rather
+than an error. (Vector 7)
+([why](notes/pc20-favorites-rationale.md#trailing-k))
+
+### Bands
+
+Prescribing the order is what makes two writers converge; preserving it does
+not. ([why](notes/pc20-favorites-rationale.md#band-order)) Inside one `medium`
+run, emit entries in four bands:
 
 | band | what | order inside it |
 |---|---|---|
-| 0 | items that name **no** feed | as read, untouched |
+| 0 | items naming **no** feed | as read, untouched |
 | 1 | artists — `podcast:publisher:guid` | as read; a new one at the end |
-| 2 | albums and podcasts — a two-element `podcast:guid:` | as read; a new one at the end |
+| 2 | albums and podcasts — two-element `podcast:guid` | as read; a new one at the end |
 | 3 | episodes and songs | grouped by the feed they name, groups in order of first appearance; a new item joins its feed's group |
 
-([Vector 18](#test-vectors).)
+- **A new entry goes at the end of its band, inside its run** — not ahead of
+  what you read, and not at the end of the event, which opens a second run for
+  a medium that already has one. (Vector 18)
+- **A run holding a tag you cannot classify is emitted as read**, in wire
+  order. A tag with no kind has no band; do not invent a place for it.
+  (Vector 4)
+- **A duplicate feed entry is well-formed.** Fold it or carry it; neither can
+  move an item. (Vector 19)
 
-**Prescribing the order is what makes it converge; preserving it never did.**
-An earlier revision said "entries you read keep their position, yours append",
-because two apps imposing their own orders rewrite the event at each other
-forever — which the two shipped implementations did, in production, for three
-weeks. That failure needs two DIFFERENT orders. One order in this document
-removes it: preserving only converges if every writer preserves, while a
-prescribed order converges even against a writer that does not sort, because
-that writer keeps what it read.
+## Public and private
 
-The three sub-rules are all still live:
+A list is **wholly** in the plaintext tags or **wholly** in the encrypted
+`content`. It is never split, and no entry is in both.
 
-- **Do not put your own entries ahead of the ones you read**, and do not append
-  to the end of the event — that opens a second run for a medium that already
-  has one. A new entry goes at the end of its **band**, inside its run.
-- **Band 0 is not cosmetic.** A legacy `["i", "podcast:item:guid:<itemGuid>"]`
-  takes its feed from the most recent feed entry above it. Move every feed
-  entry above every item and such an entry resolves to the last album in band
-  2 — a wrong feed, worse than the nothing it had. Ahead of band 2 there is no
-  feed entry to mistake for its parent; an artist is never a feed, so band 1
-  beside it is harmless. A resolvable legacy item never lands here, because the
-  same publish rewrites it. ([Vector 20](#test-vectors).)
-- **A run holding a tag you cannot classify is emitted as read.** [Rule
-  4](#4-carry-what-you-cant-read) carries an unparseable `i` or an unknown tag
-  type untouched, and a tag with no kind has no band. Rather than invent a
-  place for it, leave that whole run in wire order. ([Vector
-  4](#test-vectors).)
+`["visibility","public"]` or `["visibility","private"]` states the mode of the
+whole list, and any app may change it. It is multi-letter on purpose: relays
+index single-letter tags, and a `#v=private` filter would enumerate the pubkeys
+keeping a private list.
 
-**Banding is safe only because an entry names its own feed.** Under the first
-revision, moving a track away from the album above it destroyed the
-association. Sorting is available now for exactly the reason this section
-opens with.
+- **Absent, infer it:** entries in exactly one half means that half is the
+  mode. Entries in **both halves, or in neither: ask the user and publish
+  nothing until they answer.**
+  ([why](notes/pc20-favorites-rationale.md#no-safe-default))
+- **The tag is written on a user's choice and carried thereafter.** A writer's
+  standing setting never stamps it onto a list that has none.
+- **Changing the mode requires being able to read BOTH halves.** An app whose
+  signer has no NIP-44 carries `content` verbatim, does not restate the mode,
+  and **says on screen that it cannot open the other half.** (Vector 17)
+- **A writer that can read both, and finds the tag and the entries
+  disagreeing, converges toward the tag** — one copy of each entry, other half
+  emptied. An entry that was in both halves is emitted **once**.
+  (Vectors 15, 16)
+- **With no tag the move is asymmetric:** public → private may move another
+  app's entries; private → public may move **only** what your baseline claims,
+  because an `i` tag is a disclosure and cannot be undone. (Vector 13)
+- **A failed decrypt is a degraded read, not an empty half.** Carry the
+  ciphertext, publish nothing derived from it, say so on screen.
+- **Show the private half whatever your own last choice was** — but rendering
+  is not adopting. Out of the private half, adopt only what your baseline
+  already claims.
+  ([why](notes/pc20-favorites-rationale.md#privacy-belongs-to-the-list))
+- There is no third value. "Not on Nostr" is a local choice: withdraw what your
+  baseline claims and publish nothing further.
 
-**A duplicate feed entry is well-formed.** Two writers each stated the same
-favorite. Fold it or carry it; either is conforming, and neither can move an
-item, because no item depends on it. ([Vector 19](#test-vectors).)
+**Ship it in this order.** Land [the carry rule](#4-carry-what-you-cannot-read)
+in every writer first, and only then let any of them start writing a private
+half. An app must also read and render that half before anything moves entries
+into it on its behalf, or the move is indistinguishable from a deletion on that
+app's screen. ([why](notes/pc20-favorites-rationale.md#private-half-sequencing))
 
-**An item whose feed nobody knows is still somebody's favorite.** A legacy
-`["i", "podcast:item:guid:<itemGuid>"]` tag with no feed entry above it cannot
-be resolved by you or by anyone. Carry it in the form it arrived in, render
-what you can, and do not delete it. Do not invent a feed guid for it either — a
-wrong feed guid resolves to the wrong thing, which is worse than resolving to
-nothing, and a placeholder guid is an invented one. Emit it in **band 0**,
-ahead of every feed entry in its run, or the band order hands it whichever
-album ends up last. ([Vector 20](#test-vectors).)
+**The bytes.** The private half is a tag array, stringified, encrypted to your
+own key with
+[NIP-44](https://github.com/nostr-protocol/nips/blob/master/44.md), in
+`content`. The `medium` and [band](#bands) rules apply inside it unchanged.
 
-### Reading a list written before this revision
-
-Every list published before this revision writes items as **two elements**,
-`["i", "podcast:item:guid:<itemGuid>"]`, with the feed carried by the entry
-above. Both shipped writers do this today. So:
-
-- **A reader must accept both forms**, and the prefix at position 1 says which
-  it is holding:
-
-  | tag | what it is |
-  |---|---|
-  | `["i","podcast:guid:F"]` | a feed favorite |
-  | `["i","podcast:guid:F","podcast:item:guid:X"]` | item `X` of feed `F` |
-  | `["i","podcast:item:guid:X"]` | **legacy** item; feed from the entry above |
-  | `["i","podcast:publisher:guid:P"]` | an artist; belongs to no feed |
-
-  Nothing is ambiguous between them, and nothing else is defined — an
-  unrecognised position 2 is an unreadable entry, carried whole, not a fifth
-  row you may guess at. Dropping the legacy row does not lose a label, it makes
-  every item favorite in production unresolvable.
-- **A writer rewrites a legacy tag on its next publish**, using the feed it
-  just read positionally. Note that this replaces the WHOLE tag, position 1
-  included — the identifier becomes the feed's. Each list upgrades itself once,
-  and after that its items survive a reorder. ([Vector 27](#test-vectors).)
-- **Two shapes from drafts of this document are not forms.** One put the item
-  at position 1 and the feed at position 2; another kept position 2 but wrote
-  the item guid there bare, with no prefix. Nothing ever published either, so
-  there is nothing to read and no path to write for them.
-
-This is not the same situation as the marker that used to live at position 2.
-Nothing had ever published a marker, so moving that slot moved nothing. Items
-have shipped, so this migration is real and the dual-read rule is mandatory.
-
-**`alt` is a NIP-31 label, not data.** Emit `["alt", "PC 2.0 Favorites"]` as
-the first tag, exactly once, and regenerate it on every publish rather than
-carrying the value you read: the event can hold only one, and a client with no
-definition for kind 10333 renders whatever is there. It takes no part in
-anything, and a reader discards it. ([Vector 21](#test-vectors).)
-
-**Take an entry's kind from the entry, never from an adjacent tag.** The kind
-is derivable from the tag itself, so a `k` beside every `i` restates what the
-entry has just said. On the first real event published in this format that
-cost 423 `k` tags carrying two distinct values — about 11 KB of a 36 KB event,
-28% of it, on a list of 196 feeds and 227 items.
-
-**Derive it from the whole entry, not from position 1 alone.** Position 1 is
-`podcast:guid:` on a feed favorite and on an item favorite alike, so a writer
-that reads only position 1 emits `podcast:guid` for both, and
-`podcast:item:guid` never reaches the event at all. `#k` discovery then misses
-every item favorite on every list. The rule is one line: **an entry's kind is
-the kind of its last identifier** — position 2 when there is one, position 1
-otherwise. ([Vector 6](#test-vectors).)
-
-An earlier revision of this document paired a `k` with every `i`, so **a
-reader must accept both forms**: ignore `k` entirely when parsing entries and
-derive the kind from the identifier, and the two layouts become the same
-event. A reader that walks `i`/`k` in pairs will not read a list written by
-the current rule, and the symptom is an empty library rather than an error.
-
-Trailing `k` tags are safe because `k` takes no part in anything else. A `k`
-landing mid-list is inert, but emit them at the end anyway so nothing invites a
-parser to treat them as delimiters.
-
-Use a known-kinds table rather than scanning the string. Item guids are
-routinely permalink URLs, so "everything before the last colon" on
-`podcast:item:guid:https://example.com/ep/42` yields `podcast:item:guid:https`
-— a `k` value no relay filter will ever match, which breaks `#k` discovery
-without breaking anything visible. This applies at position 2 as much as at
-position 1: both hold a prefixed identifier, and a URL-shaped item guid is the
-value most likely to be there.
-
-### An artist is a favorite that belongs to no feed
-
-Music has three levels — artist, album, track — and this list carries two of
-them as entry kinds. The third does not need carrying. **Favoriting an artist
-means "show me this artist's whole catalogue", and the catalogue is named in
-the publisher feed**, not here. So the entry stands alone:
-
-```json
-["i", "podcast:publisher:guid:<publisherGuid>"]
-```
-
-- It **belongs to no feed.** There is no item identifier to put at position 2,
-  and nothing above it is a feed of which an artist could be an item. Emit it
-  bare, two elements, exactly like a feed favorite.
-- It is **never an item** of the entry above it. An artist is not a track.
-- Nothing on this list belongs to an artist either. An album entry is a feed
-  favorite in its own right and names no artist.
-- Its kind still belongs in the trailing `k` tags, or `#k` discovery misses
-  every artist favorite on every list.
-
-**Carrying one is mandatory; offering the feature is not.** The same split as
-the private half. An app with no artist favorites in its UI still meets an
-artist entry on a shared list, and it must carry it whole and in position. What
-it need not do is let anyone create one. Neither existing app can today, and
-neither is wrong for that.
-
-An album is an ordinary feed entry — `podcast:guid:` with `medium` set to a
-music value — and a track is an ordinary item entry carrying its album's feed
-guid. **Everything in [One favorite, one tag](#one-favorite-one-tag) applies to
-albums and tracks unchanged**, and the numbers behind it were measured on music
-in the first place: 114 of 196 feed entries existed only to place a track, and
-46 of one user's 94 album favorites could not be published at all. `medium`
-takes no part in any of it.
-
-**This is written down because the three answers disagreed.** The document had
-said nothing about publisher guids at all. Read on 2026-09-07:
-`stablekraft-app@4722dd8` (`lib/nostr/pc20-identifiers.ts`,
-`favorites-single-list.ts`) and `boostmebitch@938f90d`
-(`lib/nostr/favorites-list.ts`) both place a publisher entry as a loose entry —
-carried whole, opening nothing — and stablekraft pins it in a test. This
-repository's own reference implementation treated it as a feed that opens a
-group, so a track after an artist entry parsed with the **artist** as its
-parent in one reader and the **album** as its parent in the other two. The apps
-were right; the reference was changed. That whole class of disagreement is now
-unreachable: a track names its own feed, so no entry between it and its album
-can move it. ([Vector 28](#test-vectors).)
-
-### Medium is a hint, not a source of truth
-
-The `medium` tag exists purely so a client can bucket "Podcast" vs. "Music"
-on load without an API round trip first. It is **not** authoritative — apps
-resolve `feedGuid` / `itemGuid` against the Podcast Index (or their own feed
-cache) to get real metadata: title, artwork, audio URL, and the feed's actual
-`<podcast:medium>` value. That lookup should win if it ever disagrees with
-the hint stored here (e.g. a feed changes medium after this list was last
-published).
-
-Publish the medium only from what a feed actually declared. An app's own
-internal classification is not the same thing and usually carries a default —
-publishing that default makes a guess look authoritative, and a guess on this
-list is sticky, because no other app has any reason to correct it.
-
-### The list is public or private, and the event says which
-
-A list is wholly in the plaintext tags or wholly in the encrypted `content`.
-It is never split across the two, and an entry is never in both.
-
-**A `visibility` tag states which.** It is the mode of the whole list, not of
-the app that wrote it, and any app may change it at any time.
-
-```json
-["visibility", "public"]
-["visibility", "private"]
-```
-
-Multi-letter on purpose: relays index single-letter tags, so an `["v", …]`
-would let a `#v=private` filter enumerate the pubkeys that keep a private
-list. Nothing else about it is positional — put it next to `alt` and treat it,
-like `k`, as taking no part in
-[ordering](#tag-order).
-
-**Why a tag, when the encryption already says it.** Almost. "Whichever half
-holds entries is the mode" answers correctly for every list that has entries,
-and it is what both existing implementations do. It cannot answer for a list
-that has none — a new account, or one whose last favorite was just removed —
-and that is not an edge case, it is where every user starts. An app that
-guesses `public` there and publishes their next favorite has written a
-relay-indexed `i` tag for someone who chose Private in another app an hour
-ago, and `i` cannot be taken back. Guessing `private` is wrong the other way
-round and merely annoying. There is no safe default, so the event has to say.
-
-The second thing the tag buys is a **direction to fold in**. Before it, a list
-found with entries in both halves ([vector 15](#test-vectors)) was ambiguous:
-you could carry it, which is what that vector requires, but nothing said which
-half the user had actually asked for. Now something does.
-
-**Absent, it is inferred, and that is the whole migration.** No `visibility`
-tag means: entries in exactly one half, that half is the mode; entries in
-both, or in neither, **ask the user and publish nothing until they answer.**
-Every list published before this section reads correctly under that rule. And
-a writer whose standing setting names the EMPTY half of such a list follows
-the list or asks; it does not act on the setting. That is one app overruling
-another, which is the same conflict a stated mode exists to settle — both
-existing implementations stop and ask there.
-
-**The tag is written on a choice, and carried once it is there.** A writer
-emits it for the first time when the user picks Public or Private in that
-app, and from then on every writer carries it forward on every publish —
-regenerated from what it read, never replayed as a foreign tag, or the event
-states the mode twice with the stale copy second. A writer's standing setting
-never stamps the tag onto a list that has none: that states a mode nobody
-picked, and on a list that already has a private half the stamp is what would
-license disclosing it. So a legacy list stays untagged until somebody chooses,
-which is what both existing implementations do. Emit it on a public choice as
-much as on a private one, or its absence stays ambiguous forever.
-
-**Changing the mode requires being able to read BOTH halves.** An app whose
-signer has no NIP-44 cannot see the private half, so it cannot move those
-entries and cannot honestly claim the list is public — it would be stating a
-convergence it is not able to perform, and the entries it cannot see would sit
-encrypted under a tag saying they are not. Such an app carries `content`
-verbatim, keeps writing into the half the tag names if it can, and says on
-screen that it cannot open the other one. An empty `content` satisfies this
-trivially, which is why a fresh list can be set either way by anybody.
-
-**That requirement is what makes the tag consent.** The old rule here was an
-asymmetry: public → private could move another app's entries because it only
-reduces exposure, and private → public could not, because publishing an `i`
-tag is a disclosure and irreversible. The asymmetry existed because no app
-could tell the user's intent for the whole list from the event. The tag is
-that intent, stated by an app that could see everything it was about to
-disclose — so with the tag present the move is symmetric:
-
-- **A writer that finds the tag and the entries disagreeing, and can read both
-  halves, converges toward the tag.** One copy of each entry, in the half the
-  tag names, and the other half emptied.
-- **A writer that cannot read both halves does not converge.** It carries, and
-  it reports the state rather than leaving it silent.
-- **With no tag, the old asymmetry still applies** — public → private moves
-  everything, private → public moves only what your baseline claims. There is
-  no stated intent to act on, so the conservative rule stands.
-
-**"Not on Nostr" is a local choice and is not on the wire.** An app that stops
-syncing withdraws the entries its own baseline claims and publishes nothing
-further; the list, the tag and every other app's entries are unaffected. There
-is no third `visibility` value, and writing one would tell every other writer
-to stop on the strength of one device's setting.
-
-### Writing the private half
-
-The private half is a tag array, stringified, encrypted to the author's own
-key with NIP-44, and put in `content`. The
-[medium rules](#tag-order)
-apply inside it unchanged. Five rules govern the bytes, and each one is a
-defect an implementation shipped before it was written down here.
-
-- **The plaintext carries no `?`.** Write the character as its six-character
-  JSON escape, `\u003f`, before handing the string to the signer. A NIP-55
-  signer URL-decodes the whole `nostrsigner:` URI and only then splits it on
-  `?`, so a plaintext carrying one is truncated there and the request comes
-  back malformed — with an error that reads as "signer not installed". Item
-  guids are routinely permalink URLs, so this is not an edge case: one
-  favorited track with a query string in its guid breaks every private publish
-  on that device, forever. Percent-encoding does not help, because `%3F`
-  decodes back into the character it splits on. The JSON escape does, because
-  every reader already understands it: `JSON.parse` returns the same string
-  byte for byte in any implementation, so a writer that never heard of this
-  rule still reads the list. ([Vector 22](#test-vectors).)
-- **A plaintext that is not a tag array is an unreadable half.** Treat it
-  exactly as a decrypt that failed: carry `content` byte for byte, publish
-  nothing derived from it, and say so on screen. A `JSON.parse` that succeeds
-  on `{}` or on `"a string"` otherwise marks the half readable and empty, and
-  the next republish rewrites `content` from that emptiness — another app's
-  entries gone, from a decrypt that worked. ([Vector 23](#test-vectors).)
-- **Refuse to publish a plaintext past 60,000 bytes.** NIP-44 v2 as first
-  published capped plaintext at 65,535 bytes, and a signer built to that text
-  rejects a payload across the line — so on that device the list reads back
-  as empty, not as an error. The margin under 65,536 is for what NIP-44 adds
-  on the way to `content`: it pads to a power-of-two chunk and base64-encodes,
-  about 1.5×. Refusing costs the user one favorite and a message; publishing
-  costs them the whole list on whichever app hits the cliff, with nothing on
-  screen saying why. About 500 favorites fit. ([Vector 24](#test-vectors).)
-- **A half holding no entries is the empty string.** Emit `content: ''`, not
-  the encryption of an empty array and not the encryption of the `medium` tags
-  that used to label entries. A `medium` run left with nothing under it is not
-  cosmetic: it makes an empty half encode to real ciphertext, and ciphertext is
-  how the next writer knows somebody owns this half. A signer with no NIP-44
-  cannot open those bytes, so it reads them as a private half it must not
-  disturb and declines to change the mode on top of what it cannot see — which
-  is the correct rule, reached on false evidence. The user asks for private,
-  the app agrees the request is legitimate, the list stays public, and nothing
-  on screen says why. So prune a run you emptied, on whichever side you emptied
-  it. ([Vector 30](#test-vectors).)
+- **No `?` in the plaintext** — write its six-character JSON escape,
+  `\u003f`. A NIP-55 signer splits the decoded URI on `?`, and the truncated
+  request comes back as "signer not installed". (Vector 22)
+- **A plaintext that is not a tag array is an unreadable half**, not an empty
+  one: `{}`, a string, and an array holding a non-string all decode to null,
+  while `[]` is an empty list. (Vector 23)
+- **Refuse to publish a plaintext past 60,000 bytes.** A signer built to
+  NIP-44 v2 as first published rejects more, and the list then reads back as
+  empty rather than as an error. (Vector 24)
+- **A half holding no entries is `content: ''`** — not the encryption of an
+  empty array, and not of a `medium` run you emptied. (Vector 30)
 - **Compare decrypted arrays, never ciphertext.** NIP-44 draws a fresh nonce
-  per encryption, so identical entries produce different bytes every time, and
-  a ciphertext comparison republishes on every load, forever. Compare the
-  ciphertext only where you could not decrypt it — there, byte-identity is the
-  carry rule.
+  per encryption, so a ciphertext comparison republishes on every load forever.
 
 ## Merging
 
-Every publish is a full replacement, and every app may publish. So a writer's
-job is not "serialize my favorites" — it is **read the current event, fold my
-changes into it, and write back everything else untouched.**
+A writer's job is not "serialize my favorites". It is **read the current event,
+fold your changes into it, and write everything else back untouched.**
 
-### 1. Read before every publish, and never publish on a read you don't trust
+### 1. Read first, and never publish on a read you do not trust
 
-Do not expose a "publish my favorites" entry point at all. Make reading part
-of the same call, so no caller can skip it: the read is the only thing that
-makes the write safe.
+Do not expose a "publish my favorites" entry point at all — make the read part
+of the same call, so no caller can skip it. A relay query returning nothing
+means either "nobody has it" or "nothing answered in time", and acting on the
+second republishes the whole list as empty. Count relays yourself:
 
-A relay query returning nothing has two meanings — "nobody has it" and
-"nothing answered in time" — and under wholesale replacement, acting on the
-second is the most expensive mistake this format allows. One bad read,
-republished, is the entire list, for every app the user owns. **Publish
-nothing unless the read is trustworthy.**
+```
+trustworthy = event_in_hand OR (reached > 0 AND answered == reached)
+```
 
-Count relays yourself: `trustworthy = event_in_hand OR (reached > 0 AND
-answered == reached)`, where `reached` counts relays that accepted a
-connection and stayed up, excluding ones that never connected — requiring
-every *listed* relay to answer means one permanently dead default degrades
-every read forever. An aggregate EOSE from a relay library is not proof: in
-at least one library a failed connection is folded into the same callback, so
-being offline reports "everyone answered, nobody has it" in about 19 ms.
-Libraries also synthesize an EOSE on a timer, indistinguishable from a real
-one at the callback, so push that timer past your own deadline.
-
-Withholding a publish is invisible to the user, and on a device with no local
-cache it renders identically to "your favorites are gone". Say so in the UI;
-a silent correct decision cannot be told apart from a broken one.
+`reached` excludes relays that never connected, or one dead default degrades
+every read forever. **An aggregate EOSE from a relay library is not proof:**
+libraries fold failed connections into the same callback and synthesize EOSE on
+a timer. **Withholding a publish must be visible in the UI** — it renders
+identically to "your favorites are gone". (Vector 2)
+([why](notes/pc20-favorites-rationale.md#trustworthy-read))
 
 ### 2. Keep a baseline
 
-The event carries no provenance. Nothing on an entry says which app added it
-or when, so when the list and your local state disagree, the disagreement is
-ambiguous:
+The event carries no provenance, so "on the list, absent from your local state"
+is ambiguous: another app just added it, or you just removed it. Identical
+bytes, opposite meanings.
+([why](notes/pc20-favorites-rationale.md#no-provenance))
 
-> The list has an entry. Your local state doesn't.
-> Either another app just added it, or you just removed it.
+A **baseline** is the set of identifiers you last agreed with the relay on,
+stored privately on the device. It is not on the wire, and no two writers need
+theirs to agree.
 
-Identical bytes, opposite meanings, and both naive answers destroy something:
-prefer the list and unfavoriting silently stops working forever; prefer local
-state and you delete every entry the other apps added.
-
-So each writer keeps a **baseline**: the set of identifiers it last agreed
-with the relay on, stored privately on the device. It is not on the wire,
-other apps never see it, and no two writers need theirs to agree.
-
-- Record it **only after a publish is confirmed by a relay.** A baseline
-  written for an event that never landed says "I am already asserting this",
-  which is exactly what stops the entry from ever being retried.
-- Record only **your own** contribution, never the whole list you just
-  published — otherwise the entries you were carrying on another app's behalf
-  become yours to delete on the next cycle.
-- **"Your own" means what you will keep asserting, not what you wrote.** The
-  two implementations of this format draw that line in different places and
-  both are conformant, so it is worth stating exactly. One records the entries
-  it holds locally. The other adopts the list it read into its own library —
-  it renders the whole thing and lets the user unfavorite any of it — and
-  records that, foreign entries included.
-
-  The second is not the clobber this rule forbids, because adoption makes the
-  claim true: those entries are in its local set, so it goes on asserting them
-  and the removal test never fires by accident. An app that renders the shared
-  list as one library **has** to claim what it renders, or the user can never
-  unfavorite an entry another app added.
-
-  So the test is not where the ids came from. It is whether you will still be
-  holding them next cycle: **you may claim an entry you have adopted and will
-  keep asserting; you may never claim one you are merely carrying.** Everything
-  below about two halves is that same sentence applied per half — you adopt out
-  of the half you write into, and you only carry the other.
-- **A claim on an item is the PAIR, not the item guid.** An item guid is
-  unique inside its feed and is not globally unique, so a baseline keyed on the
-  item guid alone cannot tell two items in two feeds apart: take one back and
-  the other goes with it, silently, and no other app will restate it. Record
-  the feed guid beside it. See [One favorite, one
-  tag](#one-favorite-one-tag). ([Vector 25](#test-vectors).)
-
-  A feed favorite needs no claim of its own any more. It is an ordinary entry,
-  so its presence on the list is the favorite and taking it back is an ordinary
-  removal. An earlier revision needed a second claim because a feed entry could
-  be on the list for two unrelated reasons at once.
-- A baseline describes **one list**. Never seed it from another list, another
-  address, or an older format's baseline: that asserts you published ids to
-  an event you have never written to, and the first entry that matches gets
-  read as "mine, and I removed it" and deleted. An implementation shipped
-  exactly that and destroyed an album favorite that existed only on the other
-  app's side.
-- **Losing it is safe; guessing is not.** An empty baseline yields no
-  removals, so the next publish is a pure union. Start there.
-- **If the event has two halves, answer "your own contribution" for each half
-  separately — and the half you did not publish into has no new contribution,
-  so its claims are CARRIED, never recomputed.** Under one whole-list choice a
-  writer feeds its local entries into one half and passes the other an empty
-  list. Recompute that half's claims from what you merged and you claim every
-  entry in it, another writer's included; nothing backs the claim next cycle,
-  so rule 3's *an entry in your baseline, absent locally* row fires on the
-  whole half at once and deletes it.
-  Carrying instead keeps the claims made while that half *was* the one you
-  wrote into, so moving an entry between halves still works.
-
-  **Carrying a claim is not keeping it alive past its entry.** You edit the
-  inactive half too: taking an entry back out of it removes one, and a
-  whole-list move empties it outright. A claim left behind by either can never
-  be satisfied again, and the one thing it can still do is fire rule 3's
-  removal row — so the next app to write that entry into that half has it
-  deleted, silently, on someone else's device. Retire a carried claim when
-  BOTH are true: the entry is no longer in that half, and you no longer hold
-  it. Either one alone keeps it. An entry still in the half has a live claim,
-  and an entry you still hold keeps its claim wherever it sits, because there
-  the claim is also what stops you re-adding what another app removed. Note
-  what this is not: it only ever removes claims, so it cannot claim an entry
-  that is not yours. A half you could not read is a half you did not edit, and
-  its claims are carried untouched. ([Vector 31](#test-vectors).)
-
-  Two things make this hard to catch. The damage needs **two cycles** — the
-  first publish emits correct bytes and only the baseline recorded beside it
-  is wrong — and the first cycle need not publish at all, because a writer
-  that records a baseline when the bytes already match records the bad one
-  anyway. One implementation shipped this in both directions at once; see test
-  vector 14.
+- **Record it only after a relay confirms the publish.** A baseline written for
+  an event that never landed says "I am already asserting this", which stops
+  the entry from ever being retried. (Vector 10)
+- **Record only what you will keep asserting.** You may claim an entry you have
+  adopted and will keep asserting; you may never claim one you are merely
+  carrying.
+- **A claim on an item is the PAIR**, feed guid and item guid. (Vector 25)
+- **A baseline describes one list.** Never seed it from another list, another
+  address, or an older format's baseline.
+- **Losing it is safe; guessing is not.** An empty baseline yields no removals,
+  so the next publish is a pure union.
+- **With two halves, answer per half.** The half you write into is recomputed;
+  **the half you did not publish into has its claims carried, never
+  recomputed** — recompute and [the removal row](#3-the-merge) fires on the
+  whole half at once. (Vector 14)
+- **Retire a carried claim when the entry is gone from that half AND you no
+  longer hold it.** Either alone keeps it. A half you could not read is a half
+  you did not edit. (Vector 31)
 
 ### 3. The merge
 
@@ -718,677 +295,79 @@ Walk the entries you read, **in order**, and emit:
 | an entry you hold locally | keep it |
 | an entry not in your baseline | **carry it** — another app added it |
 | an entry in your baseline, absent locally | drop it — you removed it |
-| anything you can't parse | carry the whole tag — see 4 below |
+| anything you cannot parse | carry the whole tag — [rule 4](#4-carry-what-you-cannot-read) |
 
-Then append entries you hold that weren't on the list at all — **unless your
-baseline names them**, in which case another app removed them and re-adding
-is a resurrection loop: the entry returns on every load, forever, on every
-device.
+Then append entries you hold that were not on the list — **unless your baseline
+names them**, in which case another app removed them and re-adding is a
+resurrection loop. (Vectors 8, 9)
 
-Four consequences worth stating outright, because each is a way to delete
-someone else's data while looking correct:
+Run those rows against **every** entry, feeds and items alike: unfavoriting an
+item whose feed you dropped still propagates, and dropping a feed favorite never
+touches an item. (Vectors 11, 26) Match on the whole key. Emit each run in
+[band order](#bands). **Moving the list between halves is a merge, not a
+copy** — the rows run on both halves that cycle like any other, and claiming an
+entry
+back on the baseline alone does not keep a removal, it **publishes** it.
+(Vector 29)
 
-- **Run the three rows against every entry, feeds and items alike.** They are
-  independent favorites now, so unfavoriting an item whose feed you dropped
-  long ago still propagates, and dropping a feed favorite never touches an
-  item. An earlier revision needed a rule here — "a feed entry survives while
-  any item under it does" — because the feed entry was the only tag naming
-  those items' feed. It named nobody's feed but its own, and the rule is
-  gone. ([Vector 11](#test-vectors).)
-- **Match on the whole key.** An entry you hold, an entry your baseline claims,
-  and an entry on the wire are the same entry only when the feed guid matches
-  too. Comparing item guids alone deletes the wrong favorite.
-- **Emit each medium run in [band order](#tag-order): artists, albums and
-  podcasts, then episodes and songs grouped by feed.** Inside a band the read
-  order stands and a new entry goes at the end of that band — not ahead of what
-  you read, which is the local-first order, and not at the end of the event,
-  which splits a medium run in two. The two existing implementations disagreed
-  on ordering for the format's first three weeks and the event was rewritten
-  back and forth in production the whole time; a prescribed order is what ends
-  that, because the loop needs two apps imposing DIFFERENT orders. Getting it
-  wrong now costs churn and contiguity; it used to cost an item its feed.
-  ([Vector 18](#test-vectors).)
-- **Moving the list between halves is a merge, not a copy.** [Changing the
-  mode](#the-list-is-public-or-private-and-the-event-says-which) reads one half
-  and emits it into the other, and it is tempting to write that pass as "keep
-  everything, it is only changing places". Do not: the three rows run on both
-  halves, on that cycle like any other. An entry your baseline for either half
-  claims and you no longer hold is a removal the user made, and a move that
-  keeps it does not delay that removal by a cycle — it ends it. The baseline
-  you write next cannot claim an entry you do not hold, so nothing on any
-  later cycle can drop it, and the favorite the user deleted is back for good
-  on every device. The same slip on the half you are moving INTO makes an
-  unfavorite on a private list publish nothing at all, because the merged bytes
-  match the read and rule 5 stops there. It applies to the third pass too, the
-  one that takes back only what your own baseline names when you are not
-  licensed to move anyone else's entries: A CLAIM IS NOT A FAVORITE. Claim an
-  entry back on the baseline alone and you do not keep a removal, you PUBLISH
-  it — an `i` tag relays index, emitted by the one path that exists because a
-  disclosure cannot be undone. ([Vector 29](#test-vectors).)
-
-### 4. Carry what you can't read
+### 4. Carry what you cannot read
 
 An identifier kind outside your table, a tag type you have no meaning for, a
-`k` naming a kind you never emit, a `podcast:guid:` whose guid is malformed —
-all of it belongs to a writer newer or older than you. Carry the **whole
-tag**, not a value re-rendered from your own model: a later revision may put
-something at a position you don't read yet.
+`k` naming a kind you never emit, a malformed guid — carry the **whole tag**,
+every element, not a value re-rendered from your own model. A writer that
+rebuilds entries as `["i", id]` type-checks, renders correctly, and strips
+every item of the guid that makes it resolvable; position 3 is undefined and is
+exactly where a newer writer puts the next thing. (Vector 27) An unparseable
+entry must not end a legacy run. (Vector 4)
+([why](notes/pc20-favorites-rationale.md#carry-rule))
 
-**"Whole tag" means every element of it**, and the cost of forgetting went up
-with this revision. Position 2 of an item `i` carries [the guid of its
-feed](#one-favorite-one-tag), and position 3 is undefined, which is precisely
-where a writer newer than you will put the next thing. A writer that rebuilds
-entries as `["i", id]` type-checks, renders correctly, and strips every item on
-the list of the one value that makes it resolvable — not a label, the address.
-Nobody can look those favorites up again, including the writer that did it.
-([Vector 27](#test-vectors).)
+> **`content` is carried too. Republish `event.content` byte for byte, unless
+> you encrypted the bytes you are replacing it with.**
 
-An unparseable entry must not end a legacy run either. An unrecognized `i`
-sitting between a feed entry and a two-element item must not stop that item
-finding its feed — the entries around it belong to a writer that knew what it
-meant, and your not understanding one of them is not licence to strand the
-others. ([Vector 4](#test-vectors).)
-
-"I can't render this" is not the same claim as "this is junk". Deleting an
-entry should be a thing the user asked for.
-
-#### `content` is carried too, and this rule did not used to say so
-
-Everything above is about **tags**, and for most of this document's life that
-was the whole of it — `content` was empty, the Data Structure example showed
-`""`, and no rule mentioned it. That silence is a trap, so it is worth being
-explicit about what it costs.
-
-`content` is the only free slot in the event. A writer that supports a
-[private half](#open-questions--not-yet-resolved) puts NIP-44 ciphertext
-there. A writer that does not, and that follows this document to the letter,
-republishes the empty string the format has specified from the start. The
-first favorite toggled in the second app erases every private entry the first
-one wrote: silently, on someone else's device, with no undo, on a replaceable
-event that keeps no history to recover from — while behaving correctly by the
-document it was written against.
-
-So, as a rule and not as advice:
-
-> **Republish `event.content` byte for byte, unless you encrypted the bytes
-> you are replacing it with.** An empty `content` on a republish must be what
-> the read actually held.
-
-Two things follow, and both are easy to get wrong in the same direction:
-
-- **Do not give the value a default.** A default is how a `""` gets written
-  back in by habit — one caller that omits the argument compiles, type-checks
-  and deletes another app's data. Building a list from scratch is the only
-  case with nothing to carry, and it can say so at the call site.
-- **Capture it on the read.** An implementation that never reads
-  `event.content` has nothing to put back even in principle, which is the
-  state both existing implementations were in when this was found.
-
-Carrying is **mandatory**. Using `content` is **optional** — an app that never
-encrypts anything still conforms, and that combination is the only one that
-does not destroy data.
+Do not give that value a default: a default is how a `""` gets written back by
+habit, and one caller that omits the argument compiles, type-checks and deletes
+another app's data. Capture it on the read, or you have nothing to put back
+even in principle. **Carrying is mandatory; using `content` is optional** —
+that combination is the only one that does not destroy data. (Vector 12)
 
 ### 5. Publish only when the bytes change
 
-Compare your merged tag array against the array you read — **put through your
-own framing first**, not as it arrived. Regenerate `alt`, `visibility` and the
-trailing `k` tags on both sides, then compare byte for byte. If they match,
-publish nothing.
+Compare your merged array against the array you read, **put through your own
+framing first**: regenerate `alt`, `visibility` and the trailing `k` on both
+sides, then compare byte for byte. If they match, publish nothing.
 
-**Normalising first is not tidiness, because two conforming events differ.**
-A reader MUST accept a `k` beside every `i`, and a writer MUST emit one `k`
-per distinct kind at the end. Both layouts are legal, they mean the same list,
-and they differ byte for byte. The position of `alt`, the position of
-`visibility` and the order of the `k` tags are free in the same way. Compare
-the read as it arrived and every one of those reports a change on a list you
-have no reason to touch — and if the other app compares raw too, neither of
-you ever stops. That is the failure this rule exists to prevent, reached by
-following it literally. ([Vector 7](#test-vectors).)
+Two conforming events differ, so comparing the read as it arrived reports a
+change on a list nothing changed about — and if the other app compares raw too,
+neither of you ever stops. Compare against **the read**, never against a digest
+of your own last publish; only the former notices that another app has edited
+the event since. (Vectors 3, 7)
+([why](notes/pc20-favorites-rationale.md#reframed-bytes))
 
-What you normalise is exactly what carries no meaning. `medium` is positional
-and stays where it is, [band order](#tag-order) is prescribed so both writers
-reach it anyway, and an entry you cannot parse is carried untouched — so a
-genuine difference still shows up as one.
+## What it does not do
 
-Compare against **the read**, not against a digest of your own last publish —
-only the former notices that another app has edited the event since. This is
-also test vector 3 executed on every cycle in production rather than only in
-a test: if your merge is not idempotent, two apps rewrite the event against
-each other indefinitely.
+Alternatives considered are in
+[the rationale](notes/pc20-favorites-rationale.md#what-this-format-does-not-do).
 
-## What this format does not do
+- **One event holds everything**, so a large list risks relay size caps
+  (~128 KB on nos.lol), reached at ~90 KB of entries once encrypted. Item
+  favorites fill it an order of magnitude faster than feed favorites.
+- **No fallback URL.** Position 2 holds the item, so an entry is guids and
+  nothing else. An unresolvable entry is still somebody's favorite: carry it
+  and render what you can.
+- **A generic NIP-73 consumer shows the wrong thing for an item favorite** — it
+  resolves position 1, which is the feed.
+- **No per-item relay filter.** Relays index `i` at position 1, so `#i` for a
+  feed returns feed and item favorites together. A kind:1 boost note tags the
+  episode instead, so a filter written for one does not find the other.
+- **No way to say an item is NOT a favorite.** A removal is an absence, which
+  is what makes [the baseline](#2-keep-a-baseline) load-bearing.
+- **No provenance, so no last-write-wins, and no concurrency control.** Two
+  apps publishing within a second of each other still lose one set of changes;
+  `created_at` and relay last-write-wins decide the survivor.
+- **The pubkey, the kind, `created_at` and the event size stay public in either
+  mode.** Padding hides the exact count, not the order of magnitude.
 
-- **No split between shows and items ACROSS EVENTS.** A show favorite and an
-  episode favorite are separate entries on the list — [one favorite, one
-  tag](#one-favorite-one-tag) — but both live in the one event, so a large
-  favorites list risks hitting relay size caps (~128 KB on nos.lol).
-  Item favorites accumulate an order of magnitude faster than feed
-  favorites — a listener saving individual tracks passes a thousand without
-  trying, where the same person follows perhaps forty shows — so the tracks
-  are what eventually make a publish fail, and they take the show
-  subscriptions down with them.
-- **No fallback URL, and position 2 is spent.** An entry is guids and nothing
-  else. Resolving them is the only way to reach a title, artwork or a feed
-  URL, so a feed that 404s and was never indexed leaves a reader with a guid
-  and nothing to render. NIP-73 has an optional URL hint at position 2 for
-  exactly this, and this format puts the item's identifier there instead.
+---
 
-  That is a deliberate trade, and it is not close: without position 2 an item
-  favorite has no address at all, while without a URL hint it merely renders
-  poorly. There is one slot, and only one of the two candidates is load-bearing.
-  A URL would also have been the weaker occupant on its own terms —
-  `<podcast:guid>` is *designed* to outlive the feed URL, so the stored URL is
-  most likely to be stale at exactly the moment it is most needed.
-
-  And an entry nobody can resolve has no answer at all: carry it, render what
-  you can, and do not delete it, because a guid nobody can resolve today is
-  still somebody's favorite.
-- **A generic NIP-73 consumer shows the wrong thing for an item favorite.** It
-  resolves position 1, which on an item entry is the feed, so it renders the
-  show where one episode was meant, and reads the item's identifier at position
-  2 as a URL. This format cannot fix that in somebody else's client afterwards.
-  The
-  alternative was to put the item guid at position 1, which resolves correctly
-  in such a client and costs the ability to tell a feed favorite from an item
-  favorite by anything the namespace already defines.
-- **A per-item relay filter is not available on this kind.** Relays index `i`
-  at position 1 only, and position 1 is the feed guid for a feed favorite and
-  an item favorite alike. So `#i` for a feed guid returns both, together, and
-  there is no filter that returns one item's favorites. Counting or discovering
-  by item means fetching the lists and reading position 2.
-- **An item is addressed differently here than in a kind:1 note.** A boost note
-  tags the episode as `["i", "podcast:item:guid:<itemGuid>"]`, which is NIP-73's
-  own convention and is what both shipped apps write. This list, and
-  [the playback events](nip-value-playback-events.md), put the feed at position
-  1 instead. A `#i` filter written for one does not find the other, and nothing
-  in either format signals the difference. Read the kind before you read the
-  tag.
-- **No way to say an item is NOT a favorite.** The list holds choices, so a
-  removal is an absence. That is what makes [the baseline](#2-keep-a-baseline)
-  load-bearing: without one, a writer cannot tell an entry it removed from an
-  entry another app added, and there is nothing on the wire to ask.
-- **No provenance, and so no last-write-wins.** Nothing on an entry records
-  which app added it or when, which is why every writer has to keep its own
-  baseline (see [Merging](#merging)) instead of deriving the answer from the
-  event. Per-entry authorship, tombstones for removals, or timestamps would
-  each remove that requirement and let a reader work it out from the wire
-  alone. All three cost bytes on a list whose whole purpose is to hold as
-  many entries as it can, and none is specified here.
-- **No concurrency control.** Two apps that read the same version and publish
-  within a second of each other will still lose one set of changes; the merge
-  rules make each publish *correct with respect to what it read*, not
-  serialized. `created_at` and relay last-write-wins decide the survivor. In
-  practice favorites are toggled by one human at human speed, so the window
-  is small — but it is real, and it is why a client should re-read rather
-  than assume its own last publish is still current.
-
-## Test vectors
-
-A conforming implementation should pin at least these. They are stated as
-behaviors rather than fixtures so they can be written against any test
-runner.
-
-**1. A foreign entry survives your republish.** Read a list containing a feed
-your app cannot resolve and an item of it, publish, and both must come
-back byte-identical, in the same relative position, under the same medium.
-Your own new feed lands at the end of its own band, inside its medium run —
-which need not be the end of the event. This is the vector that catches a
-writer built from local state alone, which is the natural way to write one.
-
-**2. An empty list is distinguishable from a read that never happened.** A
-relay answering "I have nothing" and a relay that never answered must produce
-different results. Believing the second is how a whole library gets
-republished as empty.
-
-**3. Idempotence.** Read your own output, merge, publish: the tag array must
-be byte-identical. A format whose writers are not idempotent has two apps
-rewriting the event against each other forever, with neither wrong and
-neither converging.
-
-**4. An unrecognized tag or identifier kind survives.** A `k` naming a kind
-you never emit, an `i` whose prefix is not in your table, a tag type you have
-no meaning for — all of them belong to a writer newer than you, and must be
-carried through untouched. Pin that a medium run holding one comes back in wire
-order rather than banded: a tag with no kind has no band, and inventing a place
-for it is how a carried tag ends up somewhere that changes what it means. Pin
-two more places this reaches inside a tag. An
-unreadable entry between a feed entry and a legacy item must not end the
-legacy run, or that item is stranded with no feed at all. And a `podcast:guid:`
-entry whose **position 2** you cannot read is not a feed favorite: carry it
-whole, because reading it as one turns a newer writer's entry into a followed
-show.
-
-**5. Placement.** An item entry names its own feed, so shuffling the tag array
-moves nothing: parse the same entries in two orders and each item keeps the
-same feed guid. `medium` is the exception and is still a running value, and an
-entry with no `medium` tag above it reads as unknown rather than `podcast`.
-
-**6. An item entry declares a kind position 1 does not say, and a URL-shaped
-item guid does not corrupt it.** The kind is the kind of the entry's LAST
-identifier, so `["i","podcast:guid:F","podcast:item:guid:X"]` yields
-`podcast:item:guid` even though position 1 reads `podcast:guid`. And it comes
-from a table rather than from splitting a string, so an item guid of
-`https://example.com/ep/42` yields `podcast:item:guid` and never
-`podcast:item:guid:https` — at position 2, and at position 1 in the legacy
-form. Pin both, from one list: a writer that reads position 1 alone passes the
-string half on its own.
-
-**7. Both `k` layouts parse identically, and neither provokes a republish.**
-One `k` per distinct kind and a `k` paired with every `i` describe the same
-list; a reader that treats them differently silently loses every entry written
-by the other revision. Then pin the writer's half from the same fixture: hold
-exactly what the paired layout holds, claim it in your baseline, and publish
-nothing. The two layouts differ byte for byte while meaning the same thing, so
-a writer comparing the read as it ARRIVED rather than [put through its own
-framing](#5-publish-only-when-the-bytes-change) republishes a list nothing had
-changed — on every load, forever, if the other app does the same.
-
-**8. An entry you removed disappears; an entry you never published does not.**
-The same input — on the list, absent from your local state — must produce
-opposite results depending on the baseline. Pin both directions from one
-fixture, or an implementation that ignores the baseline entirely passes the
-half you wrote.
-
-**9. An entry another app removed is not resurrected.** Hold it locally, put
-it in your baseline, read a list without it, and it must stay gone. The
-obvious append-everything-local step re-adds it, and because the same step
-runs on the next load, the favorite returns forever on every device.
-
-**10. A baseline is never written for a publish that didn't land.** Simulate
-a publish that reaches no relay: the baseline must be unchanged, so the next
-toggle retries. Recording it anyway is what makes a lost publish permanent —
-the entry is now "already asserted" and is never sent again.
-
-**11. Removing a feed favorite never touches anybody's items.** Read a list
-with a feed entry and two items of that feed, one yours and one another app's.
-Take back the feed favorite and your own item: both go, theirs stays, and it
-still carries the feed guid it cannot be looked up without — which is the same
-string the removed feed entry carried, so a writer keyed on position 1 takes
-the surviving item with it. An earlier revision
-needed a rule to prevent this — the feed entry was the only tag naming those
-items' feed, so dropping it deleted another app's tracks. Pin that the
-surviving item is complete with no feed entry left on the list at all.
-
-**12. An opaque `content` survives a republish by a writer that cannot read
-it.** The sibling to vector 1, for the half of the event that is not tags.
-Read a list whose `content` is a string you have no way to interpret, change
-a favorite, publish, and it must come back byte-identical. Pin the inverse in
-the same breath — a list built from scratch is legitimately empty — or a
-writer that simply never touches the field passes on a technicality.
-
-Both existing implementations passed every vector above it while blanking
-`content` on the first favorite anyone toggled, because none of them looked
-at that field. That is what makes this one worth stating separately.
-
-**13. Going private takes the whole list, and coming back does not.** Read a
-list holding entries you did not write and cannot resolve, choose Private,
-and every entry must move — yours and theirs. Then read the result with a
-standing setting of Public and no choice, holding whatever this device now
-holds: the list says private, so a writer either follows it and publishes
-nothing, or asks — and if it publishes at all, only the entries its baseline
-claims may return to the tags, and nothing is lost from either half. The two
-halves of this vector fail in opposite directions: the first leaves a user
-97% private with nothing on screen saying which entries are still public, and
-the second publishes another app's private entry as a relay-indexed `i` tag.
-
-**14. A writer does not delete the half it does not write into — and this
-takes TWO cycles to observe.** Read an event with entries in both halves,
-where the ones in the half you do not publish into are not yours. Run a full
-cycle, feed the baseline it recorded back in, and run a second. The foreign
-entries must still be there after the second. One cycle cannot see this: the
-first publish emits correct bytes and only the baseline beside them is wrong,
-so every single-cycle vector above passes over it. One implementation shipped
-it in both directions at once: the same writer, in public mode, published an
-empty `content` over a private half it was carrying, and in private mode
-published an empty tag list over a public one. Whichever half a writer does
-not feed is the half at risk, so a writer with only one half is not exempt —
-it is simply not yet in a position to notice.
-
-Pin the control in the same fixture, or a writer that never claims anything
-passes: a list adopted off the relay must still enter the baseline for the
-half you *do* write into, or a later move between halves copies instead of
-moving, and the entries the user asked to hide stay in plaintext beside the
-encrypted copy.
-
-**15. A list found with entries in BOTH halves is carried, then converged
-once.** Read an event whose public tags and whose decrypted `content` name
-some of the same entries, where the private half also holds entries the public
-half does not. A cycle must return both halves intact: an entry appearing
-twice is not evidence that either copy is yours, and a writer that tidies the
-list by emptying one deletes entries it never wrote. Then converge, with the
-baseline claiming the inactive half and the device still holding what it
-claims — a claim without the entry behind it is a removal, rule 3 — and pin
-the thing only this state can produce — **an entry that was in both halves
-must be emitted ONCE**. The
-claimed-back copy is the same entry, not a second one, and concatenating them
-emits one favorite as two entries and double-counts it for every reader. The
-reference implementation did exactly that, and no vector above reaches the
-state that shows it. Carrying it silently is the other failure: every entry in
-the overlap is public, so a user who chose Private has not got it and nothing
-says so. Measured: 284 public, 287 encrypted, 284 in both, on an account whose
-every screen said it was fine. Vector 13 pins the switch; this pins what the
-next reader owes the result.
-
-**16. The stated mode outranks whatever the halves happen to hold.** Two
-fixtures, and the first is the one nothing else can reach. Read a list with
-`["visibility","private"]`, **no entries in either half**, and publish one
-local favorite: it must land in `content`, not in the tags. Every rule above
-answers this from emptiness, and emptiness has no answer — an implementation
-that infers the mode discloses that favorite as a relay-indexed `i` tag, on
-the account of a user who chose Private somewhere else. Then the converging
-half: read a list with `["visibility","public"]` whose `content` still decodes
-to entries, and a writer that can read both halves must emit each of them
-once, in the tags, with the private half emptied. The tag is the consent that
-licenses that move; without the tag, [vector 13](#test-vectors)'s conservative
-rule still applies and the same fixture must NOT move them.
-
-**17. A writer that cannot read a half may not restate the mode.** Same
-`["visibility","private"]` list, `content` this writer's codec cannot decode,
-and the writer set to public. It must publish `content` byte-identical, must
-not emit `["visibility","public"]`, and must not move anything. This is the
-disclosure the [read-both-halves
-rule](#the-list-is-public-or-private-and-the-event-says-which) exists for: an
-app claiming a list is public while the entries it cannot see stay encrypted
-has published a false statement about someone's privacy, and the next app to
-believe it converges on the strength of it. Pin the control in the same
-fixture — the same writer, the same list, but `content` it CAN decode — or an
-implementation that never restates the mode at all passes.
-
-**18. A run is emitted in band order, and a new entry joins its own band.**
-Read a list with two medium runs, hold the first run's items in a different
-order plus one new item, and publish: the run is not split in two and the new
-entry does not lead. Then pin the bands from a run that arrives interleaved and
-holds one of each level, with a new artist, a new album and a new track: out
-come artists, then albums, then tracks grouped by the album they name, each new
-entry at the end of its own band. Two well-formed wrong answers: local order
-first, and the other app imposes its order back forever; appended to the end of
-the event, and a second `medium` run opens for a medium that already had one. A
-third looks right until a list holds more than one level — appending at the end
-of the RUN rather than the band. And pin idempotence on the banded output, or
-the sort itself becomes the thing that never stops.
-
-**19. The same feed twice on the wire loses no item.** Read a list with two
-entries for one feed and an item after each. Fold the duplicate or carry it;
-either is conforming, and neither may lose an item or lose the favorite itself.
-Under the old grouping this was the dangerous case: each copy opened a group,
-and a writer that modelled groups by guid met the second one already taken and
-dropped the item beneath it.
-
-**20. An item that names no feed is carried, never deleted, and never given
-one by being moved.** Parse it with a null feed — do not borrow one from an
-unrelated entry and do not invent one, because a wrong feed guid resolves to
-the wrong thing and a missing one resolves to nothing. A placeholder guid is an
-invented one, and a writer that always fills position 2 writes placeholders.
-Republish and the tag is still there, still in its two-element legacy form,
-because there was nothing to rewrite it with. Then **re-parse your own output
-and assert the feed is still null**, from a fixture where the orphan shares a
-run with albums: the tag is byte-identical either way, so a writer that banded
-it in beside the other tracks passes everything else while having handed it
-whichever album landed last. That is the assertion band 0 exists for. This is
-what an item written before this revision looks like when no feed entry
-precedes it, and it is unresolvable by anyone, which is not the same as junk.
-
-**21. Exactly one `alt`, ours, first.** Read a list whose `alt` carries some
-other label, publish a change, and the event's first tag is
-`["alt", "PC 2.0 Favorites"]` with no second `alt` beside it.
-
-**22. The private plaintext carries no `?`.** Encode an item whose guid holds
-a query string: the plaintext contains no `?` character, `JSON.parse` of it
-returns the original tags, and a full cycle in private mode gives the guid
-back out of `content` unchanged.
-
-**23. A plaintext that is not a tag array is an unreadable half, not an empty
-one.** `{}`, a string, an array holding a non-array, an array holding a
-non-string all decode to null — and `[]` to an empty list. Put such bytes in
-`content`: a public-half change carries them byte for byte, and a writer set
-to private publishes nothing, because it may not write into a half it could
-not read.
-
-**24. A private half past the NIP-44 v2 cliff is refused.** Hold enough items
-that the plaintext exceeds 60,000 bytes, set private, and the cycle publishes
-nothing and claims nothing. The same shape well under the line publishes. Grow
-the fixture from the writer's own plaintext, so the vector tracks the cap
-rather than a guess about bytes per entry.
-
-**25. A feed favorite and an item favorite are stated separately.** Save one
-item from a feed you have not favorited: ONE tag, the item, carrying the guid
-of its feed, and no feed entry at all. This is the case the format could not
-write before — it had to open a feed entry to hold the item, which put a feed
-the user never chose on the list, 114 of 196 on the first real one. Then
-favorite the feed as well and a second tag appears, with the item untouched —
-and **pin that the two tags carry the same string at position 1** and differ
-only in length, because that is what a reader keyed on position 1 gets wrong.
-Pin the mirror case from the same fixture: a feed favorite alone is one tag and
-no item. Pin the baseline shape too — a claim on an item is the PAIR, and
-**two entries sharing an item guid under different feed guids are two
-favorites**: keying on the item guid alone folds them into one, and a claim on
-one then removes the other. Pin one entry in both halves, emitted once.
-
-**26. Unfavoriting the feed keeps the item, and needs nothing to say so.**
-Read a list with a feed entry and an item of that feed, hold the feed as not
-favorited with your baseline claiming it, and publish: the feed entry goes, the
-item stays, and it still carries its feed guid. An earlier revision could not
-delete that entry — it was the only tag naming the item's feed — so the removal
-had to be stated with a marker, and a writer that left the marker off said
-"nobody knows" instead. Pin the other direction from the same fixture — drop
-the item, keep the feed — and pin the conflict: a feed favorite your baseline
-does not claim is another app's, and not holding it here does not beat it.
-Deleting it has the two of you rewriting the event at each other forever.
-
-**27. An entry is carried whole, and no writer invents a feed guid.** Rule 4
-inside an `i` tag, and the stakes rose with this revision. A writer that
-rebuilds entries as `["i", id]` type-checks, renders correctly, and strips
-every item of half its address, so nobody can look those favorites up again.
-Pin an item carrying an element at position 3 that this writer has no meaning
-for: it comes back byte-identical. Then pin the MIGRATION in the same fixture:
-a legacy `["i","podcast:item:guid:X"]` takes its feed from the entry above it,
-a writer republishes it as `["i","podcast:guid:F","podcast:item:guid:X"]` —
-the WHOLE tag, not just an appended element — and reading the result back
-changes nothing. A migration that is not idempotent republishes on every load
-forever.
-
-**28. An artist entry is a favorite that belongs to no feed.** Read a list with
-a `podcast:publisher:guid` entry between an album entry and a track: the artist
-carries no item guid, and the track still names the ALBUM. Republish and it
-comes back in place and bare. Pin the bare part from the app that HOLDS the
-artist as well as one carrying it — that is where a writer reaches for a second
-element, because it has state and somewhere to put it, and there is no feed for
-an artist to belong to. Everything to here is mandatory for every app, whether
-or not it offers artist favorites. The last part is not: origination, `k` tag
-included, is what an app that DOES offer them owes — without the `k`, `#k`
-discovery misses every artist favorite it ever publishes.
-
-**29. A removal survives a change of mode.** Unfavorite an entry your baseline
-claims, and pin that it goes in all four places a mode change puts it. On a
-list already private: hold one of two private entries, publish, and the other
-is dropped — a merge carrying "it is only changing places" logic on this path
-publishes NOTHING here, because the bytes it builds match the ones it read.
-On the half being moved INTO: a licensed private → public move with the removed
-entry in the public half, which must not come back on the way past. And on the
-half being moved FROM: going private with the removed entry in the public half,
-which must not ride the move across. And on the claim-back: no `visibility`
-tag with BOTH halves populated, so the writer may take back only what its own
-baseline names, with the removed entry among what it claims — which must be
-dropped from both halves rather than published in the open. Run the last two
-for TWO cycles. The baseline written by the first cannot claim an entry the
-device does not hold, so a removal that survives either survives every cycle
-after it as well — one cycle shows a stale entry, two show that nothing can
-ever remove it.
-
-**30. An empty half is an empty string.** Take back the last entry of a
-`medium` run — a list with no `visibility` tag and both halves populated, one
-private entry your baseline claims and you still hold, moving to the public
-half — and pin that `content` comes back as `''` rather than as the encryption
-of the run that entry left behind. Then hand the result to a second writer whose
-signer has NO NIP-44, holding both feeds, and have its user choose private. It
-must reach private. A writer that cannot decrypt reads any ciphertext as a half
-another app owns, and refuses to change the mode on top of it; that refusal is
-right, and an empty half that encodes to ciphertext makes it fire on nothing.
-The second half of this vector is the one that matters — a byte-count
-assertion alone does not say what the leftover costs.
-
-**31. A carried claim retires with the entry it names.** Three parts, and the
-third is what keeps the first two from becoming an over-correction. Take an
-entry back out of the inactive half — unfavorite one your baseline claims
-there — and pin that the claim goes with it; then have a second writer put
-that entry back into that half and pin that your next cycle leaves it alone.
-Repeat on a whole-list move, where the half is emptied outright rather than
-edited entry by entry: same rule, same second writer, same outcome. Then pin
-the opposite: a second writer removes an entry from the inactive half that you
-STILL HOLD, and the claim must survive, because that claim is what stops you
-re-adding what somebody else deleted. A test that retires on absence alone
-passes the first two and fails this one.
-
-## Open questions / not yet resolved
-
-- **The list is public, and a private half is optional to support but not
-  optional to carry.** Every entry is a tag, tags are plaintext, and `i` is a
-  single-letter tag, so relays index it: a `#i` filter answers "which pubkeys
-  favorited this feed". The list is searchable in reverse, not merely readable
-  by someone who already has the pubkey. Note the reach of that one filter —
-  relays index position 1, and position 1 is the feed guid on an item entry
-  too, so the same query also returns everyone who saved a single episode of
-  the show without following it. `content` is the only free slot in the
-  event, and on a list with no private half it is empty.
-
-  The shape this would take is
-  [NIP-51](https://github.com/nostr-protocol/nips/blob/master/51.md)'s split:
-  public entries stay in tags, private entries go in `content` as a JSON array
-  that mimics the tag array, stringified and encrypted with
-  [NIP-44](https://github.com/nostr-protocol/nips/blob/master/44.md) to the
-  author's own key. The
-  [tag order rules](#tag-order) apply inside that array unchanged, because it
-  is a tag array: `medium` still runs, the bands still apply per run, and an
-  item still names its own feed. The two halves are two lists with two
-  orderings,
-  and no entry is in both. A user's list is all public or all
-  private — **never split per entry**, which an earlier revision of this
-  document allowed and which is settled in [The list is public or
-  private](#the-list-is-public-or-private-and-the-event-says-which) — and an
-  app that never encrypts anything still conforms, because carrying is
-  mandatory and using it is not.
-
-  **What no app may do is drop the half it does not use.** This used to be the
-  blocker, and it is now [rule 4's `content`
-  clause](#content-is-carried-too-and-this-rule-did-not-used-to-say-so) with
-  [test vector 12](#test-vectors) beside it: carrying is mandatory, using it is
-  optional, and that is the only combination that does not destroy data.
-
-  **The choice belongs to the LIST, not to the app**, and getting this backwards
-  produces a list that is 97% private. It was tried the other way first, on the
-  reasonable-sounding rule that an app may only move entries it wrote: a user
-  set one app to Private, its own 436 entries were encrypted, and 13 written by
-  a second app stayed in the tags — public, relay-indexed, and searchable in
-  reverse. Measured, on a real account. The user had made a privacy choice and
-  the format had honoured most of it, which is the kind of partial that is worse
-  than a clear no: nothing on screen said which entries were still public, and
-  the remedy was to go and make the same choice again in every other app they
-  had ever signed into.
-
-  So: **the whole list has one mode, every writer puts its entries in that
-  half, and the event says which.** That is the `visibility` tag, and the rules
-  for reading it, changing it and folding a list toward it are in [The list is
-  public or private](#the-list-is-public-or-private-and-the-event-says-which).
-  Setting Private in any one app moves everything, including entries that app
-  cannot resolve and did not write.
-
-  Absent the tag, the mode is inferred from whichever half holds entries, and
-  the direction of travel is asymmetric:
-
-  - **public → private may move another app's entries.** It only ever *reduces*
-    exposure, it is reversible by any app that can decrypt, and the entries are
-    carried whole rather than dropped. The worst case is an entry sitting in a
-    half its author has not learned to read yet, which is what the sequencing
-    below exists to prevent.
-  - **private → public may NOT.** It is a disclosure, it publishes an `i` tag
-    relays index, and it cannot be taken back. Move only what your baseline says
-    you put there, and carry the rest where it is.
-
-  With the tag present the asymmetry lifts, because the thing it was
-  compensating for — no way to know the user's intent for the whole list — is
-  exactly what the tag supplies, and only an app that could read both halves is
-  allowed to have written it.
-
-  **A reader shows the private half whatever its own last choice was.** The
-  entries are the user's, whoever wrote them, and rendering them discloses
-  nothing. An implementation that filters the half it is not currently writing
-  down to what its own baseline claims — a natural way to keep one app from
-  adopting another's entries — hides the user's own favorites from them, on the
-  device they just made the choice on.
-
-  **The remaining sequencing is reader-first, and it is not optional.** A
-  writer that encrypts before every other writer carries `content` does not
-  fail loudly — it silently makes those favorites disappear on the far side,
-  which is worse than the format it replaced. So: land the carry rule (done),
-  ship it in **both** implementations, and only then let either one start
-  writing a private half.
-
-  Moving *another app's* entries has a further prerequisite on top of that, and
-  it is the same shape one step along: an app must be able to **read and render**
-  the private half before anything moves entries into it on its behalf. Until
-  then the move is indistinguishable from a deletion on that app's screen. Ship
-  the reading everywhere, then let the whole-list move go on.
-
-  Four further things break, and none of them is optional either — the rules
-  for the bytes themselves are in [Writing the private
-  half](#writing-the-private-half):
-
-  - **Idempotence, immediately.** NIP-44 draws a fresh nonce per encryption,
-    so the same entries produce different bytes every time. The byte
-    comparison in rule 5 therefore always differs, and every load republishes
-    — two apps rewriting the event against each other forever, this time
-    self-inflicted. Compare the *decrypted* array against the decrypted array
-    you read, and compare ciphertext only where you could not decrypt it.
-  - **A signer that cannot decrypt looks exactly like an empty private half.**
-    Not every NIP-07 or NIP-46 signer implements `nip44`. Treat a decryption
-    failure as a degraded read under rule 1: carry the ciphertext, publish
-    nothing derived from it, and say so on screen. The user cannot otherwise
-    tell "hidden here by choice" from "this app has not shipped support yet",
-    and both render as a shorter list.
-  - **Size, at about 1.5×.** NIP-44 pads to a power-of-two chunk, then base64
-    encodes: 25 KB of tag JSON becomes 37 KB of `content`, and 90 KB becomes
-    128 KB. The ~128 KB relay cap named above is then reached at roughly 90 KB
-    of entries rather than 128 KB, so privacy costs about a third of the list
-    — paid in item favorites, which are what fill it.
-  - **The 64 KB boundary is an interop cliff, not a cap.** NIP-44 v2 as
-    originally published capped plaintext at 65535 bytes. The current text
-    allows 2^32-1 and switches to a 6-byte length prefix at 65536, so a
-    library built to the older text rejects a payload across that line. A
-    private list that grows past 64 KB may be unreadable in an app whose
-    `nip44` is a year old — and unreadable is indistinguishable from empty.
-    Stay under it until signers catch up.
-
-  The baseline gains a job too: record which half an entry was in. Moving an
-  entry from public to private is a removal and an addition, and a baseline
-  that remembers only the identifier reads the move as "mine, and I removed
-  it" on the next cycle and deletes it — the same failure as seeding a
-  baseline from another list. Rule 2 says how the two halves' claims differ:
-  the half you write into is recomputed, the half you carry keeps what it had.
-
-  **Rendering both halves as one library is not the same as adopting both.**
-  An app that shows the union — the natural thing, since it is one person's
-  favorites — still has to keep the set it renders apart from the set it
-  claims, because local state goes wholly into the half that app writes into.
-  Adopt an entry out of the other half and the next publish moves it across.
-  Which way that cuts is the asymmetry above: on a whole-list move to private
-  it is the point, and the entry is meant to travel. Going the other way it
-  is a **disclosure** — the entry reappears as a plaintext `i` tag, relays
-  index `i`, and the `#i` filter named above now answers for it — so out of
-  the private half you may adopt only what your baseline already claims, and
-  you carry the rest where it is. An item favorite discloses more than itself
-  on the way out: its feed guid is what lands at position 1, so publishing one
-  saved episode puts the show into the relay's index of that feed. Carrying an
-  entry and showing it are fine together; carrying it and *owning* it is not.
-
-  What stays public whatever you do: the pubkey, the kind, `created_at`, and
-  the event size. An observer still learns that this person keeps podcast
-  favorites, roughly how many, and when they last changed them. Padding hides
-  the exact count, not the order of magnitude.
-
-  If waiting for both writers to ship the carry rule is not acceptable, the
-  alternative is a second self-assigned kind for the private list. A writer
-  never touches a kind it does not know, so an old app cannot clobber it. That
-  costs a second read on every load, a rule for moving an entry between the
-  two events without a crash in between duplicating or losing it, and a second
-  helping of the collision cost named in [Core
-  Architecture](#core-architecture).
+Why each rule exists: [the rationale](notes/pc20-favorites-rationale.md).
+The vectors: [conformance/vectors.md](conformance/vectors.md).

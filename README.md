@@ -30,11 +30,11 @@ taken from a site. Both say so in their first line.
 
 ## The specs
 
-Four documents at the root discuss the favorites format, and **only the two
-under Normative define anything an implementation has to match.** The other two
-are background: they record how a decision was reached and what each app has to
-change, and an implementation written against them will not interoperate. If
-you are implementing, read the normative pair and stop there.
+Five documents discuss the favorites format, and **only the two under
+Normative define anything an implementation has to match.** The other three are
+background: they record why a rule exists, how a decision was reached, and what
+each app has to change, and an implementation written against them will not
+interoperate. If you are implementing, read the normative pair and stop there.
 
 Both normative specs are proposals with real failure modes behind them, not
 settled practice. Both use self-assigned kinds — check the registry for a
@@ -74,7 +74,8 @@ and you can count the user's choices by counting the lines. `content` is empty
 only because this list has no private half; it is carried verbatim, never
 assumed.
 
-Adding it to a third? Run the spec's 31 test vectors against your own code:
+Adding it to a third? The spec is about 360 lines of rules; the reasons are in
+a separate note, and the 31 test vectors run against your own code:
 
 ```bash
 node --test conformance/vectors.test.mjs
@@ -119,8 +120,13 @@ timestamped listening history, and "share my boosts" is not consent for it.
 
 ### Background — not specs, do not implement against these
 
-Neither defines wire format. They exist so the normative pair can stay short:
-the reasoning lives here rather than inside the spec.
+None of these defines wire format. They exist so the normative pair can stay
+short: the reasoning lives here rather than inside the spec.
+
+**[notes/pc20-favorites-rationale.md](notes/pc20-favorites-rationale.md)** is
+the favorites spec's companion — why each rule exists, what was measured, and
+what was considered and rejected. The spec links into it with a `(why)` beside
+the rule. Read it to understand a rule, never to implement one.
 
 **[pc20-favorites-vs-list-feeds.md](pc20-favorites-vs-list-feeds.md)** puts the
 favorites spec beside the format Podcasting 2.0 already has for the same

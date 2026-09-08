@@ -37,7 +37,7 @@ silently deletes every tag its author had not heard of — which, for a
 namespace as young as Podcasting 2.0, is most of them.
 
 That instinct is the same one behind [carry what you can't
-read](../../pc20-favorites.md#4-carry-what-you-cant-read) in the favorites
+read](../../pc20-favorites.md#4-carry-what-you-cannot-read) in the favorites
 spec, arrived at independently for RSS.
 
 ## How the sites diverge
