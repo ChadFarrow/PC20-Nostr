@@ -37,7 +37,15 @@ const {
   decodePlaintext,
   seal,
   itemClaim,
+  capabilities = {},
 } = ADAPTER;
+
+// The spec makes ORIGINATING some entry kinds optional while carrying them
+// stays mandatory, so a vector that covers one has a half no adapter can pass
+// without the feature. An adapter opts out by exporting `capabilities`; see
+// adapter.d.ts. The default is ON, deliberately — an adapter that says nothing
+// gets tested, because silence must never skip a check.
+const ORIGINATES_ARTISTS = capabilities.artistFavorites !== false;
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -1760,6 +1768,32 @@ test('28. An artist entry is a favorite that belongs to no feed', () => {
     at(out.tags, ARTIST) < at(out.tags, FEED_A) && at(out.tags, FEED_A) < at(out.tags, ITEM_A1),
     'the run was not emitted in band order: artists, albums, then tracks',
   );
+
+  // EVERYTHING ABOVE IS MANDATORY FOR EVERY APP, whether or not it offers
+  // artist favorites: the entry parses, it names no feed, it does not disturb
+  // the track after it, and it comes back bare and in its band.
+  //
+  // What follows needs the feature. The spec's rule is "carrying one is
+  // mandatory; offering the feature is not", so an app with no artist
+  // favorites in its UI cannot reach the states below — its local state never
+  // holds an artist. It says so with `capabilities.artistFavorites: false`.
+  if (!ORIGINATES_ARTISTS) {
+    // The flag has to be true in the direction that matters. An adapter that
+    // declares no artist favorites and originates one anyway is claiming an
+    // exemption it is not using, so pin that it really does not.
+    const none = plan({
+      read: ev([]),
+      local: [feed(ARTIST, 'music')],
+      baseline: base(),
+      mode: 'public',
+    });
+    assert.ok(
+      !none.publish || !none.publish.tags.some((t) => t[0] === 'i' && t[1] === ARTIST),
+      'this adapter declares artistFavorites: false but originated one anyway — '
+        + 'drop the flag and let the rest of this vector run',
+    );
+    return;
+  }
 
   // The same, from the app that HOLDS the artist — which is where a writer
   // reaches for an extra element, because it has state and somewhere to put it.

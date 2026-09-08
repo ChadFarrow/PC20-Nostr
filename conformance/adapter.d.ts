@@ -275,6 +275,28 @@ export interface FavoritesAdapter {
    */
   itemClaim(itemId: string, feedGuid: string): string;
 
+  /**
+   * Optional. Features the spec makes OPTIONAL TO OFFER while carrying them
+   * stays mandatory — omit it entirely and every vector runs.
+   *
+   * A vector covering such a feature has two halves. The carrying half is
+   * mandatory and always runs: the entry parses, survives your republish
+   * whole, and lands in its band. The originating half needs local state your
+   * app can never hold if it does not offer the feature, so declaring the flag
+   * skips exactly that and nothing else.
+   *
+   * The default is ON for every flag. An adapter that says nothing is tested,
+   * because silence must never skip a check — and the vector pins that the
+   * flag is honest, so an adapter declaring `false` while originating one
+   * anyway fails rather than buying an exemption it is not using.
+   *
+   *   artistFavorites  false when your app has no way for a user to favorite
+   *                    an ARTIST. You still carry `podcast:publisher:guid`
+   *                    entries another app wrote, bare and in place, and
+   *                    vector 28 still holds you to that.
+   */
+  capabilities?: { artistFavorites?: boolean };
+
   /** One publish cycle, decided but not sent. */
   plan(input: PlanInput): PlanResult;
 

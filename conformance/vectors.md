@@ -287,13 +287,20 @@ forever.
 **28. An artist entry is a favorite that belongs to no feed.** Read a list with
 a `podcast:publisher:guid` entry between an album entry and a track: the artist
 carries no item guid, and the track still names the ALBUM. Republish and it
-comes back in place and bare. Pin the bare part from the app that HOLDS the
-artist as well as one carrying it — that is where a writer reaches for a second
-element, because it has state and somewhere to put it, and there is no feed for
-an artist to belong to. Everything to here is mandatory for every app, whether
-or not it offers artist favorites. The last part is not: origination, `k` tag
-included, is what an app that DOES offer them owes — without the `k`, `#k`
-discovery misses every artist favorite it ever publishes.
+comes back in place, bare, and in the artist band ahead of the album it was
+read after. **All of that is mandatory for every app**, whether or not it
+offers artist favorites, because carrying one is not optional.
+
+Origination is. An app with no way for a user to favorite an artist can never
+hold one, so the rest of this vector tests a state it cannot reach: it declares
+`capabilities.artistFavorites: false` and stops there. Everything above still
+runs. For an app that DOES offer them, pin the bare entry from the app that
+HOLDS the artist — that is where a writer reaches for a second element, because
+it has state and somewhere to put it — and pin that originating one emits the
+`k` tag, without which `#k` discovery misses every artist favorite it ever
+publishes. The flag has to be honest: an adapter declaring `false` while
+originating an artist anyway fails, rather than buying an exemption it is not
+using.
 
 **29. A removal survives a change of mode.** Unfavorite an entry your baseline
 claims, and pin that it goes in all four places a mode change puts it. On a

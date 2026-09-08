@@ -83,6 +83,11 @@ keeps you from breaking them, which is why it lives here and not there:
 - **Capture `content` on the read.** An implementation that never reads the
   field has nothing to put back even in principle, which is the state both
   existing implementations were in when this was found.
+- **`capabilities` is optional, and its default is ON.** Export it only to
+  declare a feature the spec makes optional to OFFER — today just
+  `artistFavorites`. It skips the originating half of that feature's vector and
+  nothing else; carrying is mandatory and still runs. An adapter that exports
+  nothing is tested in full, because silence must never skip a check.
 
 If your app's shapes differ, adapt in the shim rather than editing the vectors.
 The vectors are the spec; the shim is yours.
@@ -121,7 +126,7 @@ One line each. The full statement of every vector is in
 | 25 | A feed the user never favorited written to the list; two items sharing an item guid folded into one |
 | 26 | Unfavoriting a feed taking its saved item with it, or deleting a favorite another app made |
 | 27 | Entries rebuilt as `['i', id]`, stripping the feed guid that makes an item resolvable at all |
-| 28 | An artist entry given a feed guid, or made an item of the entry above it |
+| 28 | An artist entry given a feed guid, or made an item of the entry above it; an app claiming `artistFavorites: false` that originates one anyway |
 | 29 | A removal suspended while the list changes mode — lost for one cycle, then for good |
 | 30 | An emptied `medium` run left behind, so an empty private half reads as one somebody owns |
 | 31 | A baseline claim outliving its entry, so the next app to write that entry has it deleted |
@@ -159,6 +164,7 @@ breaking the reference on purpose and confirming the right one fails:
 | Skip the by-feed grouping inside band 3 | **18** |
 | Put an item that names no feed in band 3 | **20** |
 | Band a run that holds a tag you cannot classify | **4** |
+| Declare `artistFavorites: false` from an adapter that originates one | **28** |
 | Skip a duplicate feed group | **19** |
 | Drop an item that has no group above it | **20** |
 | Compare against the read as it arrived instead of reframed | **7**, 17 |

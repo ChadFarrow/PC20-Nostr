@@ -11,13 +11,18 @@ Two implementations exist. Nothing else in any repo writes kind 10333.
 
 | Repo | Path | Lines | Read at |
 |---|---|---|---|
-| `boostmebitch` | `lib/nostr/favorites-list.ts` | 1862 | `76e1fe6` |
-| `stablekraft-app` | `lib/nostr/favorites-single-list.ts` + `favorites-privacy.ts` | 884 + 777 | `95d0a2fa` |
+| `boostmebitch` | `lib/nostr/favorites-list.ts` | 2432 | `7503ac5` (2026-09-07) |
+| `stablekraft-app` | `lib/nostr/favorites-single-list.ts` + `favorites-privacy.ts` | 1397 + 788 | `fba7681` (2026-09-08) |
 
-Both SHAs carry the `visibility` tag (PC20-Nostr#30, landed as
-`boostmebitch@9d55f2a` and `stablekraft-app@4924389` on 2026-09-02) and the
-fixes the first conformance run produced (boostmebitch#294 and
-stablekraft-app#236, merged 2026-09-03).
+Both are `origin/HEAD` as of 2026-09-08. Both carry the `visibility` tag
+(PC20-Nostr#30, landed as `boostmebitch@9d55f2a` and `stablekraft-app@4924389`
+on 2026-09-02) and the fixes the first conformance run produced
+(boostmebitch#294 and stablekraft-app#236, merged 2026-09-03).
+
+**The code moved a long way since this page's previous read.** At
+`boostmebitch@76e1fe6` and `stablekraft-app@95d0a2fa` the three files were 1862,
+884 and 777 lines. `favorites-list.ts` alone is +633/-63 between `76e1fe6` and
+`7503ac5`. Every conclusion below that was drawn at the old SHAs is marked.
 
 Supporting modules — boostmebitch: `favorites.ts`, `favorites-sync.ts`,
 `favorites-hydrator.ts`, `read-trust.ts`. stablekraft-app:
@@ -34,8 +39,8 @@ it. Read whichever answers the question you have, and record the SHA.
 
 | | Tests covering the format |
 |---|---|
-| `boostmebitch` | `scripts/check-favsync.mjs` (2138 lines) — `npm run check:favsync`, loading the shipping module under plain Node; every vector replayed against a `naive()` |
-| `stablekraft-app` | 2008 lines: `favorites-single-list.test.ts` (1029), `favorites-privacy.test.ts` (979) |
+| `boostmebitch` | `scripts/check-favsync.mjs` (2762 lines) — `npm run check:favsync`, loading the shipping module under plain Node; every vector replayed against a `naive()` |
+| `stablekraft-app` | 2610 lines: `favorites-single-list.test.ts` (1543), `favorites-privacy.test.ts` (1067) |
 
 stablekraft's suite cites this spec's vectors by number and imports nothing
 but `node:test` and `node:assert/strict`. It is also, by its own header, where
@@ -48,20 +53,82 @@ page was read too literally.)
 against its own merge** — `npm run check:conformance` in either repo, through a
 thin shim (`boostmebitch/scripts/conformance-adapter.mjs`,
 `stablekraft-app/lib/nostr/favorites-conformance-adapter.ts`) and the
-`PC20_FAVORITES_ADAPTER` hook on `vectors.test.mjs`. The first run of each
-found real defects (below), and four vectors the document itself had wrong.
+`PC20_FAVORITES_ADAPTER` hook on `vectors.test.mjs`. Both accept
+`PC20_NOSTR_DIR`, so the suite can be pointed at any checkout of this repo. The
+first run of each found real defects (below), and four vectors the document
+itself had wrong.
+
+## Scored against the current 31, on 2026-09-08
+
+Run today: the vectors at PC20-Nostr `3f44c19` against `boostmebitch@7503ac5`
+and `stablekraft-app@fba7681`. **Both score 25 of 31.** Which six differ, and
+that is the useful part.
+
+| vector | boostmebitch | stablekraft-app |
+|---|---|---|
+| 16 — an empty untagged list defaults to public | red | red |
+| 18 — band order | **green** | red |
+| 25 — feed and item favorites stated separately | red | green |
+| 26 — unfavoriting the feed keeps the item | red | red |
+| 27 — an entry is carried whole | red | green |
+| 28 — an artist entry belongs to no feed | green | red, until it declares the opt-out |
+| 30 — an empty half is an empty string | red | red |
+| 31 — a carried claim retires with its entry | red | red |
+
+Four of those are the spec moving, not the apps breaking:
+
+- **16 is one day old.** Both fail on the same assertion, `an empty untagged
+  list defaults to public`. Both still implement the rule it replaced — ask the
+  user and publish nothing — which landed in PC20-Nostr#47 today. It fails safe:
+  they do nothing where the spec now expects a public publish, on a brand-new
+  empty account only.
+- **30 and 31 are red in both**, and neither has adopted them yet.
+- **18 answers a question this page left open.** boostmebitch bands each
+  `medium` run; stablekraft does not. The line below saying it was unverified is
+  now resolved.
+
+Two are boostmebitch's own recorded divergences, and its
+`scripts/conformance.mjs` header states each by name: 25 fails only its last
+assertion, refused by a wholesale-delete guard deliberately stricter than the
+suite after an unhydrated store cost a live account 213 groups and 232 items on
+2026-08-21; 26 is stage 3 of the feed-guid migration, deliberately unshipped;
+27 fails one assertion — that a writer may not claim an entry it carries —
+which contradicts the adopt-what-you-render model `adapter.d.ts` documents by
+name. That header still says "25 of 28"; the suite is 31 now, so the count is
+stale even though all three reasons stand.
+
+**Vector 28 was the suite's bug, not stablekraft's, and it is fixed.** It
+failed on `favoriting an artist must publish` — the vector handed the adapter a
+local artist favorite and required one, while the spec says carrying an artist
+entry is mandatory and offering the feature is not. An app that does not
+originate them could not pass a vector testing an optional feature.
+
+The vector now splits. Everything mandatory still runs for everyone: the entry
+parses, names no feed, does not disturb the track after it, and comes back bare
+and in its band. An app with no artist favorites in its UI declares
+`capabilities.artistFavorites: false` in its adapter and stops there. The flag
+has to be honest — an adapter declaring it while originating an artist anyway
+fails, which is a row in the mutation matrix.
+
+Measured: adding that flag to stablekraft's adapter turns 28 green and takes it
+to **26 of 31**. The change is four lines in
+`lib/nostr/favorites-conformance-adapter.ts`; nothing in the app's merge moves.
 
 ## Read this before comparing the two
 
-**Both apps' source comments about each other are out of date, and so was the
-first draft of this page.**
+**Both apps' source comments about each other went out of date faster than
+anyone updated them, and so did the first draft of this page.**
 
-`favorites-list.ts` carries a header listing five deliberate divergences from
-stablekraft. It was accurate when written. Re-read against
-`stablekraft-app@db2eb22f`, **two of the five no longer hold** — stablekraft
-has since fixed both. An audit that trusted that header, or that read the
-local `~/Vibe/stablekraft-app` checkout (three commits stale at the time this
-was written), reports bugs that were fixed upstream.
+`favorites-list.ts` used to carry a header listing five deliberate divergences
+from stablekraft. It was accurate when written; re-read later against
+`stablekraft-app@db2eb22f`, two of the five no longer held, because stablekraft
+had fixed both. An audit that trusted that header, or that read a stale local
+checkout, reported bugs that were fixed upstream.
+
+**That header is gone at `7503ac5`** — the file names StableKraft only where it
+records a shared rule or a real event, never as a list of that app's defects.
+Deleting it was the right fix and it is the reason this section stays: the
+lesson outlived the comment.
 
 This is the concrete reason for the
 [read-through-`origin/HEAD` rule](../../CLAUDE.md#read-originhead-never-the-local-checkout).
@@ -71,10 +138,17 @@ cross-references faster than anyone updates them.
 ## What ships
 
 [`favorites-list.ts`](../modules/nostr/favorites-list.ts) — zero imports, same discipline as
-`read-trust.ts`. Re-extracted at `76e1fe6`, after boostmebitch#294; before that it
+`read-trust.ts`. Extracted at `76e1fe6`, after boostmebitch#294; before that it
 sat at `55a6445`, and before that at `1f26ba0` and 722 lines, which predates
 the private half, the `content` carry and the per-half baseline. Anyone who copied it in that window got a file that would
 blank another app's private entries.
+
+**The extracted copy still matches `76e1fe6` byte for byte, and its source has
+moved on.** `catalog/check-drift.sh` reports `SOURCE MOVED` for it —
+`76e1fe6 -> 7503ac5`, +633/-63 — and verifies `modules/nostr/read-trust.ts`
+clean at `1f26ba0`. So the file here is a correct snapshot of a version that is
+no longer current, and the six red vectors above were scored against `7503ac5`,
+not against this copy. Re-extract before quoting it as what the app does today.
 
 **Conformance is not settled by reading either of these.** Run
 [`../../conformance/vectors.test.mjs`](../../conformance/vectors.test.mjs)
@@ -111,12 +185,12 @@ is that it never stops. At the time it was worse than churn: tag order was
 semantic — it carried which feed an item belonged to — so each cycle rewrote
 the meaningful part of the event.
 
-Both apps keep one order now (vector 18). Two things have changed under them
-since, and neither is reflected in the code read at the SHAs above: an entry
+Both apps keep one order now. Two things changed under them since: an entry
 names its own feed, so order carries no meaning left to corrupt; and the spec
 prescribes the order rather than asking each writer to preserve what it read —
 [Tag order](../../pc20-favorites.md#tag-order), four bands per `medium` run.
-Whether either app emits the bands is unverified here.
+**Measured 2026-09-08: boostmebitch emits the bands and passes vector 18;
+stablekraft does not.**
 
 **2. The append pass and resurrection. FIXED in stablekraft-app#236.** boostmebitch
 filters local groups absent from the wire against the baseline — `fresh =
@@ -209,6 +283,12 @@ it (`conformance/adapter.d.ts`), and vectors 13 and 14 feed it back.
   driver (`favorites.ts`), the cycle serializer (`favorites-sync.ts`) and the
   hydrator are not extracted — they depend on that app's pool and storage.
   Read them in place.
-- `check:conformance` in each app needs `../PC20-Nostr` beside the checkout.
-  Neither app's CI has that, so it runs by hand — which is one step better
-  than the vectors being prose, and one step short of being a gate.
+- `check:conformance` in each app needs a checkout of this repo —
+  `../PC20-Nostr` beside it, or `PC20_NOSTR_DIR`. Neither app's CI has that, so
+  it runs by hand, which is one step better than the vectors being prose and
+  one step short of being a gate. It is also why both apps sat at 25/31 without anything going
+  red on them: nothing runs the current vectors on a push.
+- The scores above were produced from shallow clones in a sandbox. To reproduce
+  them: clone each repo, then
+  `PC20_NOSTR_DIR=<this repo> npm run check:conformance`. stablekraft needs
+  `tsx`, so its dependencies have to be installed first.
