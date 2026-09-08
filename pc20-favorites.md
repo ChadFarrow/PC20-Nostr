@@ -539,7 +539,7 @@ to stop on the strength of one device's setting.
 The private half is a tag array, stringified, encrypted to the author's own
 key with NIP-44, and put in `content`. The
 [medium rules](#tag-order)
-apply inside it unchanged. Four rules govern the bytes, and each one is a
+apply inside it unchanged. Five rules govern the bytes, and each one is a
 defect an implementation shipped before it was written down here.
 
 - **The plaintext carries no `?`.** Write the character as its six-character
@@ -568,6 +568,17 @@ defect an implementation shipped before it was written down here.
   about 1.5×. Refusing costs the user one favorite and a message; publishing
   costs them the whole list on whichever app hits the cliff, with nothing on
   screen saying why. About 500 favorites fit. ([Vector 24](#test-vectors).)
+- **A half holding no entries is the empty string.** Emit `content: ''`, not
+  the encryption of an empty array and not the encryption of the `medium` tags
+  that used to label entries. A `medium` run left with nothing under it is not
+  cosmetic: it makes an empty half encode to real ciphertext, and ciphertext is
+  how the next writer knows somebody owns this half. A signer with no NIP-44
+  cannot open those bytes, so it reads them as a private half it must not
+  disturb and declines to change the mode on top of what it cannot see — which
+  is the correct rule, reached on false evidence. The user asks for private,
+  the app agrees the request is legitimate, the list stays public, and nothing
+  on screen says why. So prune a run you emptied, on whichever side you emptied
+  it. ([Vector 30](#test-vectors).)
 - **Compare decrypted arrays, never ciphertext.** NIP-44 draws a fresh nonce
   per encryption, so identical entries produce different bytes every time, and
   a ciphertext comparison republishes on every load, forever. Compare the
@@ -1189,6 +1200,18 @@ for TWO cycles. The baseline written by the first cannot claim an entry the
 device does not hold, so a removal that survives either survives every cycle
 after it as well — one cycle shows a stale entry, two show that nothing can
 ever remove it.
+
+**30. An empty half is an empty string.** Take back the last entry of a
+`medium` run — a list with no `visibility` tag and both halves populated, one
+private entry your baseline claims and you still hold, moving to the public
+half — and pin that `content` comes back as `''` rather than as the encryption
+of the run that entry left behind. Then hand the result to a second writer whose
+signer has NO NIP-44, holding both feeds, and have its user choose private. It
+must reach private. A writer that cannot decrypt reads any ciphertext as a half
+another app owns, and refuses to change the mode on top of it; that refusal is
+right, and an empty half that encodes to ciphertext makes it fire on nothing.
+The second half of this vector is the one that matters — a byte-count
+assertion alone does not say what the leftover costs.
 
 ## Open questions / not yet resolved
 

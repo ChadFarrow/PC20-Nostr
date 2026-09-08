@@ -1,7 +1,7 @@
 /**
  * AUTHORED. This file has never served traffic.
  *
- * It exists so `../vectors.test.mjs` has something to run against — 29
+ * It exists so `../vectors.test.mjs` has something to run against — 30
  * assertions nobody has watched go green are prose in a new costume. It is a
  * worked example of the rules in `../../pc20-favorites.md`, not a
  * recommendation and not an extraction. If you want code a real site runs,
@@ -452,6 +452,31 @@ const keysOf = (localGroups) => {
  */
 const itemTag = (itemId, feedGuid) =>
   feedGuid === null ? ['i', itemId] : ['i', feedIdOf(feedGuid), itemId];
+
+/**
+ * Drop a `medium` run left with nothing under it.
+ *
+ * `mergeHalf` already refuses to emit one — "a byte change for nothing" — but
+ * the claim-back below builds its half with a filter of its own, and a filter
+ * that only inspects `i` tags keeps the run that held the entry it just took
+ * back. That leftover is not cosmetic. `encodePrivate` returns `''` only for
+ * an EMPTY array, so one stray tag is the difference between a half that
+ * encodes to nothing and a half that encodes to real ciphertext — and a
+ * signer with no NIP-44 reads ciphertext it cannot open as a private half
+ * another writer owns. It then declines to change the mode on top of bytes it
+ * cannot see, which is correct, and leaves a user who asked for private on a
+ * public list with nothing on screen saying why. Vector 30.
+ *
+ * The test is `mergeHalf`'s, deliberately: only an `i` tag keeps a run alive,
+ * because only an entry is what a `medium` labels.
+ */
+const pruneEmptyRuns = (tags) =>
+  (tags ?? []).filter((tag, index) => {
+    if (tag[0] !== 'medium') return true;
+    const next = tags.findIndex((t, i) => i > index && t[0] === 'medium');
+    const end = next === -1 ? tags.length : next;
+    return tags.some((t, i) => i > index && i < end && t[0] === 'i');
+  });
 
 /**
  * Rule 3, over ONE half's tag array.
@@ -957,10 +982,16 @@ export function plan({
       for (const e of parseTags(inactiveReadTags).entries) {
         inactiveKeyAt.set(e.index, e.key);
       }
-      mergedInactive = inactiveReadTags.filter((t, i) => {
-        if (t[0] !== 'i') return true;
-        return !returning.has(inactiveKeyAt.get(i));
-      });
+      // Pruned, because this is the one half built without `mergeHalf`.
+      // Claiming back the last entry of a run leaves the run, and a half
+      // holding nothing but a `medium` tag still encodes to ciphertext.
+      // Vector 30.
+      mergedInactive = pruneEmptyRuns(
+        inactiveReadTags.filter((t, i) => {
+          if (t[0] !== 'i') return true;
+          return !returning.has(inactiveKeyAt.get(i));
+        }),
+      );
       // Skip anything the active half ALREADY holds. An entry can sit in both
       // halves at once — see vector 15 — and concatenating the claimed-back
       // ones unconditionally emits that identifier twice, which opens a second

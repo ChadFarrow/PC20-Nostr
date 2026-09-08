@@ -1,10 +1,10 @@
 /**
- * The 29 test vectors of ../pc20-favorites.md, executable.
+ * The 30 test vectors of ../pc20-favorites.md, executable.
  *
  * The spec states them as behaviors "so they can be written against any test
  * runner". This is that, for one runner, driven through the pure functions
  * described in ./adapter.d.ts. Point ADAPTER at your own implementation and
- * the same 29 run against it.
+ * the same 30 run against it.
  *
  * Two ways to point it. Edit the import below, or leave this file alone and
  * set `PC20_FAVORITES_ADAPTER` to the path of your shim — which is what lets
@@ -1895,4 +1895,59 @@ test('29. A whole-list move is not an exemption from rule 3', () => {
     'the removed entry returned, or ours was dropped, on the second cycle',
   );
   assert.equal(backAgain.publish, null, 'the claim-back never reaches a fixed point');
+});
+
+test('30. An empty half is an empty string', () => {
+  // Claiming back the last entry of a `medium` run must take the run with it.
+  // `encodePrivate` returns `''` only for an EMPTY array, so one leftover tag
+  // is the difference between a half that encodes to nothing and a half that
+  // encodes to real ciphertext — and ciphertext is what tells the next writer
+  // somebody owns this half.
+  const cleared = plan({
+    read: ev(
+      [ALT, ['medium', 'podcast'], ['i', FEED_B], K_FEED],
+      encodePrivate([['medium', 'podcast'], ['i', FEED_A]]),
+    ),
+    local: [feed(FEED_A, 'podcast')],
+    baseline: base([], [FEED_A]),
+    mode: 'public',
+  });
+  assert.ok(cleared.publish, 'the claim-back is a change and must publish');
+  assert.deepEqual(
+    ids(cleared.publish.tags),
+    [FEED_B, FEED_A],
+    'the entry we claimed back did not reach the public half',
+  );
+  assert.equal(
+    cleared.publish.content,
+    '',
+    'a half holding no entries still encoded to ciphertext',
+  );
+
+  // THE COST OF GETTING IT WRONG IS SOMEBODY ELSE'S PRIVACY CHOICE. A signer
+  // with no NIP-44 cannot open those bytes, so it reads them as a private half
+  // another writer owns and refuses to change the mode on top of what it
+  // cannot see. That refusal is correct. It is the empty half claiming to be
+  // occupied that is not, and the user who asked for private is left on a
+  // public list with nothing on screen saying why.
+  const both = [feed(FEED_A, 'podcast'), feed(FEED_B, 'podcast')];
+  const hidden = plan({
+    read: cleared.publish,
+    local: both,
+    baseline: base([FEED_A, FEED_B]),
+    mode: 'private',
+    userChose: true,
+    canReadPrivate: false,
+  });
+  assert.ok(hidden.publish, 'the user asked for private and nothing was published');
+  assert.ok(
+    hidden.publish.tags.some((t) => t[0] === 'visibility' && t[1] === 'private'),
+    'the list did not go private: the empty half read as one somebody owns',
+  );
+  assert.deepEqual(ids(hidden.publish.tags), [], 'entries were left in the public half');
+  assert.deepEqual(
+    ids(decodePrivate(hidden.publish.content)),
+    [FEED_B, FEED_A],
+    'the private half did not receive the entries',
+  );
 });
