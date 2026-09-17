@@ -43,6 +43,44 @@ is self-assigned, not registered via any NIP — confirm there is still no
 collision before depending on it in production, and treat the spec as the
 canonical claim on it.
 
+### Why not NIP-51 kind 10054
+
+`10054`, "Favorite podcasts", already exists, and it is not this. Read at
+`nostr-protocol/nips@master` on 2026-09-17, it is defined over `p` tags
+(NIP-F4 podcast pubkeys) and `url` tags (RSS/XML podcast URLs), which rules it
+out twice over.
+
+It cannot name an individual episode or track at all, and those are the entries
+this format exists to carry: the first real list published in it held 227 item
+favorites against 82 feed favorites. And it identifies a feed by URL, the field
+two apps are least likely to agree on — `http` against `https`, a Podcast Index
+canonical URL against the publisher's, a proxy against the origin. A merge keyed
+on that field merges nothing. `<podcast:guid>` is assigned once and outlives the
+URL, which is the same property [position 2](#what-this-format-does-not-do)
+spends its one slot to preserve.
+
+Kind `10064`, "Authored podcasts", is `p` tags only. It is adjacent rather than
+related.
+
+### Why no NIP-51 list kind at all
+
+That objection is about one kind's vocabulary. This one is about the NIP, and it
+covers every list in it, the bookmark kinds included.
+
+NIP-51 gives a client one instruction for editing a list that already exists:
+"clients SHOULD append them to the end of the list". Nothing in it says to
+preserve a tag you cannot read, and the strings `i`, `NIP-73` and "external
+content identifier" appear nowhere in its text — checked at master on
+2026-09-17. So a client that reads the list, parses the tags it has definitions
+for, and writes the list back **conforms with the spec it implements and has
+destroyed every favorite in it.** Nothing on that author's side is broken, which
+is why nothing on this side can fix it.
+
+That is the objection [carrying what you cannot read](#carry-rule) generalises,
+and it is vector 4 stated as a behavior. Note what currently prevents it: no
+generic list client writes kind `10333`, because none knows the kind. Obscurity
+is not a property of the format, and a number inside NIP-51 would trade it away.
+
 Self-assignment is not free, and the cost is worth naming: a kind collision is
 worse than a `d`-tag collision, because relay filters are kind-scoped, so a
 later NIP landing on 10333 would put two unrelated event types into every query
@@ -414,6 +452,11 @@ device they just made the choice on.
 
 ## The order private lists had to ship in
 <a id="private-list-sequencing"></a>
+
+The shape is NIP-51's, and this format takes it unchanged: public entries in
+the tags, private entries as a tag array, stringified and NIP-44-encrypted to
+the author's own key, in `content`. What NIP-51 does not supply is the order the
+two sides had to ship in, because it has no merge discipline to sequence.
 
 A writer that encrypts before every other writer carries `content` does not
 fail loudly — it silently makes those favorites disappear on the far side,
