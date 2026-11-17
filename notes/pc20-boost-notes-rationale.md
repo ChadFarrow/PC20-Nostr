@@ -14,6 +14,12 @@ reading seven other repos the same night. **None of the rules has run in more
 than one app yet**, so read each one as a decision with a named failure behind
 it, not as observed practice.
 
+The first draft left five questions open. Chad answered all five on
+2026-11-16, the same night; each section one of them settled quotes his answer:
+[`by` on an album](#by), [`via` in every note](#via),
+[no note for an auto-boost](#pressed), [default sender names](#who), and
+[the `sender` tag](#sender).
+
 ---
 
 ## The sentence names what was paid, then where it was found
@@ -87,13 +93,20 @@ stopped working too. One field doing two jobs failed at both.
 write `Boosted <N> sats` when there is no name; candr-boost writes `Someone`.
 `Boosted` states no fact the app does not have.
 
-**Default names are left open.** boostmebitch sends `boostmebitch.com user`,
+**Default names stay.** boostmebitch sends `boostmebitch.com user`,
 candr.space `candr.space listener`, StableKraft `StableKraft.app user` on
 auto-boosts, and DoerfelVerse `Super Fan` or `Anonymous`, when the listener
 gives no name. boostmebitch does it on purpose — its BOOST ALL note uses the
-default "rather than attributing itself back to the user". Every receiver
-prints the default as a name. Whether to keep them is for review; the rule as
-written only stops the note from saying something the payment did not.
+default "rather than attributing itself back to the user". The first draft
+asked whether to keep them or to send no name and let the sentence say
+`Boosted`. Chad decided on 2026-11-16: *"Yes, keep the default sender."*
+
+So the default is what the payment carried, and rule 1 prints it like any
+name: `boostmebitch.com user boosted 100 sats to …`. That is what every
+receiver prints today, so the decision changes no receiver. The `Boosted` form
+stays for a boostagram that carries no name at all. What rule 1 still forbids
+is a name that exists in the note alone — a default the boostagram never
+carried.
 
 ## `<N>` is what the listener chose
 <a id="intent"></a>
@@ -153,9 +166,11 @@ boostmebitch writes no `by` on an episode for that reason.
 
 **An album gets one, which boostmebitch's branch does not do.** DoerfelVerse
 and StableKraft both write an album boost as `"Disco Swag - The Album" by The
-Doerfels` today, and an album title alone often does not say whose it is. This
-is listed as an open question in the spec, because it is the one place this
-draft departs from the branch Chad chose.
+Doerfels` today, and an album title alone often does not say whose it is. It
+is the one place this draft departs from the branch Chad chose, so the first
+draft left it open. Chad decided on 2026-11-16: yes, with
+*"ChadF boosted 100 sats to Disco Swag - The Album by The Doerfels"* as the
+example. The branch has to add it.
 
 **Dropped when it equals the title.** A self-titled release would otherwise
 read `to Kurtis by kurtis`. boostmebitch compares ignoring case.
@@ -164,7 +179,7 @@ read `to Kurtis by kurtis`. boostmebitch compares ignoring case.
 while the wallet pays and gives up after two seconds; a miss costs the words
 `by <artist>` and nothing else.
 
-## `via` is for receivers
+## `via` is in every note
 <a id="via"></a>
 
 Every receiver already names the listener's app: candr-boost,
@@ -173,10 +188,21 @@ as an app link line. The bot's own key signs the note and its `client` tag
 names the bot, so without `via` the note says nothing about where the listener
 was.
 
-A sender is the app. Its `client` tag says so, and boostmebitch's own reader
-already prints that tag as "via …", so a `via` in the sentence would show twice
-there. That is why the rule is SHOULD for a receiver and MAY for a sender, and
-why the spec leaves the question open.
+**A sender writes it too.** The first draft made it a MAY for a sender: the
+sender is the app, and its `client` tag already says so. Chad decided on
+2026-11-16 that every app adds it — *"Yes, add the app."* — with
+*"rev.hodl boosted 121 sats to Sing For You by The Doerfels from ITDV music
+playlist via BoostMeBitch"* as the example. A tag is not part of the text: it
+does not travel when the sentence is copied into a one-line form, a quote or a
+bot's note, and the sentence is meant to read the same from every app.
+
+**A sender writes the name it sends as `app_name`**, so the note and the
+boostagram name one app, as they name one sender ([`<who>`](#who)).
+
+**The cost is one `via` shown twice.** boostmebitch's note card prints the
+`client` tag as `via …` (`components/nostr-note-card.tsx:451`, read at
+`c873817`), so on that card its own boost notes would name the app twice until
+the card stops doing it for a boost note.
 
 ## Names are cleaned before they go in
 <a id="clean"></a>
@@ -256,6 +282,37 @@ boostmebitch drops a track guid too long for its site-sign route (which refuses
 a tag value over 512 characters) rather than cutting it: a shortened guid is a
 different guid, and it names a different item or none.
 
+## The `sender` tag holds a hex key
+<a id="sender"></a>
+
+**Five receivers write one today, all as an `npub`.** boostbox writes
+`["sender", <npub>]` from the boostagram's `sender_npub` or a hex `sender_id`
+(`sender-npub`, `src/boostbox/boostagram.clj` at `7ca76b5`). The Helipad bot
+writes one from `nip19.npubEncode` (`lib/sender-tag.ts` at `cad5916`). The three
+thelounge-candr bots share one `lib/payer-pubkey.js`, byte-identical in all
+three at `7fa1095`, which also writes an `npub`. No sender app writes one.
+
+**Chad decided on 2026-11-16 to keep it and give it one form.** The first draft
+asked whether to standardise the tag or drop it; the answer was standardise,
+with a hex key as other Nostr tags use. The bots that write an `npub` change.
+
+**Why hex.** `p` and `P` hold a key as 64 hex characters, and
+[NIP-19](https://github.com/nostr-protocol/nips/blob/master/19.md) says its
+bech32 forms *"are not meant to be used inside the standard NIP-01 event
+formats or inside the filters, they're meant for human-friendlier display and
+input only"*. A reader that compares a `sender` with an event's `pubkey` or a
+`p` tag otherwise has to know which form it holds and decode it first. NIP-19
+also asks clients to *"still accept keys in both hex and npub format for
+now"*, and the notes these bots have already posted cannot be edited, so a
+reader decodes an old `npub` (rule 23).
+
+**Why not a `p` tag.** boostbox's own comment says it: a `p` tag *"would put
+this bot's signed note in the mentions of whatever npub a payer named: a
+notification the payer chose, the recipient cannot decline, and no one can
+delete."* `sender` records who paid and notifies nobody. It is a multi-letter
+tag, so relays do not index it either; a reader finds a payer's boosts by
+reading the notes, not by a `#sender` filter.
+
 ## A note is for a boost a person pressed
 <a id="pressed"></a>
 
@@ -266,9 +323,32 @@ would flood a feed — a ten-minute settle interval is six notes an hour, and th
 person buried is the listener who opted in.
 
 DoerfelVerse posts a kind `1` for every auto-boost (`Auto boost for "<title>"`,
-`contexts/AudioContext.tsx` at `aedd069`). StableKraft posts none. The rule is
-a SHOULD NOT and an open question, because it would change what DoerfelVerse
-does today.
+`contexts/AudioContext.tsx` at `aedd069`). StableKraft posts none. The first
+draft made it a SHOULD NOT and left it open, because it changes what
+DoerfelVerse does today. Chad decided on 2026-11-16: *"Auto boost should not
+post to Nostr."* So it is a MUST NOT, for the app that sent the auto-boost and
+for a receiver alike. The payment is not touched: the recipient still gets the
+sats and the boostagram's metadata. Only the note goes.
+
+**A stream payment stays a SHOULD NOT.** The question named auto-boosts, and
+the answer did not reach streams, so their rule is the first draft's.
+
+**This rule is about kind `1`.** Whether an auto-boost may ever be published as
+a playback event is a question for
+[that draft](../nip-value-playback-events.md), whose privacy section already
+says to ask the listener separately and to default to off. Nothing here asks an
+app to write one.
+
+**A receiver has only `action` to go by, and it is not always there.**
+[bLIP-10](https://github.com/lightning/blips/blob/master/blip-0010.md) names two
+values, `boost` and `stream`. StableKraft sends `auto` on an auto-boost;
+Helipad numbers that action `4`, and the Helipad bot's default send rules drop
+it with streams (`DEFAULT_SEND_RULES`, `lib/config.ts` at `cad5916`).
+DoerfelVerse sends its auto-boost as `action: 'boost'` with `sender_name`
+`Auto Boost` (`createSimpleWebLNTLVRecords`, `utils/payment-utils.ts` at
+`aedd069`), so no receiver can tell it from a boost a person pressed. For that
+boost, only DoerfelVerse can keep it off Nostr, so the rule binds the app that
+sent it and not only the receivers.
 
 ## A boost is not posted twice
 <a id="twice"></a>
@@ -313,3 +393,12 @@ whether Fountain itself still writes it was not checked.
 `🎵`). See [the first section](#what-then-where).
 
 **The settled amount.** See [`<N>`](#intent).
+
+**`via` from receivers only** — the first draft's rule. Chad chose every app.
+See [`via`](#via).
+
+**No default name, so the sentence says `Boosted`.** Chad kept the defaults.
+See [`<who>`](#who).
+
+**An `npub` in `sender`, or no `sender` tag at all.** See
+[the `sender` tag](#sender).

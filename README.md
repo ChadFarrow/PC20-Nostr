@@ -128,13 +128,14 @@ sentence, in every app that writes one up — a sender app's own note, a
 bot's note, an IRC line:
 
 ```
-rev.hodl boosted 121 sats to Sing For You by The Doerfels from ITDV music playlist
+rev.hodl boosted 121 sats to Sing For You by The Doerfels from ITDV music playlist via BoostMeBitch
 ```
 
-What got the sats comes first and where the listener found it second, so a
-boost to a song on a playlist no longer reads as a boost to the playlist. It
-also fixes the order of a kind `1` boost note's `i` tags, so a reader finds the
-item's own feed first. No app writes it yet; it is a proposal for review.
+What got the sats comes first, where the listener found it second, and the app
+they used last, so a boost to a song on a playlist no longer reads as a boost
+to the playlist. It also fixes the order of a kind `1` boost note's `i` tags,
+so a reader finds the item's own feed first. No app writes it yet; it is a
+proposal for review, and Chad answered its five open questions on 2026-11-16.
 [notes/pc20-boost-notes-survey.md](notes/pc20-boost-notes-survey.md) records
 what eight repos write today, and
 [notes/pc20-boost-notes-rationale.md](notes/pc20-boost-notes-rationale.md)

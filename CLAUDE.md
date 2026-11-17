@@ -75,8 +75,12 @@ A **reference repo with five parts**, none of which is an application.
    behind every number). See `catalog/README.md`.
 5. **The boost-note draft.** `pc20-boost-notes.md` — one sentence and one
    kind `1` layout for every boost any of ChadFarrow's apps writes up
-   (`<who> boosted <N> sats to <what>[ by <artist>][ from <where>]`). A
-   **draft for Chad's review**, written 2026-11-16: no app writes it yet.
+   (`<who> boosted <N> sats to <what>[ by <artist>][ from <where>][ via <app>]`).
+   A **draft for Chad's review**, written 2026-11-16: no app writes it yet.
+   Chad answered its five open questions the same night — `by` on an album,
+   `via <app>` from every app, no note for an auto-boost, default sender
+   names kept, the `sender` tag as a hex key — and the rationale quotes each
+   answer; do not reopen one without him.
    boostmebitch's unmerged branch `feat/boost-note-wording` is closest. It
    follows the favorites split — rules in the spec, reasons in
    `notes/pc20-boost-notes-rationale.md` — plus

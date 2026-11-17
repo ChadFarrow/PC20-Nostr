@@ -356,8 +356,10 @@ nostr:nevent1…                                    the zap receipt
 - **Message:** a name in `nameToNpubMap` becomes a `nostr:npub…` mention.
 - **Tags:** `p` for each mention and host, `i`/`k` for the feed and the item,
   `image`, `t boostagram`, `t value4value`, `["sender", <npub>]` when the bot
-  knows the payer.
-- Whether it posts stream and auto-boost payments was not checked.
+  knows the payer (`nip19.npubEncode`, `lib/sender-tag.ts`).
+- **Streams and auto-boosts get no note by default.** `DEFAULT_SEND_RULES` in
+  `lib/config.ts` turns on `boost` only; Helipad numbers the actions `1`
+  stream, `2` boost, `4` auto (`lib/send-rules.ts`). Both read at `cad5916`.
 
 Example, a real boost captured in `lib/fixtures.ts`:
 
@@ -424,7 +426,9 @@ It cannot label the middle fields, because the announcer does not say what they
 hold. It also skips BoostMeBitch boosts.
 
 All three tag `amount`, `t` (`boost`, `boostagram`, `value4value`), `app`,
-`sender`, and `i`/`k` for the feed and the episode.
+`sender`, and `i`/`k` for the feed and the episode. The `sender` value is an
+`npub`: all three call `senderTag` from one `lib/payer-pubkey.js`,
+byte-identical in each bot (read at `7fa1095`).
 
 ## v4v-toolkit — no app uses it
 
@@ -472,29 +476,38 @@ locale. Tags: `i podcast:guid` and `i podcast:item:guid` only — no `k`, no
 | `amount` | intent | intent | yes | – | yes | – | yes | – |
 | `t boostagram` | yes | yes | – | – | yes | yes | yes | – |
 | `client` | yes | yes | yes | – | yes | – | – | – |
-| `sender` | – | – | – | – | npub | npub | yes | – |
+| `sender` | – | – | – | – | npub | npub | npub | – |
 
 ## What each would change to match the draft
 
 **A list of differences, not a plan any repo agreed to.** No app has been asked.
+It follows Chad's answers of 2026-11-16 to the review's five questions: `by` on
+an album, `via <app>` from every app, no note for an auto-boost, default sender
+names kept, and the `sender` tag as a hex key.
 
 - **boostmebitch** — the branch already writes the sentence. Left: `by
-  <artist>` on an album boost (the spec's first open question), and the BOOST
-  ALL sentence (Task 4 of its plan).
-- **candr.space** — the sentence in place of the arrow and `📻` lines. It names
-  a song only after it keeps the song's title, which it does not today.
-- **StableKraft** — a sender and a `from` in the sentence, no quotes around
-  the title, `t boostagram`. Its item-first tag order can stay while a note
-  names one feed.
+  <artist>` on an album boost, ` via BoostMeBitch` at the end of the sentence,
+  and the BOOST ALL sentence (Task 4 of its plan). Its note card prints the
+  `client` tag as `via …` (`components/nostr-note-card.tsx:451` at `c873817`),
+  so a boost note shows the app twice there until the card stops.
+- **candr.space** — the sentence, with `via <app>`, in place of the arrow and
+  `📻` lines. It names a song only after it keeps the song's title, which it
+  does not today.
+- **StableKraft** — a sender, a `from` and a `via` in the sentence, no quotes
+  around the title, `t boostagram`. Its item-first tag order can stay while a
+  note names one feed. It already posts no note for an auto-boost.
 - **DoerfelVerse** — as StableKraft, plus `senderName` back in the publish
   route, `parseBoostFromEvent` changed in the same commit, `amount` and `t`
-  tags, and no note for an auto-boost (the spec's third open question).
+  tags, and no note for an auto-boost.
 - **boostbox** — the sentence in place of the arrow and `📻` lines; `via <app>`
-  in it, with the app link kept as a link line.
-- **The Helipad bot** — a sentence where it has none. It already finds the
-  song and the artist.
-- **thelounge-candr** — candr-boost only, the one-line form. The other two copy
-  announcers outside the repo.
+  in it, with the app link kept as a link line; the `sender` tag as hex, not an
+  `npub`.
+- **The Helipad bot** — a sentence where it has none, with `via <app>` in it.
+  It already finds the song and the artist. The `sender` tag as hex. It
+  already posts no auto-boost by default.
+- **thelounge-candr** — candr-boost: the one-line form. All three bots: the
+  `sender` tag as hex, in `lib/payer-pubkey.js`. The other two copy
+  announcers outside the repo, so their sentences cannot change here.
 - **v4v-toolkit** — nothing uses it. Bring it in line or remove it.
 
 ## Where the boostagram differs, which the draft does not cover
@@ -502,7 +515,13 @@ locale. Tags: `i podcast:guid` and `i podcast:item:guid` only — no `k`, no
 [bLIP-10](https://github.com/lightning/blips/blob/master/blip-0010.md) defines
 `podcast` as the podcast's title. StableKraft and DoerfelVerse put the artist
 there for music. DoerfelVerse also hard-codes `feedId`, fills `remote_*` with
-its own guids and splits `value_msat` evenly. candr.space sends its TLV only to
-a node recipient, which its feed does not have, and relies on BoostBox. Four
-apps send a default `sender_name` for an anonymous listener. Each of these
-shapes what a receiver can write, and none is decided here.
+its own guids and splits `value_msat` evenly. It sends an auto-boost as
+`action: 'boost'` with `sender_name` `Auto Boost` (`createSimpleWebLNTLVRecords`,
+`utils/payment-utils.ts` at `aedd069`), so a receiver cannot tell it from a
+boost a person pressed; StableKraft sends `auto`, which bLIP-10 does not list.
+candr.space sends its TLV only to a node recipient, which its feed does not
+have, and relies on BoostBox. Each of these shapes what a receiver can write,
+and none is decided here.
+
+Four apps send a default `sender_name` for an anonymous listener. That one IS
+decided: the review kept the defaults, and the sentence prints them (rule 1).
