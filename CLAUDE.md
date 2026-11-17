@@ -20,7 +20,7 @@ do not rewrite existing prose into STE.
 
 ## What this repo is
 
-A **reference repo with four parts**, none of which is an application.
+A **reference repo with five parts**, none of which is an application.
 
 1. **The favorites spec.** `pc20-favorites.md` — an app-neutral format for
    sharing Podcasting 2.0 guids between apps over Nostr, as a single
@@ -73,11 +73,24 @@ A **reference repo with four parts**, none of which is an application.
    app. Four parts: `recipes/` (the front door), `modules/` (shared source),
    `comparisons/` (why each shipped copy won), `analysis/` (the scripts
    behind every number). See `catalog/README.md`.
+5. **The boost-note draft.** `pc20-boost-notes.md` — one sentence and one
+   kind `1` layout for every boost any of ChadFarrow's apps writes up
+   (`<who> boosted <N> sats to <what>[ by <artist>][ from <where>]`). A
+   **draft for Chad's review**, written 2026-11-16: no app writes it yet.
+   boostmebitch's unmerged branch `feat/boost-note-wording` is closest. It
+   follows the favorites split — rules in the spec, reasons in
+   `notes/pc20-boost-notes-rationale.md` — plus
+   `notes/pc20-boost-notes-survey.md`, what each app writes today at a
+   recorded SHA. The survey is in `notes/`, not `catalog/comparisons/`,
+   because it must name bots and tools that are not live sites, and
+   `check-recipes.sh` step 8 refuses two of those names in the catalog.
+   Its vectors are prose until the wording is approved.
 
-One page sits outside those four. `pc20-favorites-feed-guid-migration.md` says
+One page sits outside those five. `pc20-favorites-feed-guid-migration.md` says
 what `stablekraft-app` and `boostmebitch` each have to change so an item entry
-carries the guid of its feed, read at `4722dd8` and `938f90d`. It is the only page here
-that tells another repo what to do, and it is a **plan, not an extraction** —
+carries the guid of its feed, read at `4722dd8` and `938f90d`. With the boost
+survey's "What each would change" list, it is one of two places here that tell
+another repo what to do, and it is a **plan, not an extraction** —
 no line of it has run in either app. It is therefore the page that rots
 fastest: every line number in it is a claim about a file this repo does not
 own. Re-read before trusting it, correct it or delete it, and never let it

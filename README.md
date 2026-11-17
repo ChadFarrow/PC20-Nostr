@@ -121,6 +121,25 @@ earlier of the two by a wide margin. Its privacy section is the part to
 read first: per-track receipts under a listener's own key are a public
 timestamped listening history, and "share my boosts" is not consent for it.
 
+### Draft — under review, not yet normative
+
+**[pc20-boost-notes.md](pc20-boost-notes.md)** gives every boost one
+sentence, in every app that writes one up — a sender app's own note, a
+bot's note, an IRC line:
+
+```
+rev.hodl boosted 121 sats to Sing For You by The Doerfels from ITDV music playlist
+```
+
+What got the sats comes first and where the listener found it second, so a
+boost to a song on a playlist no longer reads as a boost to the playlist. It
+also fixes the order of a kind `1` boost note's `i` tags, so a reader finds the
+item's own feed first. No app writes it yet; it is a proposal for review.
+[notes/pc20-boost-notes-survey.md](notes/pc20-boost-notes-survey.md) records
+what eight repos write today, and
+[notes/pc20-boost-notes-rationale.md](notes/pc20-boost-notes-rationale.md)
+why each rule is there.
+
 ### Background — not specs, do not implement against these
 
 None of these defines wire format. They exist so the normative pair can stay
