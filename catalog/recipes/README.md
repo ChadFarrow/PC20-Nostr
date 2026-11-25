@@ -14,11 +14,25 @@ production — not a tidied-up illustration of it.
 
 | Recipe | Tier | Files | Install | Seen on |
 |---|---|---|---|---|
+| [podcast-feed-parser](podcast-feed-parser/) | wired | 8 | 1 package | [musicsideproject.com](https://musicsideproject.com) |
+| [safe-feed-fetch](safe-feed-fetch/) | drop-in | 2 | nothing | [boostmebitch.com](https://boostmebitch.com) |
+| [podcast-index-client](podcast-index-client/) | drop-in | 1 | nothing | [boostmebitch.com](https://boostmebitch.com) |
+| [musicl-playlist-feed](musicl-playlist-feed/) | drop-in | 2 | nothing | [stablekraft.app/playlist/maker](https://stablekraft.app/playlist/maker) |
+| [chapters-json](chapters-json/) | drop-in | 1 | nothing | [boostmebitch.com](https://boostmebitch.com) |
 | [pc20-feed-validator](pc20-feed-validator/) | drop-in | 1 | nothing | [itdv.podtards.com/feed-validator](https://itdv.podtards.com/feed-validator) |
 | [pwa-install-prompt](pwa-install-prompt/) | drop-in | 2 | nothing | [itdv.podtards.com](https://itdv.podtards.com) |
 | [lightning-wallet-payments](lightning-wallet-payments/) | wired | 5 | 3 packages | [itdv.podtards.com](https://itdv.podtards.com) |
 | [boostagram-keysend](boostagram-keysend/) | wired | 3 | nothing | nowhere - authored |
 | [boostbox-client](boostbox-client/) | wired | 3 | nothing | nowhere - authored |
+
+**Reading feeds starts at [`podcast-feed-parser`](podcast-feed-parser/).** It
+takes a string and returns typed data. On a server, get that string with
+[`safe-feed-fetch`](safe-feed-fetch/) — a feed URL is user-supplied, and a
+plain `fetch` of it is an SSRF hole. [`chapters-json`](chapters-json/) reads
+the chapters file a feed points at, [`podcast-index-client`](podcast-index-client/)
+looks a feed up in Podcast Index, and
+[`musicl-playlist-feed`](musicl-playlist-feed/) writes a playlist of songs from
+other feeds.
 
 **Payments start at [`lightning-wallet-payments`](lightning-wallet-payments/).**
 That one connects a wallet and sends. The other two ride on top of it:
@@ -86,13 +100,18 @@ vouching for it.
 
 ## For an agent
 
-Read `<recipe>/feature.json`. It is the machine-readable half and carries
+[`index.json`](index.json) lists every recipe in one file — name, tier,
+summary, packages, environment variables, and where its manifest and README
+are. It is generated from the manifests by `../check-recipes.sh --write-index`
+and checked on every run, so it cannot fall behind them.
+
+Then read `<recipe>/feature.json`. It is the machine-readable half and carries
 everything needed to install without parsing prose:
 
 | Field | Use |
 |---|---|
 | `tier` | `drop-in` \| `wired` \| `not-portable` |
-| `files[]` | `{from, to}` — `to` is the path in the target repo |
+| `files[]` | `{from, to}` — `to` is the path in the target repo. `from` may be in a subfolder of `files/` when the files import each other by relative path; keep that layout |
 | `dependencies` | npm packages to install; `{}` means none |
 | `peer` | framework versions assumed |
 | `env` | environment variables to set |
@@ -113,12 +132,14 @@ app called DoerfelVerse.
    feature already works somewhere, and code that has never served real
    traffic cannot make that promise.
 2. Every file a recipe lists exists, and every file on disk is listed.
-3. No `@/…` import goes unshipped. An unshipped import is the difference
-   between "just add it" and an import error in your repo.
+3. No `@/…` import goes unshipped, and every relative import resolves inside
+   the recipe's own `files/`. An unshipped import is the difference between
+   "just add it" and an import error in your repo.
 4. No recipe references a secret in a `NEXT_PUBLIC_` variable — those are
    bundled into public JavaScript.
 5. Every app-specific constant appears in `rename`.
 6. No recipe links to a dead or superseded URL.
+7. `index.json` matches the manifests.
 
 ## Related
 

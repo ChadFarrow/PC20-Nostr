@@ -5,15 +5,18 @@
 # are copied verbatim into codebases nobody here will ever see, so a mistake
 # in one is not a bug in this repo — it is a bug installed in someone else's.
 #
-#   ./check-recipes.sh            structural checks only
-#   ./check-recipes.sh --network  also verify every live_at still answers
+#   ./check-recipes.sh                structural checks only
+#   ./check-recipes.sh --network      also verify every live_at still answers
+#   ./check-recipes.sh --write-index  rewrite recipes/index.json, then check
 #
 # Exit: 0 = all good, 1 = at least one problem.
 
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 NET=0
+WRITE_INDEX=0
 [ "${1:-}" = "--network" ] && NET=1
+[ "${1:-}" = "--write-index" ] && WRITE_INDEX=1
 fail=0
 note() { echo "FAIL  $*"; fail=1; }
 
@@ -114,10 +117,17 @@ if m.get("tier") not in ("drop-in","wired","not-portable"):
 for f in m.get("files", []):
     if not os.path.exists(os.path.join(d, f["from"])):
         print(f"FAIL  {name} lists {f['from']}, which does not exist"); bad = 1
-shipped = {os.path.basename(f["from"]) for f in m.get("files", [])}
-on_disk = set(os.listdir(os.path.join(d, "files"))) if os.path.isdir(os.path.join(d, "files")) else set()
-for extra in on_disk - shipped:
-    print(f"FAIL  {name}/files/{extra} is not listed in feature.json"); bad = 1
+# files/ may hold folders: a recipe whose files import each other by relative
+# path ('../types/feed') ships them in the layout those imports expect, since
+# rewriting an import would break byte-identity.
+shipped = {os.path.normpath(f["from"]) for f in m.get("files", [])}
+on_disk = set()
+for root, _dirs, fns in os.walk(os.path.join(d, "files")):
+    for fn in fns:
+        if fn != ".DS_Store":  # Finder litter; .gitignore keeps it out of git
+            on_disk.add(os.path.relpath(os.path.join(root, fn), d))
+for extra in sorted(on_disk - shipped):
+    print(f"FAIL  {name}/{extra} is not listed in feature.json"); bad = 1
 sys.exit(bad)
 PY
 done
@@ -125,17 +135,33 @@ done
 echo "== 4. no unshipped app-internal import"
 # An '@/...' import the recipe does not also ship is an import error in
 # someone else's repo, which is the difference between "just add it" and
-# "this is broken".
+# "this is broken". A relative import ('./x', '../types/feed') must resolve
+# to a file inside the same files/ tree, for the same reason.
 for d in "$HERE"/recipes/*/; do
   [ -d "$d/files" ] || continue
-  name=$(basename "$d")
-  for f in "$d"/files/*; do
-    while read -r spec; do
-      base=$(basename "$spec")
-      ls "$d"/files/"$base".* >/dev/null 2>&1 || \
-        note "$name/$(basename "$f") imports '$spec' but does not ship it"
-    done < <(grep -ohE "from '@/[^']+'" "$f" 2>/dev/null | sed "s|from '@/||; s|'||")
-  done
+  python3 - "$d" "$(basename "$d")" <<'PY' || fail=1
+import os, re, sys
+d, name = sys.argv[1], sys.argv[2]
+fdir = os.path.realpath(os.path.join(d, "files"))
+paths = [os.path.join(r, f) for r, _, fs in os.walk(fdir) for f in fs if f != ".DS_Store"]
+stems = {os.path.basename(p).split(".")[0] for p in paths}
+EXTS = ("", ".ts", ".tsx", ".js", ".mjs", ".d.ts", "/index.ts", "/index.tsx", "/index.js")
+SPEC = re.compile(r"""(?:\bfrom|\bimport)\s*\(?\s*['"]([^'"]+)['"]""")
+bad = 0
+for p in paths:
+    rel = os.path.relpath(p, os.path.realpath(d))
+    for spec in sorted(set(SPEC.findall(open(p, errors="ignore").read()))):
+        if spec.startswith("@/"):
+            if os.path.basename(spec) not in stems:
+                print(f"FAIL  {name}/{rel} imports '{spec}' but does not ship it"); bad = 1
+        elif spec.startswith(("./", "../")):
+            target = os.path.normpath(os.path.join(os.path.dirname(p), spec))
+            if not target.startswith(fdir + os.sep):
+                print(f"FAIL  {name}/{rel} imports '{spec}', which is outside files/"); bad = 1
+            elif not any(os.path.isfile(target + e) for e in EXTS):
+                print(f"FAIL  {name}/{rel} imports '{spec}' but does not ship it"); bad = 1
+sys.exit(bad)
+PY
 done
 
 echo "== 5. no recipe teaches a secret leak"
@@ -167,14 +193,15 @@ for d in "$HERE"/recipes/*/; do
   python3 - "$d" "$(basename "$d")" <<'PY' || fail=1
 import json, os, re, sys
 d, name = sys.argv[1], sys.argv[2]
-TERMS = ("itdv","podtards","doerfelverse","boostmebitch","stablekraft","6590183","6590182")
+TERMS = ("itdv","podtards","doerfelverse","boostmebitch","stablekraft","musicsideproject","6590183","6590182")
 m = json.load(open(os.path.join(d, "feature.json")))
 declared = " ".join(
     f"{r.get('current','')} {r.get('why','')}" for r in m.get("rename", [])
 ).lower()
 bad = 0
 fdir = os.path.join(d, "files")
-for fn in sorted(os.listdir(fdir)) if os.path.isdir(fdir) else []:
+for fn in sorted(os.path.relpath(os.path.join(r, f), fdir)
+                 for r, _, fs in os.walk(fdir) for f in fs if f != ".DS_Store"):
     body = open(os.path.join(fdir, fn), errors="ignore").read().lower()
     for t in TERMS:
         if t in body and t not in declared:
@@ -238,8 +265,67 @@ for d in "$HERE"/recipes/*/; do
   esac
 done
 
+echo "== 10. recipes/index.json lists every recipe, as its feature.json says"
+# One file an agent can fetch to see every recipe without walking the tree.
+# It is generated from the manifests, never edited by hand, so this check
+# fails the moment a recipe is added or a manifest changes without it.
+python3 - "$HERE" "$WRITE_INDEX" <<'INDEX' || fail=1
+import json, os, sys, csv
+here, write = sys.argv[1], sys.argv[2] == "1"
+prov = {}
+with open(os.path.join(here, "PROVENANCE.tsv")) as f:
+    for row in csv.reader(f, delimiter="\t"):
+        if row and row[0] != "catalog_path":
+            prov[row[0]] = row[5] if len(row) > 5 else "extracted"
+rdir = os.path.join(here, "recipes")
+recipes = []
+for name in sorted(os.listdir(rdir)):
+    mpath = os.path.join(rdir, name, "feature.json")
+    if not os.path.isfile(mpath):
+        continue
+    m = json.load(open(mpath))
+    states = sorted({f.get("state") or prov.get(os.path.join("recipes", name, f["from"]), "authored")
+                     for f in m.get("files", [])})
+    base = f"catalog/recipes/{name}/"
+    recipes.append({
+        "name": m["name"],
+        "tier": m["tier"],
+        "summary": m["summary"],
+        "states": states,
+        "files": len(m.get("files", [])),
+        "dependencies": m.get("dependencies", {}),
+        "env": [e["name"] if isinstance(e, dict) else e for e in m.get("env", [])],
+        "live_at": m.get("live_at") or None,
+        "readme": base + "README.md",
+        "manifest": base + "feature.json",
+    })
+index = {
+    "about": "Working Podcasting 2.0 features from live sites, packaged for a coding agent to install. "
+             "Read a recipe's manifest, then its README, before copying anything.",
+    "generated_by": "catalog/check-recipes.sh --write-index",
+    "repo": "https://github.com/ChadFarrow/PC20-Nostr",
+    "raw_base": "https://raw.githubusercontent.com/ChadFarrow/PC20-Nostr/main/",
+    "states": {
+        "extracted": "byte-identical to a live site",
+        "patched": "a live-site file plus a named security fix",
+        "authored": "written for this catalog; no site runs it",
+    },
+    "recipes": recipes,
+}
+want = json.dumps(index, indent=2, ensure_ascii=False) + "\n"
+ipath = os.path.join(rdir, "index.json")
+if write:
+    open(ipath, "w").write(want)
+    print(f"wrote recipes/index.json ({len(recipes)} recipes)")
+have = open(ipath).read() if os.path.isfile(ipath) else ""
+if have != want:
+    print("FAIL  recipes/index.json is out of date with the feature.json files; "
+          "run ./check-recipes.sh --write-index")
+    sys.exit(1)
+INDEX
+
 if [ "$NET" = "1" ]; then
-  echo "== 10. every live_at still answers"
+  echo "== 11. every live_at still answers"
   for d in "$HERE"/recipes/*/; do
     [ -f "$d/feature.json" ] || continue
     url=$(python3 -c "import json,sys;print(json.load(open(sys.argv[1])).get('live_at',''))" "$d/feature.json")

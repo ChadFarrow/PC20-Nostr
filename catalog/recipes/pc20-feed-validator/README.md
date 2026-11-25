@@ -53,7 +53,10 @@ refuse to follow redirects without re-validating them, and parse IPv6
 numerically rather than by string prefix.
 [`../../comparisons/image-proxy-ssrf.md`](../../comparisons/image-proxy-ssrf.md)
 documents three bypasses found in a guard that looked correct, which is worth
-reading before writing your own.
+reading before writing your own. Or take
+[`../safe-feed-fetch/`](../safe-feed-fetch/), which refuses all three and
+ships the tests that show it — with one named gap, DNS rebinding, because it
+checks the address but does not pin it.
 
 **It validates presence and shape, not truth.** A `podcast:guid` that is
 well-formed but wrong still passes, and so does a `podcast:value` block

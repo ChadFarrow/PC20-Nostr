@@ -13,11 +13,20 @@ a README saying what breaks if you skip a step.
 
 | Recipe | Files | Install | Running on |
 |---|---|---|---|
+| [Podcast feed parser](catalog/recipes/podcast-feed-parser/) | 8 | 1 package | [MSP 2.0](https://musicsideproject.com) |
+| [Safe feed fetch](catalog/recipes/safe-feed-fetch/) | 2 | nothing | [Boost Me Bitch](https://boostmebitch.com) |
+| [Podcast Index client](catalog/recipes/podcast-index-client/) | 1 | nothing | [Boost Me Bitch](https://boostmebitch.com) |
+| [musicL playlist feed](catalog/recipes/musicl-playlist-feed/) | 2 | nothing | [Project StableKraft](https://stablekraft.app/playlist/maker) |
+| [Chapters JSON](catalog/recipes/chapters-json/) | 1 | nothing | [Boost Me Bitch](https://boostmebitch.com) |
 | [Lightning wallet payments](catalog/recipes/lightning-wallet-payments/) | 5 | 3 packages | [DoerfelVerse](https://itdv.podtards.com) |
 | [Boostagram over keysend](catalog/recipes/boostagram-keysend/) | 3 | nothing | nobody yet |
 | [BoostBox client](catalog/recipes/boostbox-client/) | 3 | nothing | nobody yet |
 | [Feed validator](catalog/recipes/pc20-feed-validator/) | 1 | nothing | [DoerfelVerse](https://itdv.podtards.com/feed-validator) |
 | [PWA install prompt](catalog/recipes/pwa-install-prompt/) | 2 | nothing | [DoerfelVerse](https://itdv.podtards.com) |
+
+To read feeds, start with **Podcast feed parser**, and fetch on a server with
+**Safe feed fetch**: a feed URL is user-supplied, and a plain `fetch` of it can
+reach your own network.
 
 To send sats, start with **Lightning wallet payments** — the other two build on
 it. Read its safety section first: this code had a bug that let a stranger
@@ -27,6 +36,10 @@ charge any amount, and the recipe is where it is fixed.
 taken from a site. Both say so in their first line.
 
 → **[catalog/](catalog/)** — where the code came from, and what it is missing.
+
+**Pointing a coding agent at this repo?** Start it at [AGENTS.md](AGENTS.md).
+[`catalog/recipes/index.json`](catalog/recipes/index.json) lists every recipe
+in one file. The code is MIT ([LICENSE](LICENSE)).
 
 ## The specs
 

@@ -1,0 +1,30 @@
+{
+  "name": "musicl-playlist-feed",
+  "tier": "drop-in",
+  "summary": "Write a musicL playlist feed (a list of songs from other feeds, as podcast:remoteItem tags) with a podcast:guid that never changes between builds, and read the remoteItems back out of any feed.",
+  "live_at": "https://stablekraft.app/playlist/maker",
+  "live_title": "Project StableKraft",
+  "source": {
+    "repo": "stablekraft-app",
+    "ref": "origin/main",
+    "sha": "826bc612",
+    "paths": ["lib/playlist/musicl-feed.ts", "lib/playlist/musicl-guid.ts"]
+  },
+  "files": [
+    { "from": "files/musicl-feed.ts", "to": "lib/playlist/musicl-feed.ts" },
+    { "from": "files/musicl-guid.ts", "to": "lib/playlist/musicl-guid.ts" }
+  ],
+  "dependencies": {},
+  "peer": {
+    "runtime": "musicl-feed.ts: any runtime, browser included. musicl-guid.ts: Node 18+ (node crypto for the UUIDv5)."
+  },
+  "env": [],
+  "rename": [],
+  "caveats": [
+    "A playlist's podcast:guid is its identity. Pass one you stored, or let playlistGuid() derive it from the URL the playlist is hosted at; never mint a new one per build, or every build is a new feed to Podcast Index, to favorites and to boosts.",
+    "<language>en</language> is fixed at musicl-feed.ts line 158.",
+    "pubDate and lastBuildDate are the time of the build, so the bytes change on every build even when the songs do not. Compare the track list, not the XML, before you podping.",
+    "Tracks are channel-level podcast:remoteItem tags with no <item> elements - that is the musicL form. A track with no feedGuid or itemGuid is skipped, silently.",
+    "The reader (parseRemoteItems, remoteItemTracks) is a regex over the source text. It finds remoteItems anywhere in the document, a podroll's included; remoteItemTracks keeps only those with an itemGuid."
+  ]
+}
