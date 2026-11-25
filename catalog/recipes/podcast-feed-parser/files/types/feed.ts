@@ -1,0 +1,830 @@
+// MSP 2.0 - Feed Type Definitions (Demu Template Compatible)
+
+// Feed type enum
+export type FeedType = 'album' | 'video' | 'publisher';
+
+// All person groups from Podcasting 2.0 taxonomy + custom 'music' group
+export type PersonGroup =
+  | 'music'
+  | 'creative-direction'
+  | 'cast'
+  | 'writing'
+  | 'audio-production'
+  | 'audio-post-production'
+  | 'administration'
+  | 'visuals'
+  | 'community'
+  | 'misc'
+  | 'video-production'
+  | 'video-post-production';
+
+// A single group+role pair
+export interface PersonRole {
+  group: PersonGroup;
+  role: string;
+}
+
+// A person with multiple roles across groups
+export interface Person {
+  name: string;
+  href?: string;
+  img?: string;
+  npub?: string;
+  roles: PersonRole[];
+}
+
+export interface ValueRecipient {
+  name: string;
+  address: string;
+  split: number;
+  type: 'node' | 'lnaddress';
+  customKey?: string;
+  customValue?: string;
+  // Spec attribute: this split is a fee and is not subject to the proportional
+  // sharing of the others. MSP has no editor for it — it is kept so an imported
+  // feed's fee recipient survives a re-save.
+  fee?: boolean;
+}
+
+export interface ValueBlock {
+  type: 'lightning';
+  method: 'keysend';
+  suggested?: string;
+  recipients: ValueRecipient[];
+  // Children of <podcast:value> other than recipients — <podcast:valueTimeSplit>
+  // in practice. Not edited, only carried through so a re-save keeps them.
+  unknownElements?: Record<string, unknown>;
+}
+
+export interface Funding {
+  url: string;
+  text: string;
+}
+
+// Remote item for referencing other feeds (used in publisher feeds and podroll)
+export interface RemoteItem {
+  feedGuid: string;
+  feedUrl?: string;
+  itemGuid?: string;
+  medium?: string;
+  title?: string;
+  image?: string;
+  // The publisher's role, e.g. "artist" or "label". Not in the spec yet — see
+  // utils/publisherRole.ts. Absent means not stated.
+  rel?: string;
+  /**
+   * Publisher catalog only: an album recommended to new listeners,
+   * written as a channel-level <podcast:pinned feedGuid> naming this feed. That
+   * is MSP's extension — the proposal (podcast-namespace #570) only pins an
+   * episode of the same feed. See generatePinnedXml in xmlGenerator.ts.
+   */
+  pinned?: boolean;
+}
+
+// Alternate enclosure types (podcast:alternateEnclosure)
+export interface AlternateEnclosureSource {
+  uri: string;
+  contentType?: string;
+  // Attributes MSP has no field for, carried through from import unchanged.
+  unknownAttributes?: Record<string, string>;
+}
+
+// Everything on an alternate version that describes one particular file.
+export interface AlternateEnclosureFile {
+  source: AlternateEnclosureSource;  // the first <podcast:source>, as it was
+  type: string;
+  length?: string;
+  bitrate?: string;
+  height?: string;
+  codecs?: string;
+  integrity?: unknown;               // the 'podcast:integrity' passthrough entry
+}
+
+export interface AlternateEnclosure {
+  id: string;
+  type: string;                    // Required: MIME type
+  length?: string;                 // File size in bytes
+  bitrate?: string;                // bits/sec
+  height?: string;                 // Video height
+  lang?: string;                   // BCP 47 language tag
+  title?: string;                  // Max 32 chars
+  rel?: string;                    // Grouping ID, max 32 chars
+  codecs?: string;                 // RFC 6381
+  default?: boolean;
+  sources: AlternateEnclosureSource[];
+  // Attributes MSP has no field for, carried through from import unchanged.
+  unknownAttributes?: Record<string, string>;
+  // Editor only, never written to XML: the user picked the type, so a URL edit
+  // no longer sets it from the extension. Kept on the version, not in the
+  // component, so it survives collapsing the track and a reload.
+  typeSetByHand?: boolean;
+  // Editor only, never written to XML: what described the file at the URL the
+  // version had before the user edited it, so an edit that returns to that URL
+  // gets it back. Set by urlChange() in utils/alternateEnclosure.ts.
+  originalFile?: AlternateEnclosureFile;
+  // Children other than <podcast:source> (<podcast:integrity>, anything newer),
+  // carried through from import unchanged.
+  unknownElements?: Record<string, unknown>;
+}
+
+// A <podcast:block id="..."> that addresses one named service. Kept verbatim:
+// value is the element text as imported ("yes", "no").
+export interface ServiceBlock {
+  id: string;
+  value: string;
+}
+
+// Podcasting 2.0 additional images (<podcast:image>). These are EXTRA images
+// (banner/canvas/social/etc.) — the primary cover stays in imageUrl/trackArtUrl.
+export interface PodcastImage {
+  href: string;          // required
+  purpose?: string;      // space-separated tokens, e.g. "canvas" or "artwork social"
+  alt?: string;
+  aspectRatio?: string;  // CSS ratio syntax, e.g. "16/9", "1/1"
+  width?: number;
+  height?: number;
+  type?: string;         // MIME, e.g. "image/jpeg"
+}
+
+// Suggested purpose tokens (open list per the spec). Single source of truth for the UI dropdown.
+export const PODCAST_IMAGE_PURPOSES: { value: string; label: string; description: string }[] = [
+  { value: 'artwork', label: 'Artwork', description: 'Alternate square (1:1) cover' },
+  { value: 'banner', label: 'Banner', description: 'Wide hero image (~4:1 or 3:1)' },
+  { value: 'canvas', label: 'Canvas', description: 'Full-screen Now Playing background (9:16 phone, 16:9 desktop)' },
+  { value: 'social', label: 'Social', description: 'Social preview / share card (~1.91:1, e.g. 1200×630)' },
+  { value: 'publisher', label: 'Publisher', description: 'Publisher / label logo (square 1:1)' },
+  { value: 'circular', label: 'Circular', description: 'Cropped to a circle — use square (1:1)' },
+  { value: 'poster', label: 'Poster', description: 'Static video thumbnail (16:9)' },
+];
+
+/**
+ * MIME types the Podcasting 2.0 spec lists for <podcast:transcript>, which is
+ * what MSP writes for a track's lyrics file. Single source of truth for the UI
+ * dropdown.
+ *
+ * Note SubRip is `application/x-subrip` in the spec. MSP defaulted to
+ * `application/srt` for a long time, which is not a spec value; the default
+ * below is the correct one, but nothing rewrites the type on feeds that already
+ * carry the old string — an existing file still plays, and silently changing a
+ * user's feed under them would be worse than an unusual MIME type.
+ */
+export const TRANSCRIPT_TYPES: { value: string; label: string }[] = [
+  { value: 'application/x-subrip', label: 'SubRip (.srt)' },
+  { value: 'text/vtt', label: 'WebVTT (.vtt)' },
+  { value: 'application/json', label: 'Podcasting 2.0 JSON (.json)' },
+  { value: 'text/plain', label: 'Plain text (.txt)' },
+  { value: 'text/html', label: 'HTML (.html)' },
+];
+
+export const DEFAULT_TRANSCRIPT_TYPE = 'application/x-subrip';
+
+// Base channel data shared between Album and PublisherFeed
+export interface BaseChannelData {
+  title: string;
+  author: string;
+  description: string;
+  link: string;
+  language: string;
+  generator: string;
+  pubDate: string;
+  lastBuildDate: string;
+  podcastGuid: string;
+  locked: boolean;
+  lockedOwner: string;
+  categories: string[];
+  // Nested <itunes:category> children, keyed by their parent category name.
+  // No editor UI — carried through from import so a re-save keeps them.
+  subcategories?: Record<string, string[]>;
+  keywords: string;
+  explicit: boolean;
+  // <itunes:block>Yes</itunes:block>, a plain <podcast:block>yes</podcast:block>, and
+  // every <podcast:block id="..."> that names one service. See utils/listing.ts.
+  // Optional so feeds saved before these existed still load.
+  itunesBlock?: boolean;
+  podcastBlock?: boolean;
+  serviceBlocks?: ServiceBlock[];
+  ownerName: string;
+  ownerEmail: string;
+  imageUrl: string;
+  imageTitle: string;
+  imageLink: string;
+  imageDescription: string;
+  managingEditor: string;
+  webMaster: string;
+  persons: Person[];
+  value: ValueBlock;
+  funding: Funding[];
+  podcastImages?: PodcastImage[];
+  unknownChannelElements?: Record<string, unknown>;
+}
+
+// Publisher reference - allows a feed to link to its parent publisher feed
+export interface PublisherReference {
+  feedGuid: string;
+  feedUrl?: string;
+  // Same value as the rel on this album's entry in the publisher feed — see
+  // utils/publisherRole.ts. Absent means not stated.
+  rel?: string;
+}
+
+export interface Track {
+  id: string;
+  trackNumber: number;
+  season?: number;
+  episode?: number;
+  title: string;
+  description: string;
+  pubDate: string;
+  guid: string;
+  enclosureUrl: string;
+  enclosureLength: string;
+  enclosureType: string;
+  duration: string;
+  explicit: boolean;
+  trackArtUrl?: string;
+  trackArtWidth?: number;
+  trackArtHeight?: number;
+  bannerArtUrl?: string;
+  podcastImages?: PodcastImage[];
+  transcriptUrl?: string;
+  /** MIME type for <podcast:transcript>. See TRANSCRIPT_TYPES. */
+  transcriptType?: string;
+  overridePersons: boolean;
+  persons: Person[];
+  overrideValue: boolean;
+  value?: ValueBlock;
+  alternateEnclosures?: AlternateEnclosure[];
+  /**
+   * A track recommended to new listeners, written as a channel-level
+   * <podcast:pinned> pointing at this track's guid. Proposed tag only
+   * (podcast-namespace discussions #570 / #747), so the editor shows it behind
+   * the experimental toggle. See generatePinnedXml in xmlGenerator.ts.
+   */
+  pinned?: boolean;
+  unknownItemElements?: Record<string, unknown>;
+}
+
+export interface Album {
+  // Basic Info
+  title: string;
+  author: string;
+  artistNpub?: string;
+  description: string;
+  link: string;
+  language: string;
+  generator: string;
+  pubDate: string;
+  lastBuildDate: string;
+
+  // Podcast Index
+  podcastGuid: string;
+  medium: 'music' | 'video';
+  locked: boolean;
+  lockedOwner: string;
+
+  // iTunes
+  categories: string[];
+  subcategories?: Record<string, string[]>;
+  keywords: string;
+  explicit: boolean;
+  // <itunes:block>Yes</itunes:block>, a plain <podcast:block>yes</podcast:block>, and
+  // every <podcast:block id="..."> that names one service. See utils/listing.ts.
+  // Optional so feeds saved before these existed still load.
+  itunesBlock?: boolean;
+  podcastBlock?: boolean;
+  serviceBlocks?: ServiceBlock[];
+  ownerName: string;
+  ownerEmail: string;
+
+  // Artwork
+  imageUrl: string;
+  imageTitle: string;
+  imageLink: string;
+  imageDescription: string;
+  bannerArtUrl: string;
+  podcastImages?: PodcastImage[];
+
+  // Contact
+  managingEditor: string;
+  webMaster: string;
+
+  // People & Value
+  persons: Person[];
+  value: ValueBlock;
+
+  // Funding
+  funding: Funding[];
+
+  // Publisher reference (optional - links this feed to a parent publisher feed)
+  publisher?: PublisherReference;
+
+  // Further parties inside the same <podcast:publisher>, in feed order, after
+  // `publisher` (the primary party). An album released by a label and credited
+  // to its artist names both. Proposed in podcast-namespace PR #793; see
+  // utils/publisherParties.ts.
+  additionalPublishers?: PublisherReference[];
+
+  // Unknown/unsupported XML elements (preserved for round-trip)
+  unknownChannelElements?: Record<string, unknown>;
+
+  // Analytics
+  op3: boolean;
+
+  // Tracks
+  tracks: Track[];
+}
+
+// Publisher feed - aggregates multiple feeds under one publisher
+export type PublisherMedium = 'publisher';
+
+export interface PublisherFeed {
+  // Basic Info
+  title: string;
+  author: string;
+  description: string;
+  link: string;
+  language: string;
+  generator: string;
+  pubDate: string;
+  lastBuildDate: string;
+
+  // Podcast Index
+  podcastGuid: string;
+  medium: PublisherMedium;
+  locked: boolean;
+  lockedOwner: string;
+
+  // iTunes
+  categories: string[];
+  subcategories?: Record<string, string[]>;
+  keywords: string;
+  explicit: boolean;
+  // <itunes:block>Yes</itunes:block>, a plain <podcast:block>yes</podcast:block>, and
+  // every <podcast:block id="..."> that names one service. See utils/listing.ts.
+  // Optional so feeds saved before these existed still load.
+  itunesBlock?: boolean;
+  podcastBlock?: boolean;
+  serviceBlocks?: ServiceBlock[];
+  ownerName: string;
+  ownerEmail: string;
+
+  // Artwork
+  imageUrl: string;
+  imageTitle: string;
+  imageLink: string;
+  imageDescription: string;
+  podcastImages?: PodcastImage[];
+
+  // Contact
+  managingEditor: string;
+  webMaster: string;
+
+  // People & Value (optional for publisher feeds)
+  persons: Person[];
+  value: ValueBlock;
+
+  // Funding
+  funding: Funding[];
+
+  // Unknown/unsupported XML elements (preserved for round-trip)
+  unknownChannelElements?: Record<string, unknown>;
+
+  // Remote items - the feeds this publisher owns
+  remoteItems: RemoteItem[];
+
+  // URL feed was imported from (used to auto-populate Publisher Feed URL field)
+  sourceUrl?: string;
+}
+
+// Default empty track (defined first so createEmptyAlbum can use it)
+export const createEmptyTrack = (trackNumber: number, enclosureType: string = 'audio/mpeg'): Track => ({
+  id: crypto.randomUUID(),
+  trackNumber,
+  season: undefined,
+  episode: undefined,
+  title: '',
+  description: '',
+  pubDate: new Date().toUTCString(),
+  guid: crypto.randomUUID(),
+  enclosureUrl: '',
+  enclosureLength: '',
+  enclosureType,
+  duration: '',
+  explicit: false,
+  trackArtUrl: '',
+  bannerArtUrl: '',
+  podcastImages: [],
+  transcriptUrl: '',
+  transcriptType: DEFAULT_TRANSCRIPT_TYPE,
+  overridePersons: false,
+  persons: [],
+  overrideValue: false,
+  value: undefined
+});
+
+// Helper to check if medium is video
+export const isVideoMedium = (medium: string): boolean => medium === 'video';
+
+// Default empty value recipient
+export const createEmptyRecipient = (): ValueRecipient => ({
+  name: '',
+  address: '',
+  split: 0,
+  type: 'lnaddress'
+});
+
+// The MSP 2.0 support split that new feeds get: the musicsideproject sub-wallet
+// on Chad's node.
+export const MSP_SUPPORT_RECIPIENT = { name: 'MSP 2.0', address: 'musicsideproject@getalby.com' } as const;
+
+// Support recipients (MSP 2.0 and Podcast Index)
+export const COMMUNITY_SUPPORT_RECIPIENTS = [
+  { name: MSP_SUPPORT_RECIPIENT.name, address: MSP_SUPPORT_RECIPIENT.address },
+  { name: 'Podcastindex.org', address: 'podcastindex@getalby.com' },
+];
+
+export const createSupportRecipients = (): ValueRecipient[] => [
+  { name: MSP_SUPPORT_RECIPIENT.name, address: MSP_SUPPORT_RECIPIENT.address, split: 1, type: 'lnaddress' },
+  { name: 'Podcastindex.org', address: 'podcastindex@getalby.com', split: 1, type: 'lnaddress' },
+];
+
+// Legacy MSP 1.0 support node. Feeds created by the original musicsideproject.com
+// paid this Lightning *node* pubkey; on import we migrate it to the MSP 2.0
+// lnaddress identity (preserving the split) so support payments keep flowing.
+export const LEGACY_MSP_NODE_PUBKEY =
+  '035ad2c954e264004986da2d9499e1732e5175e1dcef2453c921c6cdcc3536e9d8';
+
+// Feeds made before the switch to the sub-wallet pay MSP 2.0 at chadf@getalby.com.
+// Both addresses reach MSP, so that split stays as it is — but it must still count
+// as support, or the editor lists it as the artist's own split and offers to add a
+// second MSP split beside it.
+const PREVIOUS_MSP_SUPPORT_RECIPIENT = { name: 'MSP 2.0', address: 'chadf@getalby.com' };
+
+export const isCommunitySupport = (r: ValueRecipient): boolean =>
+  [...COMMUNITY_SUPPORT_RECIPIENTS, PREVIOUS_MSP_SUPPORT_RECIPIENT]
+    .some(cs => cs.name === r.name && cs.address === r.address);
+
+export const hasUserRecipients = (recipients: ValueRecipient[]): boolean =>
+  recipients.some(r => r.address && !isCommunitySupport(r));
+
+// Value blocks are kept at a 100% total, with the single personal recipient
+// absorbing whatever the community-support splits add up to.
+const SPLIT_TOTAL = 100;
+
+const sumSupportSplits = (recipients: ValueRecipient[]): number =>
+  recipients.filter(isCommunitySupport).reduce((sum, r) => sum + (r.split || 0), 0);
+
+const personalIndices = (recipients: ValueRecipient[]): number[] =>
+  recipients.reduce<number[]>((acc, r, i) => {
+    if (r.address && !isCommunitySupport(r)) acc.push(i);
+    return acc;
+  }, []);
+
+// Behavior 1: when a personal recipient's address is a Lightning address and its
+// split is still unset, default it to 100 minus the support splits (98 with the
+// standard MSP 1 + Podcast Index 1). Only fills a blank split, so a manually
+// entered value is never overwritten; node-pubkey recipients are left untouched.
+export const fillPersonalSplitDefault = (
+  recipients: ValueRecipient[],
+  editedIndex: number
+): ValueRecipient[] => {
+  const edited = recipients[editedIndex];
+  if (!edited || isCommunitySupport(edited)) return recipients;
+  if (edited.type !== 'lnaddress' || !edited.address) return recipients;
+  if (edited.split) return recipients; // don't clobber a value the user set
+  // Only default the split when this is the one and only personal recipient —
+  // with several, the musician is apportioning splits by hand.
+  const personal = personalIndices(recipients);
+  if (personal.length !== 1 || personal[0] !== editedIndex) return recipients;
+  const target = Math.max(0, SPLIT_TOTAL - sumSupportSplits(recipients));
+  return recipients.map((r, i) => (i === editedIndex ? { ...r, split: target } : r));
+};
+
+// Behavior 2: after a community-support split is edited or a support recipient is
+// removed, keep the total at 100 by pushing the remainder onto the personal
+// recipient — but only when there's exactly one, so manual multi-recipient
+// (e.g. band) splits are left alone.
+export const rebalancePersonalForSupport = (
+  recipients: ValueRecipient[]
+): ValueRecipient[] => {
+  const personal = personalIndices(recipients);
+  if (personal.length !== 1) return recipients;
+  const target = Math.max(0, SPLIT_TOTAL - sumSupportSplits(recipients));
+  return recipients.map((r, i) => (i === personal[0] ? { ...r, split: target } : r));
+};
+
+// Default empty album
+export const createEmptyAlbum = (): Album => ({
+  title: '',
+  author: '',
+  artistNpub: '',
+  description: '',
+  link: '',
+  language: 'en',
+  generator: 'MSP 2.0 - Music Side Project Studio',
+  pubDate: new Date().toUTCString(),
+  lastBuildDate: new Date().toUTCString(),
+  podcastGuid: crypto.randomUUID(),
+  medium: 'music',
+  locked: false,
+  lockedOwner: '',
+  categories: [],
+  keywords: '',
+  explicit: false,
+  itunesBlock: false,
+  podcastBlock: false,
+  serviceBlocks: [],
+  ownerName: '',
+  ownerEmail: '',
+  imageUrl: '',
+  imageTitle: '',
+  imageLink: '',
+  imageDescription: '',
+  bannerArtUrl: '',
+  podcastImages: [],
+  managingEditor: '',
+  webMaster: '',
+  persons: [],
+  value: {
+    type: 'lightning',
+    method: 'keysend',
+    suggested: '0.000033333',
+    recipients: [createEmptyRecipient()]
+  },
+  funding: [],
+  op3: false,
+  tracks: [createEmptyTrack(1)]
+});
+
+// Default empty video album
+export const createEmptyVideoAlbum = (): Album => ({
+  title: '',
+  author: '',
+  artistNpub: '',
+  description: '',
+  link: '',
+  language: 'en',
+  generator: 'MSP 2.0 - Music Side Project Studio',
+  pubDate: new Date().toUTCString(),
+  lastBuildDate: new Date().toUTCString(),
+  podcastGuid: crypto.randomUUID(),
+  medium: 'video',
+  locked: false,
+  lockedOwner: '',
+  categories: [],
+  keywords: '',
+  explicit: false,
+  itunesBlock: false,
+  podcastBlock: false,
+  serviceBlocks: [],
+  ownerName: '',
+  ownerEmail: '',
+  imageUrl: '',
+  imageTitle: '',
+  imageLink: '',
+  imageDescription: '',
+  bannerArtUrl: '',
+  podcastImages: [],
+  managingEditor: '',
+  webMaster: '',
+  persons: [],
+  value: {
+    type: 'lightning',
+    method: 'keysend',
+    suggested: '0.000033333',
+    recipients: [createEmptyRecipient()]
+  },
+  funding: [],
+  op3: false,
+  tracks: [createEmptyTrack(1, 'video/mp4')]
+});
+
+// Default empty person role
+export const createEmptyPersonRole = (): PersonRole => ({
+  group: 'music',
+  role: 'band'
+});
+
+// Default empty person
+export const createEmptyPerson = (): Person => ({
+  name: '',
+  href: '',
+  img: '',
+  npub: '',
+  roles: [createEmptyPersonRole()]
+});
+
+// Default empty funding
+export const createEmptyFunding = (): Funding => ({
+  url: '',
+  text: ''
+});
+
+// Default empty remote item
+export const createEmptyRemoteItem = (): RemoteItem => ({
+  feedGuid: '',
+  feedUrl: '',
+  title: '',
+  medium: 'music'
+});
+
+// Default empty alternate enclosure source
+export const createEmptyAlternateEnclosureSource = (): AlternateEnclosureSource => ({
+  uri: ''
+});
+
+// Default empty alternate enclosure
+export const createEmptyAlternateEnclosure = (mimeType = 'audio/mpeg'): AlternateEnclosure => ({
+  id: crypto.randomUUID(),
+  type: mimeType,
+  sources: [createEmptyAlternateEnclosureSource()]
+});
+
+// Default empty publisher reference
+export const createEmptyPublisherReference = (): PublisherReference => ({
+  feedGuid: '',
+  feedUrl: ''
+});
+
+// Default empty publisher feed
+export const createEmptyPublisherFeed = (): PublisherFeed => ({
+  title: '',
+  author: '',
+  description: '',
+  link: '',
+  language: 'en',
+  generator: 'MSP 2.0 - Music Side Project Studio',
+  pubDate: new Date().toUTCString(),
+  lastBuildDate: new Date().toUTCString(),
+  podcastGuid: crypto.randomUUID(),
+  medium: 'publisher',
+  locked: false,
+  lockedOwner: '',
+  categories: [],
+  keywords: '',
+  explicit: false,
+  itunesBlock: false,
+  podcastBlock: false,
+  serviceBlocks: [],
+  ownerName: '',
+  ownerEmail: '',
+  imageUrl: '',
+  imageTitle: '',
+  imageLink: '',
+  imageDescription: '',
+  podcastImages: [],
+  managingEditor: '',
+  webMaster: '',
+  persons: [],
+  value: {
+    type: 'lightning',
+    method: 'keysend',
+    suggested: '0.000033333',
+    recipients: [createEmptyRecipient()]
+  },
+  funding: [],
+  remoteItems: []
+});
+
+// iTunes categories for music
+export const ITUNES_CATEGORIES = [
+  'Music',
+  'Music Commentary',
+  'Music History',
+  'Music Interviews',
+  'Technology',
+  'Arts',
+  'Society & Culture',
+  'Leisure',
+  'Education'
+];
+
+// Person groups - Podcasting 2.0 taxonomy + custom 'music' group
+export const PERSON_GROUPS: { value: PersonGroup; label: string }[] = [
+  { value: 'music', label: 'Music' },
+  { value: 'creative-direction', label: 'Creative Direction' },
+  { value: 'cast', label: 'Cast' },
+  { value: 'writing', label: 'Writing' },
+  { value: 'audio-production', label: 'Audio Production' },
+  { value: 'audio-post-production', label: 'Audio Post-Production' },
+  { value: 'administration', label: 'Administration' },
+  { value: 'visuals', label: 'Visuals' },
+  { value: 'community', label: 'Community' },
+  { value: 'misc', label: 'Misc.' },
+  { value: 'video-production', label: 'Video Production' },
+  { value: 'video-post-production', label: 'Video Post-Production' }
+];
+
+// Person roles by group - Podcasting 2.0 taxonomy + custom music roles
+export const PERSON_ROLES: Record<PersonGroup, { value: string; label: string }[]> = {
+  // Custom music group for musicians
+  'music': [
+    { value: 'band', label: 'Band' },
+    { value: 'vocalist', label: 'Vocalist' },
+    { value: 'guitarist', label: 'Guitarist' },
+    { value: 'bassist', label: 'Bassist' },
+    { value: 'drummer', label: 'Drummer' },
+    { value: 'keyboardist', label: 'Keyboardist' },
+    { value: 'musician', label: 'Musician' }
+  ],
+  // Official taxonomy groups
+  'creative-direction': [
+    { value: 'director', label: 'Director' },
+    { value: 'assistant director', label: 'Assistant Director' },
+    { value: 'executive producer', label: 'Executive Producer' },
+    { value: 'senior producer', label: 'Senior Producer' },
+    { value: 'producer', label: 'Producer' },
+    { value: 'associate producer', label: 'Associate Producer' },
+    { value: 'development producer', label: 'Development Producer' },
+    { value: 'creative director', label: 'Creative Director' }
+  ],
+  'cast': [
+    { value: 'host', label: 'Host' },
+    { value: 'co-host', label: 'Co-Host' },
+    { value: 'guest host', label: 'Guest Host' },
+    { value: 'guest', label: 'Guest' },
+    { value: 'voice actor', label: 'Voice Actor' },
+    { value: 'narrator', label: 'Narrator' },
+    { value: 'announcer', label: 'Announcer' },
+    { value: 'reporter', label: 'Reporter' }
+  ],
+  'writing': [
+    { value: 'author', label: 'Author' },
+    { value: 'editorial director', label: 'Editorial Director' },
+    { value: 'co-writer', label: 'Co-Writer' },
+    { value: 'writer', label: 'Writer' },
+    { value: 'songwriter', label: 'Songwriter' },
+    { value: 'guest writer', label: 'Guest Writer' },
+    { value: 'story editor', label: 'Story Editor' },
+    { value: 'managing editor', label: 'Managing Editor' },
+    { value: 'script editor', label: 'Script Editor' },
+    { value: 'script coordinator', label: 'Script Coordinator' },
+    { value: 'researcher', label: 'Researcher' },
+    { value: 'editor', label: 'Editor' },
+    { value: 'fact checker', label: 'Fact Checker' },
+    { value: 'translator', label: 'Translator' },
+    { value: 'transcriber', label: 'Transcriber' },
+    { value: 'logger', label: 'Logger' }
+  ],
+  'audio-production': [
+    { value: 'studio coordinator', label: 'Studio Coordinator' },
+    { value: 'technical director', label: 'Technical Director' },
+    { value: 'technical manager', label: 'Technical Manager' },
+    { value: 'audio engineer', label: 'Audio Engineer' },
+    { value: 'remote recording engineer', label: 'Remote Recording Engineer' },
+    { value: 'post production engineer', label: 'Post Production Engineer' }
+  ],
+  'audio-post-production': [
+    { value: 'audio editor', label: 'Audio Editor' },
+    { value: 'sound designer', label: 'Sound Designer' },
+    { value: 'foley artist', label: 'Foley Artist' },
+    { value: 'composer', label: 'Composer' },
+    { value: 'theme music', label: 'Theme Music' },
+    { value: 'music production', label: 'Music Production' },
+    { value: 'music contributor', label: 'Music Contributor' }
+  ],
+  'administration': [
+    { value: 'production coordinator', label: 'Production Coordinator' },
+    { value: 'booking coordinator', label: 'Booking Coordinator' },
+    { value: 'production assistant', label: 'Production Assistant' },
+    { value: 'content manager', label: 'Content Manager' },
+    { value: 'marketing manager', label: 'Marketing Manager' },
+    { value: 'sales representative', label: 'Sales Representative' },
+    { value: 'sales manager', label: 'Sales Manager' }
+  ],
+  'visuals': [
+    { value: 'graphic designer', label: 'Graphic Designer' },
+    { value: 'cover art designer', label: 'Cover Art Designer' }
+  ],
+  'community': [
+    { value: 'social media manager', label: 'Social Media Manager' }
+  ],
+  'misc': [
+    { value: 'consultant', label: 'Consultant' },
+    { value: 'intern', label: 'Intern' }
+  ],
+  'video-production': [
+    { value: 'camera operator', label: 'Camera Operator' },
+    { value: 'lighting designer', label: 'Lighting Designer' },
+    { value: 'camera grip', label: 'Camera Grip' },
+    { value: 'assistant camera', label: 'Assistant Camera' }
+  ],
+  'video-post-production': [
+    { value: 'editor', label: 'Editor' },
+    { value: 'assistant editor', label: 'Assistant Editor' }
+  ]
+};
+
+// Language codes
+export const LANGUAGES = [
+  { value: 'en', label: 'English' },
+  { value: 'es', label: 'Spanish' },
+  { value: 'de', label: 'German' },
+  { value: 'fr', label: 'French' },
+  { value: 'pt', label: 'Portuguese' },
+  { value: 'ja', label: 'Japanese' },
+  { value: 'zh', label: 'Chinese' },
+  { value: 'ko', label: 'Korean' },
+  { value: 'it', label: 'Italian' },
+  { value: 'nl', label: 'Dutch' }
+];

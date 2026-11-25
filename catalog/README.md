@@ -10,6 +10,11 @@ New to boostagrams, keysend or kind 10333?
 [`recipes/`](recipes/).** Everything else here explains where that code came
 from and what it is missing.
 
+For feeds — reading a Podcasting 2.0 RSS feed, fetching it safely, Podcast
+Index lookups, chapters, musicL playlists — start at
+[`recipes/podcast-feed-parser/`](recipes/podcast-feed-parser/) and
+[`recipes/safe-feed-fetch/`](recipes/safe-feed-fetch/).
+
 For payments — connecting a wallet, sending sats, boosts — start at
 [`recipes/lightning-wallet-payments/`](recipes/lightning-wallet-payments/), then
 [`boostagram-keysend`](recipes/boostagram-keysend/) and
@@ -95,6 +100,7 @@ it. Reproduce any of the above with [`analysis/`](analysis/).
 ./check-drift.sh              # has any extracted file drifted from its source?
 ./check-recipes.sh            # are the recipes safe to hand a stranger?
 ./check-recipes.sh --network  # ...and does every "seen on" link still answer?
+./check-recipes.sh --write-index  # regenerate recipes/index.json after a manifest change
 ```
 
 **Extracted code is byte-identical to its source.** No added header, no
@@ -195,8 +201,13 @@ both routes import their own app's services. The comparison is worth reading
 before you build one:
 [`comparisons/site-identity-signing.md`](comparisons/site-identity-signing.md).
 
-RSS parsing is compared but not shipped for the same reason — every parser
-imports its own app's siblings.
+RSS parsing ships as
+[`recipes/podcast-feed-parser/`](recipes/podcast-feed-parser/), with its whole
+import closure: eight files, because the one parser that compiles on its own
+still needs seven of its app's siblings. What each site's parser reads, and why
+that one won: [`comparisons/feed-parsing.md`](comparisons/feed-parsing.md). No
+portable parser on any live site types `podcast:valueTimeSplit`,
+`podcast:liveItem` or `podcast:podroll`; the shipped one carries them raw.
 
 No split/TLV code could be **extracted**: the only implementation keeps its TLV
 construction private and hardcodes an app name and two feed IDs. That feature

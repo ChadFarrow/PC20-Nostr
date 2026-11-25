@@ -1,0 +1,1243 @@
+// MSP 2.0 - XML Parser for importing Demu RSS Feeds
+import { XMLParser } from 'fast-xml-parser';
+import type { Album, Track, Person, PersonGroup, ValueRecipient, ValueBlock, Funding, PublisherFeed, RemoteItem, PublisherReference, BaseChannelData, PodcastImage, AlternateEnclosure, AlternateEnclosureSource, ServiceBlock } from '../types/feed';
+import { createEmptyTrack, LEGACY_MSP_NODE_PUBKEY, MSP_SUPPORT_RECIPIENT, DEFAULT_TRANSCRIPT_TYPE } from '../types/feed';
+import { fromParties, samePublisher } from './publisherParties';
+import { areValueBlocksStrictEqual, arePersonsEqual } from './comparison';
+import { detectAddressType } from './addressUtils';
+import { MIN_PLAUSIBLE_MEDIA_BYTES } from './audioUtils';
+
+// OP3 prefix pattern: https://op3.dev/e/ or https://op3.dev/e,pg=GUID/
+export const OP3_PREFIX_RE = /^https:\/\/op3\.dev\/e(?:,[^/]*)?\//;
+
+// Strip OP3 prefix from a URL, restoring the original URL
+export function stripOp3Prefix(url: string): string {
+  const stripped = url.replace(OP3_PREFIX_RE, '');
+  // If the remaining URL doesn't start with a protocol, it was HTTPS
+  if (!/^https?:\/\//i.test(stripped)) {
+    return `https://${stripped}`;
+  }
+  return stripped;
+}
+
+// Alternate sources follow the OP3 toggle like the main enclosure: stored bare,
+// prefixed on save when OP3 is on. Only strip when the feed's main enclosures
+// carried OP3 (album.op3), or the save would not put the prefix back. A template
+// drops the rest in regenerateAlbumGuids.
+function stripAlternateOp3(enclosures: AlternateEnclosure[]): void {
+  for (const source of enclosures.flatMap(enclosure => enclosure.sources)) {
+    if (OP3_PREFIX_RE.test(source.uri)) source.uri = stripOp3Prefix(source.uri);
+  }
+}
+
+// Known channel keys that we explicitly parse (don't capture as unknown)
+const KNOWN_CHANNEL_KEYS = new Set([
+  'title',
+  'description',
+  'link',
+  'language',
+  'generator',
+  'pubDate',
+  'lastBuildDate',
+  'managingEditor',
+  'webMaster',
+  'image',
+  'item',
+  'itunes:author',
+  'itunes:category',
+  'itunes:keywords',
+  'itunes:explicit',
+  // Both block tags are modelled in full (parseBlockTags), the service-named
+  // podcast:block entries included, so none of them may also pass through.
+  'itunes:block',
+  'podcast:block',
+  'itunes:owner',
+  'itunes:image',
+  'podcast:guid',
+  'podcast:medium',
+  'podcast:locked',
+  'podcast:person',
+  'podcast:value',
+  'podcast:funding',
+  'podcast:publisher',
+  'podcast:remoteItem',  // For publisher feeds
+  // 'podcast:txt' is deliberately absent. Listing it made every txt tag vanish on
+  // import (verification tokens included) when only the npub one is modelled;
+  // parseRssFeed consumes that one entry and the rest round-trip as unknown.
+  'podcast:image'
+]);
+
+// Album and video feeds don't model channel-level remoteItems (a podroll), so
+// letting the key stay "known" for them meant it was neither parsed nor
+// preserved — parseRssFeed never reads it, and being in the set above excludes
+// it from unknownChannelElements. Since Download Feed is a parse→regenerate,
+// that deleted a publisher's podroll from their album feeds. Dropping the key
+// here lets it round-trip as an unknown element instead. The publisher path
+// keeps the full set: it parses these into feed.remoteItems and would otherwise
+// emit them twice.
+const ALBUM_CHANNEL_KEYS = new Set(
+  [...KNOWN_CHANNEL_KEYS].filter(key => key !== 'podcast:remoteItem')
+);
+
+// Known item keys that we explicitly parse (don't capture as unknown)
+const KNOWN_ITEM_KEYS = new Set([
+  'title',
+  'description',
+  'pubDate',
+  'guid',
+  'enclosure',
+  'itunes:duration',
+  'itunes:explicit',
+  'itunes:image',
+  'podcast:season',
+  'podcast:episode',
+  'podcast:images',
+  'podcast:image',
+  'podcast:transcript',
+  'podcast:person',
+  'podcast:value',
+  'podcast:alternateEnclosure'
+]);
+
+/**
+ * The one parser configuration every feed read uses. Exported so the import-time
+ * inspector (feedInspect.ts) sees exactly the tree the importer does.
+ *
+ * Values stay strings: number coercion is off for both text and attributes.
+ * With it on, fast-xml-parser rewrote anything number-shaped, and everything
+ * that round-trips through a passthrough came back changed on save — a
+ * `podcast:txt` token `0012345` as `12345`, a valueTimeSplit `itemGuid="0012345"`
+ * as `12345` (a different payment target), `5e10` as `50000000000`, a 23-digit
+ * id rounded to `1.2345678901234568e+22`. Modelled fields all go through
+ * getText/getAttr and parseInt, which read strings the same way.
+ */
+export const createFeedXmlParser = (): XMLParser => new XMLParser({
+  ignoreAttributes: false,
+  attributeNamePrefix: '@_',
+  textNodeName: '#text',
+  parseAttributeValue: false,
+  parseTagValue: false,
+  trimValues: true
+});
+
+// Parse XML string to Album object
+export const parseRssFeed = (xmlString: string): Album => {
+  const parser = createFeedXmlParser();
+
+  const result = parser.parse(xmlString);
+  const channel = result?.rss?.channel;
+
+  if (!channel) {
+    throw new Error('Invalid RSS feed: missing channel element');
+  }
+
+  // Parse common channel elements
+  const common = parseCommonChannelElements(channel);
+
+  // Create album with common elements
+  const album: Album = {
+    ...common,
+    medium: (getText(channel['podcast:medium']) as 'music' | 'video') || 'music',
+    bannerArtUrl: '',
+    op3: false,
+    unknownChannelElements: captureUnknownElements(channel, ALBUM_CHANNEL_KEYS),
+    tracks: []
+  };
+
+  // Podcast Index tags
+  album.podcastGuid = getText(channel['podcast:guid']) || '';
+  album.medium = (getText(channel['podcast:medium']) as 'music' | 'video') || 'music';
+
+  // Locked
+  const locked = channel['podcast:locked'];
+  if (locked) {
+    album.locked = getText(locked) === 'yes';
+    album.lockedOwner = getAttr(locked, 'owner') || '';
+  }
+
+  // Categories (and subcategories) come from parseCommonChannelElements.
+
+  // Keywords
+  album.keywords = getText(channel['itunes:keywords']) || '';
+
+  // Explicit
+  album.explicit = parseExplicit(channel['itunes:explicit']);
+
+  // Owner
+  const owner = channel['itunes:owner'];
+  if (owner) {
+    album.ownerName = getText((owner as Record<string, unknown>)['itunes:name']) || '';
+    album.ownerEmail = getText((owner as Record<string, unknown>)['itunes:email']) || '';
+  }
+
+  // Image
+  const image = channel.image;
+  if (image) {
+    album.imageUrl = getText(image.url) || '';
+    album.imageTitle = getText(image.title) || '';
+    album.imageLink = getText(image.link) || '';
+    album.imageDescription = getText(image.description) || '';
+  }
+
+  // iTunes image fallback
+  const itunesImage = channel['itunes:image'];
+  if (itunesImage && !album.imageUrl) {
+    album.imageUrl = getAttr(itunesImage, 'href') || '';
+  }
+
+  // Contact
+  album.managingEditor = getText(channel.managingEditor) || '';
+  album.webMaster = getText(channel.webMaster) || '';
+
+  // Persons
+  album.persons = parsePersons(channel['podcast:person']);
+
+  // Value block
+  const value = channel['podcast:value'];
+  if (value) {
+    album.value = parseValueBlock(value);
+  }
+
+  // Funding
+  const funding = channel['podcast:funding'];
+  if (funding) {
+    const fundingArray = Array.isArray(funding) ? funding : [funding];
+    album.funding = fundingArray.map(parseFunding).filter(Boolean) as Funding[];
+  }
+
+  // Publisher references (if this album belongs to a publisher). Every party is
+  // kept, primary first (utils/publisherParties.ts).
+  const parties = parsePublisherReferences(channel['podcast:publisher']);
+
+  // Some feeds point at their publisher with a bare channel-level
+  // <podcast:remoteItem medium="publisher"> and no <podcast:publisher> wrapper.
+  // That has to be *modelled*, not passed through as an unknown element: the
+  // publish and Download Catalog flows set this publisher's party after
+  // parsing, so a passed-through copy would be re-emitted alongside the
+  // <podcast:publisher> block the generator writes — two publisher references
+  // in a file we rewrote on the user's behalf. Every bare publisher item is a
+  // party, after the wrapper's, unless it names a party already read; a second
+  // one used to be deleted outright. Podroll remoteItems (any other medium)
+  // still round-trip untouched via unknownChannelElements.
+  const channelRemoteItems = channel['podcast:remoteItem'];
+  const remoteItemArray = channelRemoteItems
+    ? (Array.isArray(channelRemoteItems) ? channelRemoteItems : [channelRemoteItems])
+    : [];
+  const podrollItems = remoteItemArray.filter(
+    item => getAttr(item, 'medium') !== 'publisher'
+  );
+  for (const item of remoteItemArray) {
+    if (getAttr(item, 'medium') === 'publisher') addParty(parties, toPublisherReference(item));
+  }
+  if (parties.length > 0) Object.assign(album, fromParties(parties));
+
+  // Artist Npub (from podcast:txt with purpose="npub"). Only the first non-empty
+  // npub is modelled — the generator writes artistNpub back out — so only that
+  // entry leaves the passthrough below. Every other txt (verification tokens, a
+  // second npub, free text) round-trips untouched.
+  const txtTags = channel['podcast:txt'];
+  const txtArray: unknown[] = txtTags ? (Array.isArray(txtTags) ? txtTags : [txtTags]) : [];
+  const npubIndex = txtArray.findIndex(txt => getAttr(txt, 'purpose') === 'npub' && getText(txt));
+  if (npubIndex >= 0) {
+    album.artistNpub = getText(txtArray[npubIndex]);
+  }
+
+  // Capture unknown channel elements
+  album.unknownChannelElements = captureUnknownElements(channel, ALBUM_CHANNEL_KEYS);
+
+  // Keep only the podroll entries in the passthrough. Any publisher-medium one
+  // was consumed into album.publisher just above, and the generator writes that
+  // back out as a <podcast:publisher> block — leaving it here too would emit it
+  // twice.
+  album.unknownChannelElements = keepPassthrough(album.unknownChannelElements, 'podcast:remoteItem', podrollItems);
+  // Same rule for the npub txt consumed into artistNpub.
+  album.unknownChannelElements = keepPassthrough(
+    album.unknownChannelElements,
+    'podcast:txt',
+    txtArray.filter((_, i) => i !== npubIndex)
+  );
+
+  // Tracks
+  const items = channel.item;
+  if (items) {
+    const itemArray = Array.isArray(items) ? items : [items];
+    album.tracks = itemArray.map((item, index) => parseTrack(item, index + 1, album.value, album.persons));
+  }
+
+  // Detect OP3 prefix on any track enclosure URLs
+  const hasOp3 = album.tracks.some(t => OP3_PREFIX_RE.test(t.enclosureUrl));
+  album.op3 = hasOp3;
+  if (hasOp3) {
+    for (const track of album.tracks) {
+      if (OP3_PREFIX_RE.test(track.enclosureUrl)) {
+        track.enclosureUrl = stripOp3Prefix(track.enclosureUrl);
+      }
+      stripAlternateOp3(track.alternateEnclosures ?? []);
+    }
+  }
+
+  // Recommended tracks. Both `guid` (the proposal) and `itemGuid` (the rename
+  // discussed on it) are read.
+  const tracksByGuid = new Map(album.tracks.filter(track => track.guid).map(track => [track.guid, track]));
+  album.unknownChannelElements = consumePins(
+    channel,
+    album.unknownChannelElements,
+    pin => tracksByGuid.get(getAttr(pin, 'guid') || getAttr(pin, 'itemGuid'))
+  );
+
+  return album;
+};
+
+// Helper to get text content
+function getText(node: unknown): string {
+  if (node === null || node === undefined) return '';
+  if (typeof node === 'string') return node;
+  if (typeof node === 'number') return String(node);
+  if (typeof node === 'object' && node !== null) {
+    if ('#text' in node) return String((node as Record<string, unknown>)['#text']);
+  }
+  return '';
+}
+
+// Helper to get attribute
+function getAttr(node: unknown, attr: string): string {
+  if (node === null || node === undefined) return '';
+  if (typeof node === 'object' && node !== null) {
+    const key = `@_${attr}`;
+    if (key in node) return String((node as Record<string, unknown>)[key]);
+  }
+  return '';
+}
+
+// Read <atom:link rel="self" href="..."> — the URL a feed claims to live at.
+// Not added to KNOWN_CHANNEL_KEYS on purpose: the element still round-trips
+// through unknownChannelElements, this only reads it.
+function parseSelfLink(channel: unknown): string {
+  if (!channel || typeof channel !== 'object') return '';
+  const raw = (channel as Record<string, unknown>)['atom:link'];
+  if (!raw) return '';
+  const links = Array.isArray(raw) ? raw : [raw];
+  for (const link of links) {
+    if (getAttr(link, 'rel') !== 'self') continue;
+    const href = getAttr(link, 'href');
+    if (href.startsWith('http')) return href;
+  }
+  return '';
+}
+
+// Parse all <podcast:image> elements under a channel or item node into PodcastImage[].
+function parsePodcastImages(parent: unknown): PodcastImage[] {
+  if (!parent || typeof parent !== 'object') return [];
+  const raw = (parent as Record<string, unknown>)['podcast:image'];
+  if (!raw) return [];
+  const arr = Array.isArray(raw) ? raw : [raw];
+  return arr
+    .map((node): PodcastImage => {
+      const image: PodcastImage = { href: getAttr(node, 'href') };
+      const purpose = getAttr(node, 'purpose');
+      const alt = getAttr(node, 'alt');
+      const aspectRatio = getAttr(node, 'aspect-ratio');
+      const width = getAttr(node, 'width');
+      const height = getAttr(node, 'height');
+      const type = getAttr(node, 'type');
+      if (purpose) image.purpose = purpose;
+      if (alt) image.alt = alt;
+      if (aspectRatio) image.aspectRatio = aspectRatio;
+      if (width) image.width = parseInt(width) || undefined;
+      if (height) image.height = parseInt(height) || undefined;
+      if (type) image.type = type;
+      return image;
+    })
+    .filter(img => img.href);
+}
+
+// Capture unknown elements from a parsed XML object
+function captureUnknownElements(obj: Record<string, unknown>, knownKeys: Set<string>): Record<string, unknown> | undefined {
+  const unknown: Record<string, unknown> = {};
+
+  for (const key of Object.keys(obj)) {
+    // Skip known keys and XML parser internals (attributes start with @_)
+    if (knownKeys.has(key) || key.startsWith('@_')) {
+      continue;
+    }
+    unknown[key] = obj[key];
+  }
+
+  // Return undefined if no unknown elements found
+  return Object.keys(unknown).length > 0 ? unknown : undefined;
+}
+
+/**
+ * Leave only `remaining` under `key` in a passthrough map — the entries the caller
+ * did NOT consume into a modelled field. An element is either modelled or passed
+ * through, never both: the generator writes the modelled one back out, so leaving
+ * it here as well would emit it twice. Returns undefined once the map is empty,
+ * matching captureUnknownElements.
+ */
+function keepPassthrough(
+  elements: Record<string, unknown> | undefined,
+  key: string,
+  remaining: unknown[]
+): Record<string, unknown> | undefined {
+  if (!elements || !(key in elements)) return elements;
+  if (remaining.length > 0) {
+    elements[key] = remaining.length === 1 ? remaining[0] : remaining;
+  } else {
+    delete elements[key];
+  }
+  return Object.keys(elements).length > 0 ? elements : undefined;
+}
+
+/**
+ * Read <podcast:pinned> (a proposed tag). A pin that `targetOf` resolves to
+ * something this feed models — a track, or a publisher's catalog feed — sets
+ * that target's `pinned`, and the generator writes it back, so it leaves the
+ * passthrough. A pin naming nothing here round-trips as is.
+ */
+function consumePins(
+  channel: Record<string, unknown>,
+  elements: Record<string, unknown> | undefined,
+  targetOf: (pin: unknown) => { pinned?: boolean } | undefined
+): Record<string, unknown> | undefined {
+  const pinTags = channel['podcast:pinned'];
+  if (!pinTags) return elements;
+  const unmatchedPins = (Array.isArray(pinTags) ? pinTags : [pinTags]).filter(pin => {
+    const target = targetOf(pin);
+    if (!target) return true;
+    target.pinned = true;
+    return false;
+  });
+  return keepPassthrough(elements, 'podcast:pinned', unmatchedPins);
+}
+
+// itunes:explicit is "true"/"false" today. Apple's older vocabulary was "yes" /
+// "explicit" against "no" / "clean", and reading only "true" turned every legacy
+// explicit feed clean on import.
+function parseExplicit(node: unknown): boolean {
+  if (node === true) return true;
+  if (typeof node === 'boolean') return false;
+  const value = getText(node).trim().toLowerCase();
+  return value === 'true' || value === 'yes' || value === 'explicit';
+}
+
+// <itunes:category> in both shapes — the text attribute (spec form) or element
+// text — with nested subcategories kept, keyed by their parent's name.
+function parseCategories(node: unknown): { categories: string[]; subcategories?: Record<string, string[]> } {
+  if (!node) return { categories: [] };
+  const nodes = Array.isArray(node) ? node : [node];
+  const categories: string[] = [];
+  const subcategories: Record<string, string[]> = {};
+  for (const category of nodes) {
+    const name = getAttr(category, 'text') || getText(category);
+    if (!name) continue;
+    categories.push(name);
+    const nested = typeof category === 'object' && category !== null
+      ? (category as Record<string, unknown>)['itunes:category']
+      : undefined;
+    if (!nested) continue;
+    const subs = (Array.isArray(nested) ? nested : [nested])
+      .map(sub => getAttr(sub, 'text') || getText(sub))
+      .filter(Boolean);
+    // hasOwn, not `??`: a category named "constructor" would otherwise read Object's.
+    if (subs.length > 0) subcategories[name] = [...(Object.hasOwn(subcategories, name) ? subcategories[name] : []), ...subs];
+  }
+  return Object.keys(subcategories).length > 0 ? { categories, subcategories } : { categories };
+}
+
+// Intermediate type for parsing a single person tag (has one role)
+interface ParsedPersonTag {
+  name: string;
+  href?: string;
+  img?: string;
+  npub?: string;
+  group: PersonGroup;
+  role: string;
+}
+
+// Parse a single person tag from XML
+function parsePersonTag(node: unknown): ParsedPersonTag | null {
+  if (!node) return null;
+
+  return {
+    name: getText(node),
+    href: getAttr(node, 'href') || undefined,
+    img: getAttr(node, 'img') || undefined,
+    npub: getAttr(node, 'npub') || undefined,
+    group: (getAttr(node, 'group') || 'music') as PersonGroup,
+    role: getAttr(node, 'role') || 'band'
+  };
+}
+
+// Merge multiple person tags with the same name into a single Person with multiple roles
+function mergePersonTags(tags: ParsedPersonTag[]): Person[] {
+  const personMap = new Map<string, Person>();
+
+  for (const tag of tags) {
+    // Create a key based on name + href + img + npub to group same person
+    const key = `${tag.name}|${tag.href || ''}|${tag.img || ''}|${tag.npub || ''}`;
+
+    if (personMap.has(key)) {
+      // Add role to existing person
+      const person = personMap.get(key)!;
+      const roleExists = person.roles.some(
+        r => r.group === tag.group && r.role === tag.role
+      );
+      if (!roleExists) {
+        person.roles.push({ group: tag.group, role: tag.role });
+      }
+    } else {
+      // Create new person
+      personMap.set(key, {
+        name: tag.name,
+        href: tag.href,
+        img: tag.img,
+        npub: tag.npub,
+        roles: [{ group: tag.group, role: tag.role }]
+      });
+    }
+  }
+
+  return Array.from(personMap.values());
+}
+
+// Parse person tags and merge by name
+function parsePersons(nodes: unknown): Person[] {
+  if (!nodes) return [];
+  const nodeArray = Array.isArray(nodes) ? nodes : [nodes];
+  const tags = nodeArray.map(parsePersonTag).filter(Boolean) as ParsedPersonTag[];
+  return mergePersonTags(tags);
+}
+
+// Parse funding tag
+function parseFunding(node: unknown): Funding | null {
+  if (!node) return null;
+  const url = getAttr(node, 'url');
+  if (!url) return null;
+
+  return {
+    url,
+    text: getText(node) || ''
+  };
+}
+
+// Parse value recipient
+function parseRecipient(node: unknown): ValueRecipient | null {
+  if (!node) return null;
+
+  // Derive the type from the address rather than trusting the XML's `type`
+  // attribute: older tools (e.g. the original musicsideproject.com) only knew
+  // about Lightning nodes and wrote type="node" even for Lightning addresses.
+  // An address containing "@" is always a Lightning address. This mirrors the
+  // auto-detection the editor UI applies on manual edit (RecipientsList.tsx).
+  const address = getAttr(node, 'address') || '';
+  const split = parseInt(getAttr(node, 'split')) || 0;
+
+  // Migrate the legacy MSP 1.0 support node to the MSP 2.0 lnaddress identity,
+  // preserving the split so support payments keep flowing after import. Match
+  // on the pubkey (unique, unforgeable) — not the name, which a user may rename.
+  if (address.toLowerCase() === LEGACY_MSP_NODE_PUBKEY) {
+    return {
+      name: MSP_SUPPORT_RECIPIENT.name,
+      address: MSP_SUPPORT_RECIPIENT.address,
+      split,
+      type: 'lnaddress'
+    };
+  }
+
+  const isFee = getAttr(node, 'fee').toLowerCase() === 'true';
+
+  return {
+    name: getAttr(node, 'name') || '',
+    address,
+    split,
+    type: address ? detectAddressType(address) : 'node',
+    customKey: getAttr(node, 'customKey') || undefined,
+    customValue: getAttr(node, 'customValue') || undefined,
+    ...(isFee ? { fee: true } : {})
+  };
+}
+
+// '#text' too, or a block with stray text would hand the generator a '#text' key
+// to emit as an element.
+const VALUE_BLOCK_KNOWN_KEYS = new Set(['podcast:valueRecipient', '#text']);
+
+// Parse value block
+function parseValueBlock(node: unknown): ValueBlock {
+  const recipients = (node as Record<string, unknown>)?.['podcast:valueRecipient'];
+  const recipientArray = recipients ? (Array.isArray(recipients) ? recipients : [recipients]) : [];
+  // Everything else inside the block (<podcast:valueTimeSplit>) is carried through.
+  // An array means the feed has several value blocks; there is no single block to
+  // carry, and capturing its indexes would emit <0> and <1> elements.
+  const unknownElements = node && typeof node === 'object' && !Array.isArray(node)
+    ? captureUnknownElements(node as Record<string, unknown>, VALUE_BLOCK_KNOWN_KEYS)
+    : undefined;
+
+  return {
+    type: 'lightning',
+    method: 'keysend',
+    suggested: getAttr(node, 'suggested') || undefined,
+    recipients: recipientArray.map(parseRecipient).filter(Boolean) as ValueRecipient[],
+    ...(unknownElements ? { unknownElements } : {})
+  };
+}
+
+// Attributes of an alternate version or source that MSP has no field for. They
+// ride on the model and are written back, as unknown children are: once the
+// element is modelled, nothing on it reaches the item passthrough.
+function captureUnknownAttributes(node: object, known: ReadonlySet<string>): Record<string, string> | undefined {
+  const unknown: Record<string, string> = {};
+  for (const [key, value] of Object.entries(node)) {
+    if (key.startsWith('@_') && !known.has(key.slice(2))) unknown[key.slice(2)] = String(value);
+  }
+  return Object.keys(unknown).length > 0 ? unknown : undefined;
+}
+
+const ALTERNATE_SOURCE_ATTRIBUTES = new Set(['uri', 'contentType']);
+const ALTERNATE_ENCLOSURE_ATTRIBUTES = new Set(['type', 'length', 'bitrate', 'height', 'lang', 'title', 'rel', 'codecs', 'default']);
+
+// Parse alternate enclosure source (podcast:source)
+function parseAlternateEnclosureSource(node: unknown): AlternateEnclosureSource | null {
+  if (!node || typeof node !== 'object') return null;
+  const uri = getAttr(node, 'uri');
+  if (!uri) return null;
+
+  const unknownAttributes = captureUnknownAttributes(node, ALTERNATE_SOURCE_ATTRIBUTES);
+  return {
+    uri,
+    contentType: getAttr(node, 'contentType') || undefined,
+    ...(unknownAttributes ? { unknownAttributes } : {})
+  };
+}
+
+// '#text' too, for the same reason as VALUE_BLOCK_KNOWN_KEYS.
+const ALTERNATE_ENCLOSURE_KNOWN_KEYS = new Set(['podcast:source', '#text']);
+
+// Parse alternate enclosure (podcast:alternateEnclosure). Null when MSP can't
+// read it (no type, or no source with a uri); the caller keeps such a node in
+// the passthrough instead.
+function parseAlternateEnclosure(node: unknown): AlternateEnclosure | null {
+  if (!node || typeof node !== 'object' || Array.isArray(node)) return null;
+
+  const type = getAttr(node, 'type');
+  if (!type) return null; // type is required
+
+  const enclosureNode = node as Record<string, unknown>;
+
+  // Parse sources
+  const sourcesNode = enclosureNode['podcast:source'];
+  let sources: AlternateEnclosureSource[] = [];
+  if (sourcesNode) {
+    const sourcesArray = Array.isArray(sourcesNode) ? sourcesNode : [sourcesNode];
+    sources = sourcesArray.map(parseAlternateEnclosureSource).filter(Boolean) as AlternateEnclosureSource[];
+  }
+
+  // Must have at least one source
+  if (sources.length === 0) return null;
+
+  // <podcast:integrity> and any other child are carried through as they are:
+  // MSP has no field for them, and reading them into a model dropped a second
+  // integrity element and rewrote an unknown integrity type as "sri".
+  const unknownElements = captureUnknownElements(enclosureNode, ALTERNATE_ENCLOSURE_KNOWN_KEYS);
+  const unknownAttributes = captureUnknownAttributes(enclosureNode, ALTERNATE_ENCLOSURE_ATTRIBUTES);
+
+  return {
+    id: crypto.randomUUID(),
+    type,
+    length: getAttr(node, 'length') || undefined,
+    bitrate: getAttr(node, 'bitrate') || undefined,
+    height: getAttr(node, 'height') || undefined,
+    lang: getAttr(node, 'lang') || undefined,
+    title: getAttr(node, 'title') || undefined,
+    rel: getAttr(node, 'rel') || undefined,
+    codecs: getAttr(node, 'codecs') || undefined,
+    default: getAttr(node, 'default').trim().toLowerCase() === 'true',
+    sources,
+    ...(unknownAttributes ? { unknownAttributes } : {}),
+    ...(unknownElements ? { unknownElements } : {})
+  };
+}
+
+/**
+ * Split a track's <podcast:alternateEnclosure> nodes into the versions MSP can
+ * edit and the ones it can't read. The unreadable ones go back in the
+ * passthrough, so a re-save writes them unchanged instead of deleting them.
+ */
+function splitAlternateEnclosures(nodes: unknown): { versions: AlternateEnclosure[]; unreadable: unknown[] } {
+  const versions: AlternateEnclosure[] = [];
+  const unreadable: unknown[] = [];
+  if (!nodes) return { versions, unreadable };
+  for (const node of Array.isArray(nodes) ? nodes : [nodes]) {
+    const version = parseAlternateEnclosure(node);
+    if (version) versions.push(version);
+    else unreadable.push(node);
+  }
+  return { versions, unreadable };
+}
+
+/**
+ * Bring a track saved in localStorage up to date. From Jan to Oct 2026 MSP did
+ * not model <podcast:alternateEnclosure>, so the element was stored verbatim in
+ * unknownItemElements; left there, the generator still writes it while the
+ * editor never shows it, and "+ Add Alternate Version" adds a second copy
+ * beside one the user can't see or remove. A version stored in Jan 2026, when
+ * the feature briefly existed, may carry a modelled `integrity`. `stripOp3` is
+ * the album's op3, as on import. Safe to run on every load: a second run
+ * changes nothing.
+ */
+export function migrateStoredAlternateEnclosures(track: Track, stripOp3: boolean): Track {
+  type StoredVersion = AlternateEnclosure & { integrity?: { type: string; value: string } };
+  const stored = (track.alternateEnclosures ?? []) as StoredVersion[];
+  if (stored.length === 0 && !(track.unknownItemElements && 'podcast:alternateEnclosure' in track.unknownItemElements)) {
+    return track;
+  }
+  const current = stored.map(({ integrity, ...enc }) => ({
+    ...enc,
+    id: enc.id || crypto.randomUUID(),
+    ...(integrity?.value
+      ? { unknownElements: { ...enc.unknownElements, 'podcast:integrity': { '@_type': integrity.type, '@_value': integrity.value } } }
+      : {})
+  }));
+
+  const { versions, unreadable } = splitAlternateEnclosures(track.unknownItemElements?.['podcast:alternateEnclosure']);
+  if (stripOp3) stripAlternateOp3(versions);
+
+  const alternateEnclosures = [...current, ...versions];
+  return {
+    ...track,
+    alternateEnclosures: alternateEnclosures.length > 0 ? alternateEnclosures : undefined,
+    unknownItemElements: keepPassthrough(
+      track.unknownItemElements ? { ...track.unknownItemElements } : undefined,
+      'podcast:alternateEnclosure',
+      unreadable
+    )
+  };
+}
+
+// Parse common channel elements shared between Album and PublisherFeed
+function parseCommonChannelElements(channel: Record<string, unknown>): Omit<BaseChannelData, 'unknownChannelElements'> {
+  // Basic info
+  const title = getText(channel.title) || '';
+  const author = getText(channel['itunes:author']) || '';
+  const description = getText(channel.description) || '';
+  const link = getText(channel.link) || '';
+  const language = getText(channel.language) || 'en';
+  const generator = getText(channel.generator) || 'MSP 2.0';
+  const pubDate = getText(channel.pubDate) || new Date().toUTCString();
+  const lastBuildDate = getText(channel.lastBuildDate) || new Date().toUTCString();
+
+  // Podcast Index tags
+  const podcastGuid = getText(channel['podcast:guid']) || '';
+
+  // Locked
+  const lockedNode = channel['podcast:locked'];
+  const locked = lockedNode ? getText(lockedNode) === 'yes' : false;
+  const lockedOwner = lockedNode ? getAttr(lockedNode, 'owner') || '' : '';
+
+  // Categories
+  const { categories, subcategories } = parseCategories(channel['itunes:category']);
+
+  // Keywords
+  const keywords = getText(channel['itunes:keywords']) || '';
+
+  // Explicit
+  const explicit = parseExplicit(channel['itunes:explicit']);
+
+  // Block tags (utils/listing.ts)
+  const { itunesBlock, podcastBlock, serviceBlocks } = parseBlockTags(channel);
+
+  // Owner
+  const owner = channel['itunes:owner'];
+  const ownerName = owner ? getText((owner as Record<string, unknown>)['itunes:name']) || '' : '';
+  const ownerEmail = owner ? getText((owner as Record<string, unknown>)['itunes:email']) || '' : '';
+
+  // Image
+  const image = channel.image as Record<string, unknown> | undefined;
+  let imageUrl = image ? getText(image.url) || '' : '';
+  const imageTitle = image ? getText(image.title) || '' : '';
+  const imageLink = image ? getText(image.link) || '' : '';
+  const imageDescription = image ? getText(image.description) || '' : '';
+
+  // iTunes image fallback
+  const itunesImage = channel['itunes:image'];
+  if (itunesImage && !imageUrl) {
+    imageUrl = getAttr(itunesImage, 'href') || '';
+  }
+
+  // Contact
+  const managingEditor = getText(channel.managingEditor) || '';
+  const webMaster = getText(channel.webMaster) || '';
+
+  // Persons
+  const persons = parsePersons(channel['podcast:person']);
+
+  // Value block
+  const valueNode = channel['podcast:value'];
+  const value: ValueBlock = valueNode
+    ? parseValueBlock(valueNode)
+    : { type: 'lightning', method: 'keysend', suggested: '0.000033333', recipients: [] };
+
+  // Funding
+  const fundingNode = channel['podcast:funding'];
+  let funding: Funding[] = [];
+  if (fundingNode) {
+    const fundingArray = Array.isArray(fundingNode) ? fundingNode : [fundingNode];
+    funding = fundingArray.map(parseFunding).filter(Boolean) as Funding[];
+  }
+
+  return {
+    title,
+    author,
+    description,
+    link,
+    language,
+    generator,
+    pubDate,
+    lastBuildDate,
+    podcastGuid,
+    locked,
+    lockedOwner,
+    categories,
+    ...(subcategories ? { subcategories } : {}),
+    keywords,
+    explicit,
+    itunesBlock,
+    podcastBlock,
+    serviceBlocks,
+    ownerName,
+    ownerEmail,
+    imageUrl,
+    imageTitle,
+    imageLink,
+    imageDescription,
+    podcastImages: parsePodcastImages(channel),
+    managingEditor,
+    webMaster,
+    persons,
+    value,
+    funding
+  };
+}
+
+// Read both block tags in full. Apple honours only "Yes" (any case) and every
+// other value means "not blocked", so the plain tags are read as yes-or-nothing:
+// dropping a "No" changes the file but not what any directory does with it.
+// - itunesBlock: any <itunes:block> saying yes. A repeated tag arrives as an
+//   array, and getText reads an array as '' — so a direct read lost the block.
+// - podcastBlock: any <podcast:block> with no id saying yes.
+// - serviceBlocks: every <podcast:block> that names a service, verbatim. The
+//   Listing control shows these as Custom and replaces them when a choice is
+//   picked; until then they are written back as they came in.
+function parseBlockTags(channel: Record<string, unknown>): {
+  itunesBlock: boolean;
+  podcastBlock: boolean;
+  serviceBlocks: ServiceBlock[];
+} {
+  const says = (node: unknown) => getText(node).trim().toLowerCase() === 'yes';
+  const itunesNode = channel['itunes:block'];
+  const itunesArray: unknown[] = itunesNode ? (Array.isArray(itunesNode) ? itunesNode : [itunesNode]) : [];
+  const blockNode = channel['podcast:block'];
+  const blockArray: unknown[] = blockNode ? (Array.isArray(blockNode) ? blockNode : [blockNode]) : [];
+  return {
+    itunesBlock: itunesArray.some(says),
+    podcastBlock: blockArray.some(block => !getAttr(block, 'id') && says(block)),
+    serviceBlocks: blockArray
+      .filter(block => getAttr(block, 'id'))
+      .map(block => ({ id: getAttr(block, 'id'), value: getText(block).trim() })),
+  };
+}
+
+// Parse remote item (for publisher feeds and podroll)
+function parseRemoteItem(node: unknown): RemoteItem | null {
+  if (!node) return null;
+
+  const feedGuid = getAttr(node, 'feedGuid');
+  const feedUrl = getAttr(node, 'feedUrl');
+
+  // Must have at least feedGuid or feedUrl
+  if (!feedGuid && !feedUrl) return null;
+
+  return {
+    feedGuid: feedGuid || '',
+    feedUrl: feedUrl || undefined,
+    itemGuid: getAttr(node, 'itemGuid') || undefined,
+    medium: getAttr(node, 'medium') || undefined,
+    // The spec defines title as an ATTRIBUTE and the element as self-closing.
+    // Reading only the element text meant every conforming publisher feed —
+    // Fountain's among them — imported with no titles at all. The text fallback
+    // stays for feeds MSP itself wrote before the generator was corrected.
+    title: getAttr(node, 'title') || getText(node) || undefined,
+    image: getAttr(node, 'feedImg') || getAttr(node, 'image') || undefined,
+    // Read so that a parse→regenerate (Download Feed, processCatalogFeed) keeps
+    // the role a feed states instead of silently dropping it.
+    rel: getAttr(node, 'rel') || undefined
+  };
+}
+
+/** Add `party` unless it is undefined or the list already names that publisher. */
+function addParty(parties: PublisherReference[], party: PublisherReference | undefined): void {
+  if (party && !parties.some(existing => samePublisher(existing, party))) parties.push(party);
+}
+
+/** One publisher party from a remoteItem-shaped node, or undefined when it names no feed. */
+function toPublisherReference(node: unknown): PublisherReference | undefined {
+  const feedGuid = getAttr(node, 'feedGuid');
+  const feedUrl = getAttr(node, 'feedUrl');
+  if (!feedGuid && !feedUrl) return undefined;
+  return {
+    feedGuid: feedGuid || '',
+    feedUrl: feedUrl || undefined,
+    rel: getAttr(node, 'rel') || undefined
+  };
+}
+
+/**
+ * Parse the publisher references of an album, primary first.
+ *
+ * The spec form is a <podcast:publisher> wrapping one
+ * <podcast:remoteItem medium="publisher">, and that is what the generator emits
+ * for one party. podcast-namespace PR #793 proposes one item per party (the
+ * artist and the label), so every publisher item is a party; MSP used to keep
+ * the first and delete the rest. Two malformed shapes also occur in the wild and
+ * both used to be *deleted*, because 'podcast:publisher' is in
+ * KNOWN_CHANNEL_KEYS and so is excluded from unknownChannelElements too. Since
+ * the Download Feed flow is a parse→regenerate, that lost the tag outright.
+ * Reading them here normalizes all of them to the canonical form on output.
+ */
+function parsePublisherReferences(node: unknown): PublisherReference[] {
+  if (!node || typeof node !== 'object') return [];
+
+  const publisherNode = node as Record<string, unknown>;
+  const raw = publisherNode['podcast:remoteItem'];
+
+  // fast-xml-parser returns an array when the child repeats, and getAttr returns
+  // '' for an array — so more than one remoteItem used to drop the publisher
+  // entirely.
+  const items: unknown[] = raw ? (Array.isArray(raw) ? raw : [raw]) : [];
+
+  // A party is an item with medium="publisher", or with no medium. The generator
+  // writes every party back as medium="publisher", so an item of another medium
+  // (out of spec inside this element) must not become one.
+  // The same publisher named twice is one party: the first entry is kept.
+  const isPartyMedium = (item: unknown) => ['', 'publisher'].includes(getAttr(item, 'medium'));
+  const parties: PublisherReference[] = [];
+  for (const item of items.filter(isPartyMedium)) addParty(parties, toPublisherReference(item));
+  if (parties.length > 0) return parties;
+
+  // No publisher-medium item: keep the first usable item of any medium, as MSP
+  // did before parties existed, rather than drop the reference.
+  for (const item of items) {
+    const party = toPublisherReference(item);
+    if (party) return [party];
+  }
+
+  // Attributes written directly on <podcast:publisher> with no child element.
+  // Out of spec, but reading it beats discarding the user's data.
+  const bare = toPublisherReference(publisherNode);
+  return bare ? [bare] : [];
+}
+
+// Parse track/item
+function parseTrack(node: unknown, trackNumber: number, albumValue: ValueBlock, albumPersons: Person[]): Track {
+  const track = createEmptyTrack(trackNumber);
+  const item = node as Record<string, unknown>;
+
+  track.title = getText(item.title) || '';
+  track.description = getText(item.description) || '';
+  track.pubDate = getText(item.pubDate) || new Date().toUTCString();
+
+  // GUID
+  const guid = item.guid;
+  if (guid) {
+    track.guid = getText(guid) || crypto.randomUUID();
+  }
+
+  // Enclosure
+  const enclosure = item.enclosure;
+  if (enclosure) {
+    track.enclosureUrl = getAttr(enclosure, 'url') || '';
+    // Only keep a length that could plausibly be a real file. `0` and generator
+    // placeholders (MSP itself long wrote a literal `33` for every track) are dropped
+    // so the size gets re-measured from the host instead of propagating a wrong number.
+    const length = parseInt(getAttr(enclosure, 'length') || '', 10);
+    track.enclosureLength = Number.isFinite(length) && length >= MIN_PLAUSIBLE_MEDIA_BYTES ? String(length) : '';
+    track.enclosureType = getAttr(enclosure, 'type') || 'audio/mpeg';
+  }
+
+  // Duration
+  track.duration = getText(item['itunes:duration']) || '00:00:00';
+
+  // Season number
+  const season = item['podcast:season'];
+  if (season) {
+    track.season = parseInt(getText(season)) || undefined;
+  }
+
+  // Episode number
+  const episode = item['podcast:episode'];
+  if (episode) {
+    const episodeNum = parseInt(getText(episode));
+    track.episode = episodeNum || undefined;
+    track.trackNumber = episodeNum || trackNumber;
+  }
+
+  // Explicit
+  track.explicit = parseExplicit(item['itunes:explicit']);
+
+  // Track image (check itunes:image first, then podcast:images as fallback)
+  const itunesImage = item['itunes:image'];
+  if (itunesImage) {
+    track.trackArtUrl = getAttr(itunesImage, 'href') || '';
+  }
+  // Check podcast:images for URL (if no itunes:image) and dimensions
+  const podcastImages = item['podcast:images'];
+  if (podcastImages) {
+    // Fallback to podcast:images srcset for URL if no itunes:image
+    if (!track.trackArtUrl) {
+      const srcset = getAttr(podcastImages, 'srcset') || '';
+      // srcset can be a single URL or multiple URLs with sizes - take the first one
+      track.trackArtUrl = srcset.split(' ')[0] || '';
+    }
+    // Parse width and height attributes
+    const width = getAttr(podcastImages, 'width');
+    const height = getAttr(podcastImages, 'height');
+    if (width) track.trackArtWidth = parseInt(width) || undefined;
+    if (height) track.trackArtHeight = parseInt(height) || undefined;
+  }
+
+  // Podcasting 2.0 additional images
+  track.podcastImages = parsePodcastImages(item);
+
+  // Transcript
+  const transcript = item['podcast:transcript'];
+  if (transcript) {
+    track.transcriptUrl = getAttr(transcript, 'url') || '';
+    // Fallback only — a feed that states its own type keeps it verbatim.
+    track.transcriptType = getAttr(transcript, 'type') || DEFAULT_TRANSCRIPT_TYPE;
+  }
+
+  // Persons - only set override if different from album
+  const persons = item['podcast:person'];
+  if (persons) {
+    track.persons = parsePersons(persons);
+    track.overridePersons = !arePersonsEqual(track.persons, albumPersons);
+  }
+
+  // Value block - only set override if different from album
+  const value = item['podcast:value'];
+  if (value) {
+    track.value = parseValueBlock(value);
+    track.overrideValue = !areValueBlocksStrictEqual(track.value, albumValue);
+  }
+
+  // Alternate versions (e.g. a lossless copy of the track)
+  const { versions, unreadable } = splitAlternateEnclosures(item['podcast:alternateEnclosure']);
+  if (versions.length > 0) {
+    track.alternateEnclosures = versions;
+  }
+
+  // Capture unknown item elements
+  track.unknownItemElements = captureUnknownElements(item, KNOWN_ITEM_KEYS);
+  if (unreadable.length > 0) {
+    track.unknownItemElements = {
+      ...track.unknownItemElements,
+      'podcast:alternateEnclosure': unreadable.length === 1 ? unreadable[0] : unreadable
+    };
+  }
+
+  return track;
+}
+
+// Check if URL is an MSP-hosted feed
+const isMspUrl = (url: string): boolean => {
+  return url.includes('/api/hosted/') ||
+    url.includes('musicsideproject.com') ||
+    url.includes('msp.podtards.com') ||
+    url.includes('msp-2-0');
+};
+
+/** Carries the real reason a fetch failed, so callers can say something true. */
+export class FeedFetchError extends Error {
+  // Declared as fields rather than constructor parameter properties:
+  // erasableSyntaxOnly is enabled in tsconfig.
+  readonly code: string;
+  readonly status?: number;
+
+  constructor(message: string, code: string, status?: number) {
+    super(message);
+    this.name = 'FeedFetchError';
+    this.code = code;
+    this.status = status;
+  }
+}
+
+const FETCH_ACCEPT = 'application/rss+xml, application/xml, text/xml, */*';
+const PASTE_HINT = ' You can also paste the XML content directly.';
+
+/**
+ * Mirrors the ErrorCode union in api/proxy-feed.ts. An unknown code falls back
+ * to the server's own `error` string, so adding a code server-side degrades to a
+ * usable message rather than a wrong one.
+ */
+const CODE_MESSAGES: Record<string, string> = {
+  'not-found': "That URL didn't load — the host returned 404 Not Found.",
+  blocked:
+    'The host refused our request. Bot protection (on Cloudflare: Security → Bots) may be blocking it — Podcast Index would be blocked the same way.',
+  'not-a-feed':
+    "That URL loaded, but it isn't an RSS feed. Check you copied the feed URL rather than a web page.",
+  'too-large':
+    'That feed is too large to fetch through MSP. Download the XML and import it as a file instead.',
+  'unsafe-address': 'That address is not one MSP can fetch. Use a public URL.',
+  'invalid-url': "That doesn't look like a valid feed URL.",
+  'rate-limited': "You've imported a lot of feeds recently. Wait a few minutes and try again.",
+  timeout: "That URL didn't respond in time.",
+  network: "Couldn't connect to that address.",
+  'too-many-redirects': 'That URL redirects too many times.',
+  'upstream-error': "That URL didn't load — the host returned an error."
+};
+
+const looksLikeFeed = (xml: string): boolean =>
+  xml.includes('<rss') || xml.includes('<feed') || xml.includes('<channel');
+
+/**
+ * Optimisation only. Works when the host sends CORS headers; most self-hosted
+ * feeds don't. Its failure is not evidence about the feed — a CORS rejection is
+ * a bare TypeError — so it never produces the user-facing error.
+ */
+async function fetchDirect(url: string): Promise<string | null> {
+  try {
+    const response = await fetch(url, { headers: { Accept: FETCH_ACCEPT } });
+    if (!response.ok) return null;
+    const content = await response.text();
+    return looksLikeFeed(content) ? content : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The authoritative attempt: throws a FeedFetchError carrying the real reason. */
+async function fetchViaProxy(url: string): Promise<string> {
+  let response: Response;
+  try {
+    response = await fetch(`/api/proxy-feed?url=${encodeURIComponent(url)}`, {
+      headers: { Accept: FETCH_ACCEPT }
+    });
+  } catch {
+    throw new FeedFetchError('Could not reach MSP to fetch that feed.' + PASTE_HINT, 'network');
+  }
+
+  if (response.ok) {
+    const content = await response.text();
+    if (looksLikeFeed(content)) return content;
+    throw new FeedFetchError(CODE_MESSAGES['not-a-feed'] + PASTE_HINT, 'not-a-feed');
+  }
+
+  const body = (await response.json().catch(() => null)) as
+    | { error?: string; code?: string; status?: number }
+    | null;
+  const code = body?.code ?? 'upstream-error';
+  const message = CODE_MESSAGES[code] ?? body?.error ?? CODE_MESSAGES['upstream-error'];
+  throw new FeedFetchError(message + PASTE_HINT, code, body?.status ?? response.status);
+}
+
+/**
+ * Fetch a feed's XML, going through /api/proxy-feed to sidestep CORS.
+ *
+ * Exactly one attempt is authoritative for the error. This used to loop over
+ * four transports — direct, our proxy, allorigins.win and corsproxy.io —
+ * `continue`-ing past every failure, so the only thing it could ever report was
+ * a generic "paste the XML directly". The two public proxies are gone for three
+ * independent reasons: they leak every user's feed URL to a third party,
+ * corsproxy.io requires an API key so that entry always failed, and allorigins
+ * wraps the body in JSON that was unwrapped heuristically, which could mangle a
+ * feed. Our own proxy no longer has a domain allowlist, so they cover nothing.
+ */
+export const fetchFeedFromUrl = async (url: string): Promise<string> => {
+  // MSP-hosted feeds go through the proxy first: on a preview deploy the app and
+  // the canonical hosted URL are different origins, so direct always CORS-fails.
+  if (isMspUrl(url)) return fetchViaProxy(url);
+
+  return (await fetchDirect(url)) ?? (await fetchViaProxy(url));
+};
+
+// Detect if XML is a video feed based on medium tag
+export const isVideoFeed = (xmlString: string): boolean => {
+  const parser = createFeedXmlParser();
+
+  try {
+    const result = parser.parse(xmlString);
+    const channel = result?.rss?.channel;
+    if (!channel) return false;
+
+    const medium = getText(channel['podcast:medium']);
+    return medium === 'video';
+  } catch {
+    return false;
+  }
+};
+
+// Detect if XML is a publisher feed based on medium tag
+export const isPublisherFeed = (xmlString: string): boolean => {
+  const parser = createFeedXmlParser();
+
+  try {
+    const result = parser.parse(xmlString);
+    const channel = result?.rss?.channel;
+    if (!channel) return false;
+
+    const medium = getText(channel['podcast:medium']);
+    return medium === 'publisher';
+  } catch {
+    return false;
+  }
+};
+
+// Parse XML string to PublisherFeed object
+export const parsePublisherRssFeed = (xmlString: string): PublisherFeed => {
+  const parser = createFeedXmlParser();
+
+  const result = parser.parse(xmlString);
+  const channel = result?.rss?.channel;
+
+  if (!channel) {
+    throw new Error('Invalid RSS feed: missing channel element');
+  }
+
+  // Parse common channel elements
+  const common = parseCommonChannelElements(channel);
+
+  // Create publisher feed with common elements (podcastImages comes via ...common)
+  const feed: PublisherFeed = {
+    ...common,
+    medium: 'publisher',
+    unknownChannelElements: captureUnknownElements(channel, KNOWN_CHANNEL_KEYS),
+    remoteItems: []
+  };
+
+  // A feed imported from a file/paste has no import URL, so fall back to the URL
+  // the feed claims for itself. Overridden by the real import URL in handleImport
+  // when there is one.
+  const selfLink = parseSelfLink(channel);
+  if (selfLink) {
+    feed.sourceUrl = selfLink;
+  }
+
+  // Remote items (the feeds this publisher owns)
+  const remoteItems = channel['podcast:remoteItem'];
+  if (remoteItems) {
+    const remoteArray = Array.isArray(remoteItems) ? remoteItems : [remoteItems];
+    feed.remoteItems = remoteArray.map(parseRemoteItem).filter(Boolean) as RemoteItem[];
+  }
+
+  // Recommended albums: MSP's <podcast:pinned feedGuid>, since a publisher feed
+  // has no episodes for the proposal's `guid` to name. A `guid` pin is left alone.
+  // A feedUrl-only item has feedGuid '', which every pin without the attribute
+  // would otherwise match.
+  const itemsByFeedGuid = new Map(feed.remoteItems.filter(item => item.feedGuid).map(item => [item.feedGuid, item]));
+  feed.unknownChannelElements = consumePins(
+    channel,
+    feed.unknownChannelElements,
+    pin => itemsByFeedGuid.get(getAttr(pin, 'feedGuid'))
+  );
+
+  return feed;
+};

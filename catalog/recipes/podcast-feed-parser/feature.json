@@ -1,0 +1,101 @@
+{
+  "name": "podcast-feed-parser",
+  "tier": "wired",
+  "summary": "Parse a Podcasting 2.0 RSS feed into typed data: channel and items, value blocks and recipients, persons, funding, publisher, block, locked, images and transcripts. Tags it does not model are kept raw, so nothing is silently dropped.",
+  "live_at": "https://musicsideproject.com",
+  "live_title": "MSP 2.0 - Music Side Project Studio",
+  "source": {
+    "repo": "MSP-2.0",
+    "ref": "origin/master",
+    "sha": "b2216ec",
+    "paths": [
+      "src/utils/xmlParser.ts",
+      "src/types/feed.ts",
+      "src/utils/publisherParties.ts",
+      "src/utils/urlValidation.ts",
+      "src/utils/comparison.ts",
+      "src/utils/addressUtils.ts",
+      "src/utils/audioUtils.ts",
+      "src/utils/videoUtils.ts"
+    ]
+  },
+  "files": [
+    {
+      "from": "files/utils/xmlParser.ts",
+      "to": "lib/feed/utils/xmlParser.ts"
+    },
+    {
+      "from": "files/types/feed.ts",
+      "to": "lib/feed/types/feed.ts"
+    },
+    {
+      "from": "files/utils/publisherParties.ts",
+      "to": "lib/feed/utils/publisherParties.ts"
+    },
+    {
+      "from": "files/utils/urlValidation.ts",
+      "to": "lib/feed/utils/urlValidation.ts"
+    },
+    {
+      "from": "files/utils/comparison.ts",
+      "to": "lib/feed/utils/comparison.ts"
+    },
+    {
+      "from": "files/utils/addressUtils.ts",
+      "to": "lib/feed/utils/addressUtils.ts"
+    },
+    {
+      "from": "files/utils/audioUtils.ts",
+      "to": "lib/feed/utils/audioUtils.ts"
+    },
+    {
+      "from": "files/utils/videoUtils.ts",
+      "to": "lib/feed/utils/videoUtils.ts"
+    }
+  ],
+  "dependencies": {
+    "fast-xml-parser": "^5.3.3"
+  },
+  "peer": {
+    "typescript": ">=5, passes strict with nothing but fast-xml-parser",
+    "runtime": "browser, or Node 19+ (uses the global crypto.randomUUID)",
+    "tsconfig": "lib must include DOM: audioUtils and videoUtils reference browser media types"
+  },
+  "env": [],
+  "rename": [
+    {
+      "file": "files/utils/xmlParser.ts",
+      "line": 538,
+      "current": "if (address.toLowerCase() === LEGACY_MSP_NODE_PUBKEY) {",
+      "why": "MSP policy, and it changes a payment destination: a recipient paying the legacy MSP 1.0 support node (a fixed node pubkey) is returned as MSP 2.0's Lightning address, musicsideproject@getalby.com, with the same split. MSP's own comment says it does this so support payments keep flowing after an import into MSP's editor. Delete this if-block (lines 538-545) so the parse returns the destination the feed names; keep it only if your app is MSP."
+    },
+    {
+      "file": "files/types/feed.ts",
+      "line": 438,
+      "current": "export const MSP_SUPPORT_RECIPIENT = { name: 'MSP 2.0', address: 'musicsideproject@getalby.com' } as const;",
+      "why": "Used only by the rewrite above and by MSP's editor helpers (createSupportRecipients), which the parser never calls. Once the rewrite is deleted nothing in the parse reads it, and the import of LEGACY_MSP_NODE_PUBKEY and MSP_SUPPORT_RECIPIENT at xmlParser.ts line 4 becomes unused: remove those two names from it if your lint refuses unused imports."
+    },
+    {
+      "file": "files/utils/xmlParser.ts",
+      "line": 1051,
+      "current": "const isMspUrl = (url: string): boolean => {",
+      "why": "Names MSP's own hosts (musicsideproject.com, the legacy msp.podtards.com). Only fetchFeedFromUrl uses it. Delete it with fetchFeedFromUrl, or replace the hosts with your own."
+    },
+    {
+      "file": "files/utils/xmlParser.ts",
+      "line": 1121,
+      "current": "response = await fetch(`/api/proxy-feed?url=${encodeURIComponent(url)}`, {",
+      "why": "fetchFeedFromUrl falls back to a same-origin route this recipe does not ship. Build that route with the safe-feed-fetch recipe, or fetch the XML yourself and call parseRssFeed(xml)."
+    }
+  ],
+  "caveats": [
+    "parseRssFeed(xml) is pure and synchronous; it does no network I/O. Fetching is yours: on a server, fetch with the safe-feed-fetch recipe, because a feed URL is user-supplied.",
+    "OP3 analytics prefixes are stripped from enclosure URLs, and album.op3 is set to true when one was there. A player that plays enclosureUrl as returned takes those plays out of the podcaster's OP3 stats; put the prefix back when album.op3 is true.",
+    "An item with no <guid> gets a random UUID, different on every parse. Never key storage, favorites or boosts on track.guid unless the feed had one.",
+    "A feed with no podcast:medium comes back as 'music', and medium is typed 'music' | 'video' but holds whatever string the feed has. Missing pubDate and lastBuildDate become the time of the parse.",
+    "Typed: guid, medium, value + valueRecipient (type derived from the address: '@' means lnaddress), person, funding, publisher, block, locked, images, transcript, alternateEnclosure, txt npub. Raw pass-through only: valueTimeSplit (value.unknownElements), podroll, liveItem, chapters and any tag it does not know (unknownChannelElements, unknownItemElements), in fast-xml-parser's object shape with '@_' attribute keys.",
+    "The model is MSP's: a channel is an Album and an item is a Track. A podcast feed parses fine into it; the field names just say album.",
+    "Ids stay strings: the parser never coerces values, so an itemGuid or customValue like 0012345 keeps its leading zeros.",
+    "Keep utils/ and types/ as sibling folders: the files import each other by relative path ('../types/feed')."
+  ]
+}

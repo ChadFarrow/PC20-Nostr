@@ -73,6 +73,11 @@ A **reference repo with five parts**, none of which is an application.
    app. Four parts: `recipes/` (the front door), `modules/` (shared source),
    `comparisons/` (why each shipped copy won), `analysis/` (the scripts
    behind every number). See `catalog/README.md`.
+   `AGENTS.md` at the root is the entry for a stranger's coding agent;
+   this file is for whoever maintains the repo. `catalog/recipes/index.json`
+   lists every recipe and is generated: after changing any `feature.json`,
+   run `./catalog/check-recipes.sh --write-index`, or step 10 fails. The repo
+   is MIT (`LICENSE`), as are the four public allowlisted source repos.
 5. **The boost-note draft.** `pc20-boost-notes.md` — one sentence and one
    kind `1` layout for every boost any of ChadFarrow's apps writes up
    (`<who> boosted <N> sats to <what>[ by <artist>][ from <where>][ via <app>]`).
@@ -177,8 +182,8 @@ The spec was **authored, not extracted**. Every rule in it began as a design
 decision someone made rather than a behavior observed in production, and most
 still are.
 
-Both implementations went live on 2026-08-13: `~/stablekraft-app`
-publishes and reads kind 10333 in production, and `~/boostmebitch`
+Both implementations went live on 2026-08-13: `stablekraft-app`
+publishes and reads kind 10333 in production, and `boostmebitch`
 started publishing it the same evening. That is **two writers, one user, one
 day old** — a source of measurements (event sizes, group counts, bugs each
 actually hit) and not evidence that a rule is settled.
@@ -267,26 +272,19 @@ entry or a known-gap note, never as a patch over there.
 one of these repos is carrying thousands of uncommitted files that exist
 nowhere else.
 
-### Where they are, and which are not here at all
+### Where they are
 
-They sit **directly in `~`**, one directory per repo, beside `~/PC20-Nostr`.
-Not under `~/Vibe`; an earlier revision of this file said that and no such
-directory exists. Two of the paths do not match the repo name:
+They sit in **`~/Vibe`**, one directory per repo, beside `~/Vibe/PC20-Nostr`
+(the workspace layout in `vibe-kit/workspace.md`). Checked 2026-11-24 on the
+Mac mini: all five allowlisted repos are cloned there, each under its own
+repo name — `~/Vibe/MSP-2.0` with a hyphen, `~/Vibe/candr.space` private on
+GitHub.
 
-| repo | path | note |
-|---|---|---|
-| `boostmebitch` | `~/boostmebitch` | |
-| `stablekraft-app` | `~/stablekraft-app` | |
-| `MSP-2.0` | `~/MSP 2.0` | **a space, not a hyphen** — quote it |
-| `ITDV-Lightning` | — | **not cloned here** |
-| `candr.space` | — | **not cloned here**, and private on GitHub |
-
-`~/boostbox-1` is the clone of `ChadFarrow/boostbox`, which is not on the
-allowlist either way. Checked 2026-09-07: 17 repos in `~`, none named `Vibe`.
-
-**Two allowlisted sources are missing, and that is a fact to state rather than
-route around.** Read them over the API instead — read-only, and it answers
-`origin/HEAD` directly rather than a stale checkout:
+An earlier revision of this file (2026-09-07) found them directly in `~`, with
+MSP at `~/MSP 2.0` and two repos not cloned. That was another machine before
+the `~/Vibe` workspace; if a repo is missing where you run, that is a fact to
+state rather than route around. Read it over the API instead — read-only, and
+it answers `origin/HEAD` directly rather than a stale checkout:
 
 ```bash
 gh api repos/ChadFarrow/<repo>/commits/main --jq '.sha[0:7]'      # the SHA
@@ -296,25 +294,19 @@ gh api repos/ChadFarrow/<repo>/contents/<path> --jq '.content' | base64 -d
 Do not clone one to make a claim easier without being asked. A catalog entry
 whose source cannot be read at a recorded SHA is unverified and must say so.
 
-**Known gap: the catalog scripts still hardcode `~/Vibe`.**
-`catalog/check-drift.sh` defaults `ROOT` to `$HOME/Vibe`, and `closure.py`,
-`feature.py`, `magnitude.py` and `overlap.py` each set
-`VIBE = os.path.expanduser("~/Vibe")`. Repointing the base is not enough on
-its own either: they build `<root>/<repo name>`, which misses `~/MSP 2.0`, and
-they name all five repos, two of which are not cloned here.
+Measured on 2026-11-24, so use these results rather than re-deriving them:
 
-Measured on 2026-09-07, so use these results rather than re-deriving them:
+- `./catalog/check-recipes.sh --network` — **passes**, all 11 checks.
+- `./catalog/check-drift.sh` — **exit 1**, and only for one reason: 28 rows,
+  0 `MISSING REPO`, and 6 `SOURCE MOVED` rows from 4 source files whose
+  repos gained commits after extraction: `lnurl-service.ts` and
+  `nwc-service.ts` (each shipped twice, as module and recipe), `read-trust.ts`
+  and `favorites-list.ts`. Each line prints the `git diff` to read. Every row still matches its
+  recorded SHA byte for byte, and the three `patched` rows differ as declared.
+  `SOURCE MOVED` is a prompt to re-read, not a failure of the copy.
 
-- `./catalog/check-recipes.sh --network` — **passes**, all 10 checks. It reads
-  only this repo, so the path has no effect on it.
-- `./catalog/check-drift.sh ~` — **exit 1**. `PROVENANCE.tsv` has 14 rows: the
-  2 `boostmebitch` rows verify clean, and the other 12 report `MISSING REPO`
-  (11 `ITDV-Lightning`, not cloned; 1 `MSP-2.0`, whose directory has a space).
-  Run without the `~` argument it reports all 14 as missing.
-
-So the drift checker cannot currently confirm 12 of 14 extracted files, and a
-number produced by an `analysis/` script has not been reproduced on this
-machine. Say that rather than quoting either as verified.
+`candr.space` is private: read it to verify a claim, but copy no code or text
+from it into this public repo without Chad's yes.
 
 ## Read `origin/HEAD`, never the local checkout
 
@@ -323,16 +315,16 @@ behind their remote** — one by 19 commits, both kind-10333 implementations by
 2 and 3 — and two were sitting on feature branches rather than their default
 branch.
 
-So a claim verified by reading `~/<repo>/lib/thing.ts` is a claim about
+So a claim verified by reading `~/Vibe/<repo>/lib/thing.ts` is a claim about
 whatever happened to be checked out, and it will be wrong about half the time.
 This is not hypothetical: the first draft of
 `catalog/comparisons/favorites-10333.md` reported four bugs in stablekraft's merge
 that had already been fixed upstream.
 
 ```bash
-git -C ~/<repo> fetch origin --quiet          # touches .git/refs only
-git -C ~/<repo> show origin/HEAD:<path>
-git -C ~/<repo> rev-parse --short origin/HEAD # the SHA to record
+git -C ~/Vibe/<repo> fetch origin --quiet          # touches .git/refs only
+git -C ~/Vibe/<repo> show origin/HEAD:<path>
+git -C ~/Vibe/<repo> rev-parse --short origin/HEAD # the SHA to record
 ```
 
 `fetch` never modifies a working tree, so this stays inside the read-only
@@ -341,7 +333,7 @@ rule.
 **Record the SHA in the entry.** A row without one is unverified and must say
 so — a stale example is worse than none, because it will be trusted and it
 will be wrong. With the SHA, checking is one command:
-`git -C ~/<repo> diff <sha> origin/HEAD -- <path>`.
+`git -C ~/Vibe/<repo> diff <sha> origin/HEAD -- <path>`.
 
 **Do not trust one implementation's comments about another.** Both apps carry
 headers describing how the other one behaves, and both are out of date. Go
@@ -511,6 +503,6 @@ and read the other one.
   what was believed, what was measured, what changed, with real numbers
   where there are any.
 - **Review what you're committing.** `git status` and `git show --stat`
-  before and after. There is **no `.gitignore`** in this repo, so a
-  `.DS_Store` or an editor swap file goes in with the prose and stays in the
-  history.
+  before and after. The `.gitignore` covers `.DS_Store`, editor swap files and
+  `node_modules/`, and nothing else — anything else you leave in the tree goes
+  in with the prose and stays in the history.

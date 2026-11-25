@@ -1,92 +1,157 @@
 # RSS feed parsing
 
 Turning a podcast or music RSS feed into typed albums, tracks, value blocks,
-persons, chapters and remote items.
+persons, chapters and remote items — and fetching it safely first.
 
-**Compared, not shipped.** Every parser depends on sibling modules in its own
-app, so none passes the
-[standalone-compile test](../README.md#what-the-checkers-enforce). This
-page says which one to read.
+**Shipped** as [`../recipes/podcast-feed-parser/`](../recipes/podcast-feed-parser/),
+with [`../recipes/safe-feed-fetch/`](../recipes/safe-feed-fetch/) for the fetch,
+[`../recipes/chapters-json/`](../recipes/chapters-json/) and
+[`../recipes/musicl-playlist-feed/`](../recipes/musicl-playlist-feed/). This page
+says why those copies won.
+
+**The sites do not parse feeds the same way.** They share the Podcast Index
+auth header ([podcast-index-auth.md](podcast-index-auth.md)) and one fork pair,
+DoerfelVerse and Project StableKraft. Past that, each reads XML its own way.
 
 ## Where it lives
 
-| Site | Repo | Path | Lines | Read at |
-|---|---|---|---|---|
-| MSP 2.0 | `MSP-2.0` | `src/utils/xmlParser.ts` | 934 | `c294548` |
-| Project StableKraft | `stablekraft-app` | `lib/rss-parser/index.ts` | 805 | `db2eb22f` |
-| Project StableKraft | `stablekraft-app` | `lib/rss-parser-db.ts` | 1594 | `db2eb22f` |
-| DoerfelVerse | `ITDV-Lightning` | `lib/rss-parser.ts` | 1952 | `4bc69b2` |
+Read at `origin/HEAD` on 2026-11-24.
 
-`lib/feed-parser.ts` is a separate thing again, present in both
-`stablekraft-app` and `ITDV-Lightning` at ~355–363 lines and **95.6%
-identical** — one of the few files these two sites have not driven apart.
+| Site | Repo | Path | Lines | How it reads XML | Tests beside it | Read at |
+|---|---|---|---|---|---|---|
+| MSP 2.0 | `MSP-2.0` | `src/utils/xmlParser.ts` | 1243 | `fast-xml-parser` object tree | 924 lines, plus a 24-feed round-trip corpus | `b2216ec` |
+| Boost Me Bitch | `boostmebitch` | `lib/feed-xml.ts` + `lib/pi.ts` | 1160 + 2726 | its own string scanner, no XML library | plain-Node check scripts, e.g. `check-value-time-split` 1316 lines | `815c551f` |
+| Project StableKraft | `stablekraft-app` | `lib/rss-parser-db.ts` | 1766 | `rss-parser` + `fast-xml-parser` + regex | 3 files, 329 lines | `826bc612` |
+| Project StableKraft | `stablekraft-app` | `lib/rss-parser/` | 805 + 317 | DOM (`@xmldom/xmldom`, browser `DOMParser`) | none | `826bc612` |
+| DoerfelVerse | `ITDV-Lightning` | `lib/rss-parser.ts` | 1952 | DOM (`@xmldom/xmldom`, browser `DOMParser`) | none | `da54fd3` |
 
-Between them the live sites ship three XML parsing libraries: `fast-xml-parser`,
-`rss-parser` and `xml2js`.
+StableKraft also parses with `xml2js` in `lib/music-track-parser/` (about
+1,240 lines) and reads value blocks a fourth time in
+`lib/lightning/value-parser.ts` (302 lines). That is four XML approaches in one
+app, and a fix to one reaches none of the others.
 
-## Which one to read
+`lib/feed-parser.ts` — a batch orchestrator with no XML of its own — is in both
+DoerfelVerse (472 lines) and StableKraft (471). The two differ by 37 lines,
+about 96% identical: one of the few files those two sites have not driven
+apart.
 
-**`MSP-2.0/src/utils/xmlParser.ts`.** It is the only parser in any of these
-repos with real test coverage — a 597-line suite beside it — and the only one
-that is pure functions with no database or Next.js coupling.
+The fifth site, `candr.space`, is a private repo and is not compared here.
 
-It is also the only parser that **round-trips losslessly**.
-`captureUnknownElements()` keeps channel elements it does not recognise, so
-they survive a parse-edit-regenerate cycle. Without that, a feed *editor*
-silently deletes every tag its author had not heard of — which, for a
-namespace as young as Podcasting 2.0, is most of them.
+## What each one reads
 
-That instinct is the same one behind [carry what you can't
-read](../../pc20-favorites.md#4-carry-what-you-cannot-read) in the favorites
-spec, arrived at independently for RSS.
+From reading each parser at the SHA above. The MSP column is also pinned by
+the recipe's tests; the others were read, not run.
 
-## How the sites diverge
+| Tag | MSP `xmlParser` | BMB `feed-xml` + `pi` | SK `rss-parser-db` | SK `rss-parser/` | ITDV `rss-parser` |
+|---|---|---|---|---|---|
+| `podcast:guid` | yes | yes ¹ | yes | — | yes |
+| `podcast:medium` | yes | yes | yes | — | remoteItem attribute only |
+| `podcast:value` + `valueRecipient` | yes | yes | yes | stub | yes ² |
+| `podcast:valueTimeSplit` | raw | yes | yes | — | — |
+| `podcast:remoteItem` | yes | yes | yes | yes | yes |
+| `podcast:podroll` | raw | yes | — | stub | yes |
+| `podcast:publisher` | yes | yes | yes | stub | yes |
+| `podcast:chapters` | raw | yes | yes, fetches the JSON | — | video and channel paths |
+| `podcast:transcript` | yes | yes | — | — | — |
+| `podcast:person` | yes | npub only | yes | — | — |
+| `podcast:liveItem` | raw | yes | — | yes | — |
+| `podcast:block` | yes | — | yes | — | — |
+| `podcast:funding` | yes | yes | yes | stub | yes |
+| `podcast:txt` (npub) | yes | yes | yes | — | not checked |
 
-**StableKraft runs two parsers at once.** `lib/rss-parser/` is the DOM-based
-path (`@xmldom/xmldom` on the server, browser `DOMParser` on the client);
-`lib/rss-parser-db.ts` is a separate 1594-line `fast-xml-parser` ingestion
-path used by `lib/feed-parsing.ts`. They are unrelated code answering the same
-question, and a fix to one does not reach the other.
+*raw* — kept unparsed in the output, in the XML library's object shape, so
+nothing is lost but you read it yourself. *stub* — the function exists and
+returns nothing.
 
-**StableKraft's modular split stubs out the parts a V4V app needs.** The
-directory layout is right — `lib/rss-parser.ts` is now a four-line
-`@deprecated` re-export over `lib/rss-parser/{index,types,utils}.ts` — but
-`extractFunding`, `extractPodroll` and `extractValue4Value` return empty or
-`undefined`, and `parsePublisherFeedInfo` logs "not implemented" and returns
-`null`. A value-for-value app cannot use a parser whose `extractValue4Value`
-returns nothing, so this cannot be the common base until those are filled in.
+¹ From Podcast Index JSON in most paths; from the RSS only when resolving a
+musicL playlist.
+² A channel with no value block takes the first item's: channel lookups use
+`getElementsByTagName(…)[0]`, which also searches the items (`:424`, `:941`).
 
-**DoerfelVerse's is the largest at 1952 lines and has content policy compiled
-into it.** `parseAlbumFeed` carries roughly 350 lines keyed on specific album
-titles — branches on `'autumn rust'` and `'doerfel'`, chapter URLs matched by
-filename, a hardcoded timestamp comment. That is per-album behaviour living
-inside a general parser; it cannot be parameterised, only removed.
+## Which one to take
 
-**The public API differs in ways that break drop-in replacement.**
+**MSP 2.0's `xmlParser.ts`**, shipped as the recipe. It is the only full parser
+that compiles on its own: with seven sibling files it passes strict TypeScript
+with nothing but `fast-xml-parser` (checked 2026-11-24). It is tested, keeps
+every value a string so `0012345` stays `0012345`, and keeps every tag it does
+not model.
+
+Its gaps are named in the recipe, not hidden: it carries `valueTimeSplit`,
+`podroll`, `liveItem` and `chapters` raw rather than typing them, it rewrites
+the legacy MSP 1.0 support node to MSP 2.0's address, it strips OP3 prefixes
+from enclosures, and it invents a random guid for an item that has none.
+
+**Boost Me Bitch reads the most tags**, value time splits included, and its
+check scripts are thorough. But the typed output is built inside `lib/pi.ts`,
+2,726 lines with about a dozen app imports, including a 5,960-line
+`lib/util.ts`. `lib/feed-xml.ts` lifts out almost alone, but it is a toolkit
+of scanners (`findTags`, `channelSlice`, `parsePlaylistRemoteItems`), not a
+parser that returns a feed.
+
+**StableKraft's modular parser is still stubbed.** `extractFunding`,
+`extractPodroll` and `extractValue4Value` return nothing, and
+`parsePublisherFeedInfo` logs "not implemented". A value-for-value app cannot
+use a parser whose value extraction is empty.
+
+**DoerfelVerse's has content policy compiled in.** About 350 lines
+(`:1108-1460`, plus branches at `:446`, `:773`, `:803`) are keyed on specific
+album titles. It has the channel-scoping bug above, no tests, and its fetch
+fallback calls `/api/fetch-rss`, a route that does not exist in the repo.
+
+**No live site has a portable parser that types `podcast:valueTimeSplit`.**
+Boost Me Bitch and StableKraft both parse it, inside files that cannot leave
+their apps. That is the next extraction worth doing.
+
+## The public APIs differ
+
 `parseAlbumFeed` takes `(feedUrl, trackFilter?)` in DoerfelVerse and
 `(feedUrl)` elsewhere; `parsePublisherFeed` returns `RSSPublisherItem[]` in
-DoerfelVerse and `{ publisherInfo, remoteItems }` in StableKraft.
+DoerfelVerse and `{ publisherInfo, remoteItems }` in StableKraft. MSP's
+`parseRssFeed(xml)` takes a string and does no I/O, which is why it travels.
 
-## Feed fetching is a separate problem
+## Feed fetching
 
-Fetching an arbitrary user-supplied feed URL server-side is an SSRF sink.
-`MSP-2.0` guards it: `api/_utils/urlSafety.ts` (`assertPublicHttpUrl`) and
-`api/_utils/safeFetch.ts`, referenced from 14 files, with tests.
+Fetching a user-supplied feed URL on a server is an SSRF sink. Four live
+sites have code for it; one guard is clearly the strongest.
 
-`ITDV-Lightning` has its own `lib/proxy-guard.ts` for the image proxy, but do
-not reach for it — a review found three SSRF bypasses in it, and the recipe
-that shipped it was withdrawn. See
+| | DNS checked | Redirects | `100.64/10` | IPv6 literals | Body cap |
+|---|---|---|---|---|---|
+| BMB `lib/safe-fetch.ts` | every hop | manual, 5, each re-checked | refused | refused by prefix, deliberately; public ones allowed | 8 MB, counted while reading |
+| MSP `api/_utils/urlSafety.ts` + `safeFetch.ts` | every hop | manual, 5, each re-checked | **allowed** | refused, **by accident** ³ | `readCapped`, size set by the caller (`proxy-feed`: 4 MiB) |
+| SK `lib/url-security.ts` + `lib/safe-fetch.ts` | **no** (its own comment says so) | 3, each re-checked | — | string checks only | 12 MiB |
+| ITDV `lib/proxy-guard.ts` | **no** | **followed unchecked** | — | **bypassed** | — |
+
+³ MSP hands the bracketed hostname (`[::1]`) to `dns.lookup`, which fails, so
+every IPv6 literal is refused as "Could not resolve host" — the private ones
+and the public ones alike. Run on 2026-11-24 at `b2216ec`: `100.64.0.1`,
+`198.18.0.1` and `192.0.2.1` were allowed; every IPv6 literal, `localhost.`
+and `127.0.0.1.nip.io` were refused.
+
+Boost Me Bitch's guard is shipped as
+[`../recipes/safe-feed-fetch/`](../recipes/safe-feed-fetch/), with a test
+that fails when any one of its 42 rules is removed. **None of the
+four pins the checked address**, so DNS rebinding passes all of them. And
+StableKraft's `parseRSSFeed`, when a caller does not hand it the XML, does not
+use its guard: `fetchFeedXml` (`lib/rss-parser-db.ts:1204`) is a plain `fetch`
+with a 30-second timeout and an uncapped `response.text()`. DoerfelVerse's server fetch
+(`lib/rss-parser.ts:163`) is a bare `fetch(feedUrl)`: no timeout, no size cap,
+no guard. Why the DoerfelVerse guard was withdrawn:
 [image-proxy-ssrf.md](image-proxy-ssrf.md).
 
-Not extracted here because `safeFetch.ts` imports `urlSafety.js`, which
-re-exports from `rateLimiter.js`.
+## Feed generation
+
+- **musicL playlists:** StableKraft's `lib/playlist/musicl-feed.ts` +
+  `musicl-guid.ts` (277 lines, no imports, tested), shipped as
+  [`../recipes/musicl-playlist-feed/`](../recipes/musicl-playlist-feed/). Boost
+  Me Bitch's `lib/community/feed-doc.ts` (154) imports an app type. MSP has no
+  musicL writer.
+- **Full feeds:** `MSP-2.0/src/utils/xmlGenerator.ts` (768 lines, 507 of tests)
+  is the tested one. Not shipped: it imports the same closure as the parser
+  and more of MSP's editor.
 
 ## Known gaps
 
-- No comparison of what each parser actually *extracts*. Line counts say they
-  differ; they do not say which one drops `<podcast:valueTimeSplit>` or
-  mishandles a CDATA title. That comparison is the work this page does not do.
-- Nothing here covers feed *generation*. `MSP-2.0/src/utils/xmlGenerator.ts`
-  is the tested one; `stablekraft-app/app/api/generate-playlist-rss/route.ts`
-  is the musicL playlist variant.
-- No live site parses `<podcast:valueTimeSplit>` at all.
+- No portable `valueTimeSplit` parser, as above.
+- Nothing retries a Podcast Index 429 on any site.
+- No guard pins the checked address.
+- `candr.space` is private and not compared.

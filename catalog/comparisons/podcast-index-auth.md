@@ -17,6 +17,12 @@ Shipped as
 [`../modules/rss-pc20/podcast-index-auth.ts`](../modules/rss-pc20/podcast-index-auth.ts)
 — one exported function, one import (`node:crypto`).
 
+If you want lookups and not only the header, take
+[`../recipes/podcast-index-client/`](../recipes/podcast-index-client/) instead:
+Boost Me Bitch's 112-line client (`services/nostr-index/src/pi.ts` at
+`815c551f`), which signs the same way and keeps "not found" apart from "could
+not ask", so a rate limit is never cached as a miss.
+
 MSP 2.0's wins on being the smallest correct version with no app coupling.
 There is nothing clever to get right here; the value of naming one is that the
 others stop existing.
@@ -55,4 +61,7 @@ means finding fourteen sites, and missing one produces a single endpoint that
   well enough to copy.
 - The shipped version reads `process.env` at module load, so it captures
   whatever was set at import time. Fine for a server route; surprising in a
-  long-lived process that expects to pick up rotated credentials.
+  long-lived process that expects to pick up rotated credentials. The client
+  recipe reads them on every call.
+- Re-counted on 2026-11-24 at `826bc612`: StableKraft builds the header inline
+  in 11 app and library files beside its client, plus 56 scripts.

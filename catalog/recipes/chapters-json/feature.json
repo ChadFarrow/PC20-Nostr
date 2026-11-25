@@ -1,0 +1,27 @@
+{
+  "name": "chapters-json",
+  "tier": "drop-in",
+  "summary": "Parse a podcast:chapters JSON file, repairing the one real-world corruption that breaks JSON.parse on otherwise intact chapters, without ever rewriting a valid file.",
+  "live_at": "https://boostmebitch.com",
+  "live_title": "Boost Me Bitch",
+  "source": {
+    "repo": "boostmebitch",
+    "ref": "origin/main",
+    "sha": "815c551f",
+    "paths": ["lib/chapters-json.ts"]
+  },
+  "files": [
+    { "from": "files/chapters-json.ts", "to": "lib/chapters-json.ts" }
+  ],
+  "dependencies": {},
+  "peer": {
+    "runtime": "any; it imports nothing"
+  },
+  "env": [],
+  "rename": [],
+  "caveats": [
+    "Returns unknown. It parses, it does not validate: check for a chapters array of { startTime, title } yourself.",
+    "The chapters URL comes from a feed, so fetch it on a server with the safe-feed-fetch recipe and read it with readCappedText.",
+    "Repairs exactly one corruption (an orphan run of digits between a comma and the next quote, outside any string). Anything else throws the original SyntaxError. Do not widen it: the input is bytes a stranger chose."
+  ]
+}

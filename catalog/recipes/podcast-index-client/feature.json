@@ -1,0 +1,58 @@
+{
+  "name": "podcast-index-client",
+  "tier": "drop-in",
+  "summary": "A minimal Podcast Index API client: signed requests, three lookups (podcast by guid, podcast by feed URL, episode by guid), and an answer that keeps 'not found' apart from 'could not ask', so a rate limit is never cached as a miss.",
+  "live_at": "https://boostmebitch.com",
+  "live_title": "Boost Me Bitch",
+  "source": {
+    "repo": "boostmebitch",
+    "ref": "origin/main",
+    "sha": "815c551f",
+    "paths": [
+      "services/nostr-index/src/pi.ts"
+    ]
+  },
+  "files": [
+    {
+      "from": "files/pi.ts",
+      "to": "lib/podcast-index.ts"
+    }
+  ],
+  "dependencies": {},
+  "peer": {
+    "runtime": "Node 18+ server only (node:crypto). Never import it from client code."
+  },
+  "env": [
+    {
+      "name": "PODCAST_INDEX_KEY",
+      "scope": "server-only",
+      "why": "API key from api.podcastindex.org. Must NOT carry a NEXT_PUBLIC_ prefix: Next.js inlines those into the browser bundle."
+    },
+    {
+      "name": "PODCAST_INDEX_SECRET",
+      "scope": "server-only",
+      "why": "API secret, used only inside the sha1 auth hash. Same rule: never NEXT_PUBLIC_."
+    },
+    {
+      "name": "APP_NAME",
+      "scope": "server-only",
+      "why": "Sent as the User-Agent. Podcast Index attributes traffic by it; set it to your app's name and version."
+    }
+  ],
+  "rename": [
+    {
+      "file": "files/pi.ts",
+      "line": 49,
+      "current": "'User-Agent': process.env.APP_NAME?.trim() || 'boostmebitch-index/0.1',",
+      "why": "The fallback User-Agent names the app this came from. Set APP_NAME, or change the fallback, or your requests reach Podcast Index labelled as another app's."
+    }
+  ],
+  "caveats": [
+    "Answers are raw Podcast Index JSON typed unknown. Type the fields you read yourself.",
+    "Three states: { found } and { miss } may be cached; null means the request failed (401, 429, 5xx, timeout, bad JSON) and must never be cached as absent.",
+    "Podcast Index says 'not found' with HTTP 400, and sometimes with 200 and an empty object. Both are { miss }.",
+    "No retry and no backoff. A 429 returns null; retry later in your own code.",
+    "Credentials are read on every call, not at import, so a rotated key takes effect without a restart.",
+    "15-second timeout per request, fixed in the file."
+  ]
+}

@@ -21,7 +21,7 @@
   "env": [],
   "rename": [],
   "caveats": [
-    "Client-side fetch, so feeds without permissive CORS headers fail with a network error. Route through a guarded server proxy if you need those; see the image-proxy recipe's proxy-guard.ts.",
+    "Client-side fetch, so feeds without permissive CORS headers fail with a network error. Route through a guarded server proxy if you need those: build it on the safe-feed-fetch recipe. (The image-proxy recipe this once pointed at was withdrawn for SSRF bypasses.)",
     "Validates tag presence and shape, not correctness. A well-formed but wrong podcast:guid passes."
   ]
 }

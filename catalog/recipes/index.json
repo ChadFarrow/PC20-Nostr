@@ -1,0 +1,168 @@
+{
+  "about": "Working Podcasting 2.0 features from live sites, packaged for a coding agent to install. Read a recipe's manifest, then its README, before copying anything.",
+  "generated_by": "catalog/check-recipes.sh --write-index",
+  "repo": "https://github.com/ChadFarrow/PC20-Nostr",
+  "raw_base": "https://raw.githubusercontent.com/ChadFarrow/PC20-Nostr/main/",
+  "states": {
+    "extracted": "byte-identical to a live site",
+    "patched": "a live-site file plus a named security fix",
+    "authored": "written for this catalog; no site runs it"
+  },
+  "recipes": [
+    {
+      "name": "boostagram-keysend",
+      "tier": "wired",
+      "summary": "Split a boost across a <podcast:value> block's recipients and attach a bLIP-10 boostagram to each keysend payment, plus the decoder for reading inbound ones.",
+      "states": [
+        "authored"
+      ],
+      "files": 3,
+      "dependencies": {},
+      "env": [],
+      "live_at": null,
+      "readme": "catalog/recipes/boostagram-keysend/README.md",
+      "manifest": "catalog/recipes/boostagram-keysend/feature.json"
+    },
+    {
+      "name": "boostbox-client",
+      "tier": "wired",
+      "summary": "Store a boost's Podcasting 2.0 metadata in a BoostBox instance and get back a short URL for the payment description, with the API key held server-side.",
+      "states": [
+        "authored"
+      ],
+      "files": 3,
+      "dependencies": {},
+      "env": [
+        "BOOSTBOX_API_KEY",
+        "BOOSTBOX_URL"
+      ],
+      "live_at": null,
+      "readme": "catalog/recipes/boostbox-client/README.md",
+      "manifest": "catalog/recipes/boostbox-client/feature.json"
+    },
+    {
+      "name": "chapters-json",
+      "tier": "drop-in",
+      "summary": "Parse a podcast:chapters JSON file, repairing the one real-world corruption that breaks JSON.parse on otherwise intact chapters, without ever rewriting a valid file.",
+      "states": [
+        "extracted"
+      ],
+      "files": 1,
+      "dependencies": {},
+      "env": [],
+      "live_at": "https://boostmebitch.com",
+      "readme": "catalog/recipes/chapters-json/README.md",
+      "manifest": "catalog/recipes/chapters-json/feature.json"
+    },
+    {
+      "name": "lightning-wallet-payments",
+      "tier": "wired",
+      "summary": "Connect a browser Lightning wallet over WebLN or Nostr Wallet Connect, then pay a Lightning address, a bolt11 invoice or a keysend destination.",
+      "states": [
+        "authored",
+        "extracted",
+        "patched"
+      ],
+      "files": 5,
+      "dependencies": {
+        "bech32": "^2.0.0",
+        "nostr-tools": "2.16.2",
+        "light-bolt11-decoder": "^3.2.0"
+      },
+      "env": [],
+      "live_at": "https://itdv.podtards.com",
+      "readme": "catalog/recipes/lightning-wallet-payments/README.md",
+      "manifest": "catalog/recipes/lightning-wallet-payments/feature.json"
+    },
+    {
+      "name": "musicl-playlist-feed",
+      "tier": "drop-in",
+      "summary": "Write a musicL playlist feed (a list of songs from other feeds, as podcast:remoteItem tags) with a podcast:guid that never changes between builds, and read the remoteItems back out of any feed.",
+      "states": [
+        "extracted"
+      ],
+      "files": 2,
+      "dependencies": {},
+      "env": [],
+      "live_at": "https://stablekraft.app/playlist/maker",
+      "readme": "catalog/recipes/musicl-playlist-feed/README.md",
+      "manifest": "catalog/recipes/musicl-playlist-feed/feature.json"
+    },
+    {
+      "name": "pc20-feed-validator",
+      "tier": "drop-in",
+      "summary": "A page that checks a podcast RSS feed against twenty Podcasting 2.0 namespace tags and reports what is present, missing or malformed.",
+      "states": [
+        "extracted"
+      ],
+      "files": 1,
+      "dependencies": {},
+      "env": [],
+      "live_at": "https://itdv.podtards.com/feed-validator",
+      "readme": "catalog/recipes/pc20-feed-validator/README.md",
+      "manifest": "catalog/recipes/pc20-feed-validator/feature.json"
+    },
+    {
+      "name": "podcast-feed-parser",
+      "tier": "wired",
+      "summary": "Parse a Podcasting 2.0 RSS feed into typed data: channel and items, value blocks and recipients, persons, funding, publisher, block, locked, images and transcripts. Tags it does not model are kept raw, so nothing is silently dropped.",
+      "states": [
+        "extracted"
+      ],
+      "files": 8,
+      "dependencies": {
+        "fast-xml-parser": "^5.3.3"
+      },
+      "env": [],
+      "live_at": "https://musicsideproject.com",
+      "readme": "catalog/recipes/podcast-feed-parser/README.md",
+      "manifest": "catalog/recipes/podcast-feed-parser/feature.json"
+    },
+    {
+      "name": "podcast-index-client",
+      "tier": "drop-in",
+      "summary": "A minimal Podcast Index API client: signed requests, three lookups (podcast by guid, podcast by feed URL, episode by guid), and an answer that keeps 'not found' apart from 'could not ask', so a rate limit is never cached as a miss.",
+      "states": [
+        "extracted"
+      ],
+      "files": 1,
+      "dependencies": {},
+      "env": [
+        "PODCAST_INDEX_KEY",
+        "PODCAST_INDEX_SECRET",
+        "APP_NAME"
+      ],
+      "live_at": "https://boostmebitch.com",
+      "readme": "catalog/recipes/podcast-index-client/README.md",
+      "manifest": "catalog/recipes/podcast-index-client/feature.json"
+    },
+    {
+      "name": "pwa-install-prompt",
+      "tier": "drop-in",
+      "summary": "An install-as-app banner handling Android's beforeinstallprompt and iOS Safari's Add-to-Home-Screen instructions separately, with session-scoped dismissal.",
+      "states": [
+        "extracted"
+      ],
+      "files": 2,
+      "dependencies": {},
+      "env": [],
+      "live_at": "https://itdv.podtards.com",
+      "readme": "catalog/recipes/pwa-install-prompt/README.md",
+      "manifest": "catalog/recipes/pwa-install-prompt/feature.json"
+    },
+    {
+      "name": "safe-feed-fetch",
+      "tier": "drop-in",
+      "summary": "Fetch a user-supplied feed, chapters or transcript URL on a server without opening an SSRF hole: every redirect hop re-checked, every resolved address checked, private and special-use IPv4 and IPv6 refused, and the body read under a byte cap.",
+      "states": [
+        "extracted"
+      ],
+      "files": 2,
+      "dependencies": {},
+      "env": [],
+      "live_at": "https://boostmebitch.com",
+      "readme": "catalog/recipes/safe-feed-fetch/README.md",
+      "manifest": "catalog/recipes/safe-feed-fetch/feature.json"
+    }
+  ]
+}

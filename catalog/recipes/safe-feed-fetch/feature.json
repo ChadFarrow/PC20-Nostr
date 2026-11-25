@@ -1,0 +1,32 @@
+{
+  "name": "safe-feed-fetch",
+  "tier": "drop-in",
+  "summary": "Fetch a user-supplied feed, chapters or transcript URL on a server without opening an SSRF hole: every redirect hop re-checked, every resolved address checked, private and special-use IPv4 and IPv6 refused, and the body read under a byte cap.",
+  "live_at": "https://boostmebitch.com",
+  "live_title": "Boost Me Bitch",
+  "source": {
+    "repo": "boostmebitch",
+    "ref": "origin/main",
+    "sha": "815c551f",
+    "paths": ["lib/safe-fetch.ts", "lib/capped-body.ts"]
+  },
+  "files": [
+    { "from": "files/safe-fetch.ts", "to": "lib/safe-fetch.ts" },
+    { "from": "files/capped-body.ts", "to": "lib/capped-body.ts" }
+  ],
+  "dependencies": {},
+  "peer": {
+    "runtime": "safe-fetch.ts: Node 18+ server only (node:dns/promises). capped-body.ts: any runtime, browser included - it imports nothing."
+  },
+  "env": [],
+  "rename": [],
+  "caveats": [
+    "Residual risk, stated in the file itself: this is resolve-then-fetch, so a DNS server that answers the check with a public address and the connection with a private one (classic rebinding) still gets through. Closing it needs a dialer that pins the checked address.",
+    "The port is not restricted. A public host is reachable on any port, 22 included.",
+    "Plain http is allowed on purpose: a long tail of real podcast feeds is still http.",
+    "safeFetch sets no timeout and no User-Agent. Pass both: safeFetch(url, { signal: AbortSignal.timeout(8000), headers: { 'User-Agent': 'your-app/1.0' } }).",
+    "safeFetch does not read the body. Read it with readCappedText(res) (8 MB default) or readCappedJson(res); never res.text(), which has no limit.",
+    "The thrown errors name the host. Map them to a generic 4xx before you answer a client.",
+    "Any redirect and next option you pass is overridden: redirects are always followed by hand, and cache is always no-store."
+  ]
+}
