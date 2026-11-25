@@ -77,8 +77,7 @@ A **reference repo with five parts**, none of which is an application.
    this file is for whoever maintains the repo. `catalog/recipes/index.json`
    lists every recipe and is generated: after changing any `feature.json`,
    run `./catalog/check-recipes.sh --write-index`, or step 10 fails. The repo
-   is MIT (`LICENSE`); every allowlisted source repo is MIT too, except the
-   private `candr.space`, which has no license.
+   is MIT (`LICENSE`), as are the four public allowlisted source repos.
 5. **The boost-note draft.** `pc20-boost-notes.md` — one sentence and one
    kind `1` layout for every boost any of ChadFarrow's apps writes up
    (`<who> boosted <N> sats to <what>[ by <artist>][ from <where>][ via <app>]`).

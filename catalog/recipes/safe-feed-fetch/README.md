@@ -98,8 +98,10 @@ http.
 
 `tests/ssrf.test.ts` runs the full list above against the shipped bytes —
 literals, redirects, DNS and the body cap — and needs no network except one
-DNS lookup, which it reports as SKIP when there is none. Each check was
-confirmed to fail when its rule is removed from `safe-fetch.ts`.
+DNS lookup, which it reports as SKIP when there is none. Every rule in both
+files was removed in turn — each range, each name, the scheme check, the
+per-hop checks, the redirect cap, the three body caps: 42 mutations — and the
+test failed for every one.
 
 ```bash
 npm i -D tsx typescript

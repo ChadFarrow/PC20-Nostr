@@ -19,8 +19,10 @@ import goes through it.
 ## Difficulty: wired
 
 Eight files, one package, and four places where the parse changes what the
-feed says. Read [What will bite you](#what-will-bite-you) before you pay
-anyone from its output.
+feed says — one of them a payment destination, which you delete on install
+(see [What to rename](#what-to-rename)). Read
+[What will bite you](#what-will-bite-you) before you pay anyone from its
+output.
 
 ## What you get
 
@@ -83,12 +85,14 @@ into `12345` — a different payment target.
 
 Four entries in `feature.json` `rename`. The one that matters:
 
-**`files/utils/xmlParser.ts` lines 538–545 rewrite a payment recipient.** A
-recipient paying the old MSP 1.0 Lightning node comes back as MSP 2.0's
-Lightning address, `musicsideproject@getalby.com`, with the same split. Both
-reach MSP, which is why MSP's editor wants it. In your app it means the parse
-returns a destination the feed does not contain. If you pay from parsed value
-blocks, delete that `if` block.
+**Delete `files/utils/xmlParser.ts` lines 538–545. They rewrite a payment
+recipient.** A recipient paying the legacy MSP 1.0 support node (one fixed node
+pubkey) comes back as MSP 2.0's Lightning address,
+`musicsideproject@getalby.com`, with the same split. MSP's own comment says it
+does this so support payments keep flowing after a feed is imported into MSP's
+editor. In any other app it means the parse returns a destination the feed does
+not contain. The recipe ships the file unchanged because it is byte-identical
+to what MSP runs; the `rename` entry tells an agent to delete the block.
 
 The other three are MSP's hosts and route in `fetchFeedFromUrl`
 (`isMspUrl` at 1051, `/api/proxy-feed` at 1121). Delete `fetchFeedFromUrl` and
@@ -118,7 +122,8 @@ podcast feed parses fine into it; the field names just say album.
 ## Tests
 
 `tests/parse.test.ts` pins every claim above, the four rewrites included, so
-this README cannot drift from the code:
+this README cannot drift from the code. It passes on the file as shipped and
+again after you delete the MSP block, and says which one it saw:
 
 ```bash
 npm i -D tsx typescript fast-xml-parser

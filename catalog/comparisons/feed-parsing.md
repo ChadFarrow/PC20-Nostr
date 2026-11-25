@@ -128,12 +128,14 @@ and the public ones alike. Run on 2026-11-24 at `b2216ec`: `100.64.0.1`,
 and `127.0.0.1.nip.io` were refused.
 
 Boost Me Bitch's guard is shipped as
-[`../recipes/safe-feed-fetch/`](../recipes/safe-feed-fetch/), with tests that
-were each confirmed to fail when the rule they pin is removed. **None of the
+[`../recipes/safe-feed-fetch/`](../recipes/safe-feed-fetch/), with a test
+that fails when any one of its 42 rules is removed. **None of the
 four pins the checked address**, so DNS rebinding passes all of them. And
-StableKraft's own `parseRSSFeed` does not use its guard: it fetches with a
-plain `fetch` and a 30-second timeout. DoerfelVerse's server fetch has no
-timeout, no size cap and no guard. Why the DoerfelVerse guard was withdrawn:
+StableKraft's `parseRSSFeed`, when a caller does not hand it the XML, does not
+use its guard: `fetchFeedXml` (`lib/rss-parser-db.ts:1204`) is a plain `fetch`
+with a 30-second timeout and an uncapped `response.text()`. DoerfelVerse's server fetch
+(`lib/rss-parser.ts:163`) is a bare `fetch(feedUrl)`: no timeout, no size cap,
+no guard. Why the DoerfelVerse guard was withdrawn:
 [image-proxy-ssrf.md](image-proxy-ssrf.md).
 
 ## Feed generation

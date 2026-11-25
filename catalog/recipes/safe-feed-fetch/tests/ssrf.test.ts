@@ -35,7 +35,20 @@ const MUST_REFUSE: [string, string][] = [
   ['http://172.16.0.1/', 'RFC 1918 172.16/12'],
   ['http://192.168.1.1/', 'RFC 1918 192.168/16'],
   ['http://100.64.0.1/', 'CGNAT / tailnet'],
+  ['http://100.127.255.1/', 'CGNAT upper edge'],
+  ['http://172.31.255.1/', 'RFC 1918 172.16/12 upper edge'],
   ['http://0.0.0.0/', '0/8'],
+  ['http://224.0.0.1/', 'multicast 224/4'],
+  ['http://239.255.255.250/', 'multicast SSDP'],
+  ['http://240.0.0.1/', 'reserved 240/4'],
+  ['http://255.255.255.255/', 'broadcast'],
+  ['http://192.0.0.1/', 'IETF protocol assignments 192.0.0/24'],
+  ['http://192.0.2.1/', 'TEST-NET-1'],
+  ['http://198.51.100.1/', 'TEST-NET-2'],
+  ['http://203.0.113.1/', 'TEST-NET-3'],
+  ['http://198.18.0.1/', 'benchmarking 198.18/15'],
+  ['http://198.19.255.1/', 'benchmarking 198.19'],
+  ['http://192.88.99.1/', '6to4 relay anycast'],
   ['http://2130706433/', 'decimal 127.0.0.1'],
   ['http://0177.0.0.1/', 'octal 127.0.0.1'],
   ['http://0x7f.0.0.1/', 'hex 127.0.0.1'],
@@ -45,6 +58,8 @@ const MUST_REFUSE: [string, string][] = [
   ['http://localhost./', 'localhost with trailing dot'],
   ['http://metadata.google.internal./', '.internal with trailing dot'],
   ['http://printer.local/', '.local'],
+  ['http://app.localhost/', '*.localhost'],
+  ['http://metadata.google.internal/', '.internal'],
   ['http://[::1]/', 'IPv6 loopback'],
   ['http://[::]/', 'IPv6 unspecified'],
   // The bypass that withdrew the image proxy: Node rewrites the embedded IPv4
@@ -60,6 +75,8 @@ const MUST_REFUSE: [string, string][] = [
   ['http://[fe80::1]/', 'link-local'],
   ['http://[fec0::1]/', 'site-local'],
   ['http://[fd00::1]/', 'unique-local'],
+  ['http://[fc00::1]/', 'unique-local fc'],
+  ['http://[100::1]/', 'discard-only 100::/64'],
   ['file:///etc/passwd', 'file scheme'],
   ['gopher://example.com/', 'gopher scheme'],
   ['ftp://example.com/feed.xml', 'ftp scheme'],
@@ -78,6 +95,11 @@ const MUST_ALLOW: [string, string][] = [
   ['https://fdrecords.com/feed.xml', 'public name starting fd'],
   ['https://fcc.gov/', 'public name starting fc'],
   ['https://fe80.example.com/', 'public name starting fe80'],
+  // The edges of each refused range, so a widened or narrowed rule shows.
+  ['http://172.32.0.1/', 'just above 172.16/12'],
+  ['http://100.128.0.1/', 'just above 100.64/10'],
+  ['http://223.255.255.1/', 'just below multicast'],
+  ['http://198.20.0.1/', 'just above 198.18/15'],
 ];
 for (const [url, why] of MUST_ALLOW) {
   refused(url) ? fail(`refused ${why}: ${url}`) : ok(`allowed ${why}: ${url}`);
@@ -142,10 +164,19 @@ async function main() {
     } catch (e) { fail(`relative public redirect refused: ${(e as Error).message}`); }
   }
   {
-    const calls = stubFetch(() => redirect(PUBLIC));
-    try { await safeFetch(PUBLIC); fail('redirect loop never stopped'); }
+    // The stub gives up after 20 hops so a missing cap fails here, not hangs.
+    const calls = stubFetch((_u, n) => n > 20 ? new Response('gave up') : redirect(PUBLIC));
+    try { await safeFetch(PUBLIC); fail(`redirect loop not capped (${calls.length} requests)`); }
     catch { calls.length === 6 ? ok('redirect chain capped (1 request + 5 redirects)')
                                : fail(`redirect cap made ${calls.length} requests, expected 6`); }
+  }
+  {
+    // A public host redirecting to another scheme. The literal IP skips DNS,
+    // so only the per-hop scheme check stands between it and the request.
+    const calls = stubFetch((_u, n) => n === 1 ? redirect('gopher://93.184.215.14/') : new Response('reached'));
+    try { await safeFetch(PUBLIC); fail('redirect to gopher: was followed'); }
+    catch { calls.length === 1 ? ok('redirect to another scheme refused before the second request')
+                               : fail('redirect to gopher: reached fetch'); }
   }
   {
     const calls = stubFetch(() => new Response('never'));
@@ -180,6 +211,11 @@ async function main() {
     await readCappedText(new Response('x', { headers: { 'content-length': String(1e12) } }), 1024);
     fail('declared 1 TB body was read');
   } catch { ok('declared length over the cap refused before reading'); }
+  // A body with no stream is buffered whole before it can be measured, and is
+  // still refused past the cap rather than handed over.
+  const unstreamed = { headers: new Headers(), body: null, arrayBuffer: async () => new ArrayBuffer(20) };
+  try { await readCappedText(unstreamed, 10); fail('20-byte unstreamed body passed a 10-byte cap'); }
+  catch { ok('unstreamed body over the cap refused'); }
   const prefix = await readBytesUpTo(stream(3, 4), 5);
   prefix.bytes.length === 5 && prefix.truncated
     ? ok('readBytesUpTo stops at the cap and reports truncated')

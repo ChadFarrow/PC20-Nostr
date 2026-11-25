@@ -20,14 +20,38 @@
     ]
   },
   "files": [
-    { "from": "files/utils/xmlParser.ts", "to": "lib/feed/utils/xmlParser.ts" },
-    { "from": "files/types/feed.ts", "to": "lib/feed/types/feed.ts" },
-    { "from": "files/utils/publisherParties.ts", "to": "lib/feed/utils/publisherParties.ts" },
-    { "from": "files/utils/urlValidation.ts", "to": "lib/feed/utils/urlValidation.ts" },
-    { "from": "files/utils/comparison.ts", "to": "lib/feed/utils/comparison.ts" },
-    { "from": "files/utils/addressUtils.ts", "to": "lib/feed/utils/addressUtils.ts" },
-    { "from": "files/utils/audioUtils.ts", "to": "lib/feed/utils/audioUtils.ts" },
-    { "from": "files/utils/videoUtils.ts", "to": "lib/feed/utils/videoUtils.ts" }
+    {
+      "from": "files/utils/xmlParser.ts",
+      "to": "lib/feed/utils/xmlParser.ts"
+    },
+    {
+      "from": "files/types/feed.ts",
+      "to": "lib/feed/types/feed.ts"
+    },
+    {
+      "from": "files/utils/publisherParties.ts",
+      "to": "lib/feed/utils/publisherParties.ts"
+    },
+    {
+      "from": "files/utils/urlValidation.ts",
+      "to": "lib/feed/utils/urlValidation.ts"
+    },
+    {
+      "from": "files/utils/comparison.ts",
+      "to": "lib/feed/utils/comparison.ts"
+    },
+    {
+      "from": "files/utils/addressUtils.ts",
+      "to": "lib/feed/utils/addressUtils.ts"
+    },
+    {
+      "from": "files/utils/audioUtils.ts",
+      "to": "lib/feed/utils/audioUtils.ts"
+    },
+    {
+      "from": "files/utils/videoUtils.ts",
+      "to": "lib/feed/utils/videoUtils.ts"
+    }
   ],
   "dependencies": {
     "fast-xml-parser": "^5.3.3"
@@ -43,13 +67,13 @@
       "file": "files/utils/xmlParser.ts",
       "line": 538,
       "current": "if (address.toLowerCase() === LEGACY_MSP_NODE_PUBKEY) {",
-      "why": "MSP policy, and it changes a payment destination: a recipient paying the old MSP 1.0 node is returned as MSP 2.0's Lightning address (musicsideproject@getalby.com). Both reach MSP, so MSP's own editor wants it. If you pay from parsed value blocks, delete this if-block (lines 538-545) so the parse returns what the feed says."
+      "why": "MSP policy, and it changes a payment destination: a recipient paying the legacy MSP 1.0 support node (a fixed node pubkey) is returned as MSP 2.0's Lightning address, musicsideproject@getalby.com, with the same split. MSP's own comment says it does this so support payments keep flowing after an import into MSP's editor. Delete this if-block (lines 538-545) so the parse returns the destination the feed names; keep it only if your app is MSP."
     },
     {
       "file": "files/types/feed.ts",
       "line": 438,
       "current": "export const MSP_SUPPORT_RECIPIENT = { name: 'MSP 2.0', address: 'musicsideproject@getalby.com' } as const;",
-      "why": "Used only by the rewrite above and by MSP's editor helpers (createSupportRecipients), which the parser never calls. Leave it if you delete the rewrite; nothing else reads it."
+      "why": "Used only by the rewrite above and by MSP's editor helpers (createSupportRecipients), which the parser never calls. Once the rewrite is deleted nothing in the parse reads it, and the import of LEGACY_MSP_NODE_PUBKEY and MSP_SUPPORT_RECIPIENT at xmlParser.ts line 4 becomes unused: remove those two names from it if your lint refuses unused imports."
     },
     {
       "file": "files/utils/xmlParser.ts",
