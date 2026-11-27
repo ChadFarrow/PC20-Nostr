@@ -10,7 +10,8 @@
 #   extracted  byte-identical to the source. Any difference is LOCAL EDIT,
 #              which is fatal - editing an extracted file in place is how the
 #              catalog stops being evidence of anything.
-#   patched    a source file plus a security fix the source does not have.
+#   patched    a source file plus a named fix the source does not have (a
+#              security fix, or a rule that is right only on that site).
 #              Differing from the source is the point, so cmp is expected to
 #              fail and is reported as PATCHED rather than as drift. SOURCE
 #              MOVED still applies: a patched file has to be rebased when

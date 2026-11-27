@@ -11,7 +11,14 @@
     "paths": ["lib/safe-fetch.ts", "lib/capped-body.ts"]
   },
   "files": [
-    { "from": "files/safe-fetch.ts", "to": "lib/safe-fetch.ts" },
+    {
+      "from": "files/safe-fetch.ts",
+      "to": "lib/safe-fetch.ts",
+      "state": "patched",
+      "fixes": [
+        "Added IPv6 multicast ff00::/8 to PRIVATE_V6, which the site's list does not have. A connect to a multicast address fails anyway, so this makes the refusal explicit; it closes no reachable hole. ITDV-Lightning carries the same refusal in its own wrapper (lib/proxy-guard.ts at 8b7fa61) because its copy of this file is byte-identical to the site's."
+      ]
+    },
     { "from": "files/capped-body.ts", "to": "lib/capped-body.ts" }
   ],
   "dependencies": {},
@@ -27,6 +34,7 @@
     "safeFetch sets no timeout and no User-Agent. Pass both: safeFetch(url, { signal: AbortSignal.timeout(8000), headers: { 'User-Agent': 'your-app/1.0' } }).",
     "safeFetch does not read the body. Read it with readCappedText(res) (8 MB default) or readCappedJson(res); never res.text(), which has no limit.",
     "The thrown errors name the host. Map them to a generic 4xx before you answer a client.",
-    "Any redirect and next option you pass is overridden: redirects are always followed by hand, and cache is always no-store."
+    "Any redirect and next option you pass is overridden: redirects are always followed by hand, and cache is always no-store. Do not remove the override: on a cacheable fetch Next reads a copy of the whole body to store it, outside the 8 MB cap.",
+    "Next.js: because the fetch is no-store, a route or page with export const revalidate silently becomes dynamic (the build passes, every request fetches again), and a catch around safeFetch receives Next's 'Dynamic server usage' error during the build - retrying it can push the prerender past Next's 60 s limit and fail the build. Call unstable_rethrow(err) first in such a catch. To keep a cache, wrap the fetch, capped read and parse in unstable_cache (the route stays static and only your returned data is cached; tested on Next 15.5.28), or set dynamic = 'force-dynamic' and send a CDN Cache-Control (s-maxage). See the README section 'Next.js: this fetch turns revalidate off'."
   ]
 }

@@ -294,15 +294,19 @@ gh api repos/ChadFarrow/<repo>/contents/<path> --jq '.content' | base64 -d
 Do not clone one to make a claim easier without being asked. A catalog entry
 whose source cannot be read at a recorded SHA is unverified and must say so.
 
-Measured on 2026-11-24, so use these results rather than re-deriving them:
+Measured on 2026-11-26, so use these results rather than re-deriving them:
 
 - `./catalog/check-recipes.sh --network` — **passes**, all 11 checks.
 - `./catalog/check-drift.sh` — **exit 1**, and only for one reason: 28 rows,
-  0 `MISSING REPO`, and 6 `SOURCE MOVED` rows from 4 source files whose
+  0 `MISSING REPO`, and 7 `SOURCE MOVED` rows from 5 source files whose
   repos gained commits after extraction: `lnurl-service.ts` and
-  `nwc-service.ts` (each shipped twice, as module and recipe), `read-trust.ts`
-  and `favorites-list.ts`. Each line prints the `git diff` to read. Every row still matches its
-  recorded SHA byte for byte, and the three `patched` rows differ as declared.
+  `nwc-service.ts` (each shipped twice, as module and recipe), `read-trust.ts`,
+  `favorites-list.ts` and `capped-body.ts`. Each line prints the `git diff` to
+  read. Every extracted row still matches its recorded SHA byte for byte, and
+  the five `patched` rows differ as declared: three in
+  `lightning-wallet-payments`, plus `safe-fetch.ts` (one added rule, IPv6
+  multicast) and `xmlParser.ts` (MSP's rewrite of one payment recipient
+  removed).
   `SOURCE MOVED` is a prompt to re-read, not a failure of the copy.
 
 `candr.space` is private: read it to verify a claim, but copy no code or text

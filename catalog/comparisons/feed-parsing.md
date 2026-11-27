@@ -77,9 +77,10 @@ every value a string so `0012345` stays `0012345`, and keeps every tag it does
 not model.
 
 Its gaps are named in the recipe, not hidden: it carries `valueTimeSplit`,
-`podroll`, `liveItem` and `chapters` raw rather than typing them, it rewrites
-the legacy MSP 1.0 support node to MSP 2.0's address, it strips OP3 prefixes
-from enclosures, and it invents a random guid for an item that has none.
+`podroll`, `liveItem` and `chapters` raw rather than typing them, it strips OP3
+prefixes from enclosures, and it invents a random guid for an item that has
+none. MSP's copy also rewrites the legacy MSP 1.0 support node to MSP 2.0's
+address; the recipe removes that rewrite, so its `xmlParser.ts` is `patched`.
 
 **Boost Me Bitch reads the most tags**, value time splits included, and its
 check scripts are thorough. But the typed output is built inside `lib/pi.ts`,
@@ -128,8 +129,9 @@ and the public ones alike. Run on 2026-11-24 at `b2216ec`: `100.64.0.1`,
 and `127.0.0.1.nip.io` were refused.
 
 Boost Me Bitch's guard is shipped as
-[`../recipes/safe-feed-fetch/`](../recipes/safe-feed-fetch/), with a test
-that fails when any one of its 42 rules is removed. **None of the
+[`../recipes/safe-feed-fetch/`](../recipes/safe-feed-fetch/), plus one rule
+it lacks (IPv6 multicast `ff00::/8`), with a test that fails when any one of
+its 43 rules is removed. **None of the
 four pins the checked address**, so DNS rebinding passes all of them. And
 StableKraft's `parseRSSFeed`, when a caller does not hand it the XML, does not
 use its guard: `fetchFeedXml` (`lib/rss-parser-db.ts:1204`) is a plain `fetch`

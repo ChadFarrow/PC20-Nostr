@@ -39,10 +39,12 @@ echo "== 2. every shipped file says where it came from"
 # Three states, and a file must be in exactly one of them:
 #
 #   extracted  byte-identical to a live site. PROVENANCE.tsv carries the row.
-#   patched    a live-site file plus a security fix the site does not have.
-#              PROVENANCE.tsv carries the row, and feature.json must name the
-#              issues fixed - a reader has to be able to tell what diverged
-#              and why without diffing against a repo they do not have.
+#   patched    a live-site file plus a named fix the site does not have: a
+#              security fix, or the removal of a rule that is right only on
+#              that site. PROVENANCE.tsv carries the row, and feature.json
+#              must name the issues fixed - a reader has to be able to tell
+#              what diverged and why without diffing against a repo they do
+#              not have.
 #   authored   new code that has never served traffic. No PROVENANCE row, and
 #              feature.json must say so out loud.
 #
@@ -307,7 +309,7 @@ index = {
     "raw_base": "https://raw.githubusercontent.com/ChadFarrow/PC20-Nostr/main/",
     "states": {
         "extracted": "byte-identical to a live site",
-        "patched": "a live-site file plus a named security fix",
+        "patched": "a live-site file plus a named fix the site does not have",
         "authored": "written for this catalog; no site runs it",
     },
     "recipes": recipes,

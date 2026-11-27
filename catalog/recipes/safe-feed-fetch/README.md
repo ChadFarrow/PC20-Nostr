@@ -26,7 +26,7 @@ Two files, no packages, nothing to rename.
 | `files/safe-fetch.ts` | `lib/safe-fetch.ts` |
 | `files/capped-body.ts` | `lib/capped-body.ts` |
 
-213 + 178 lines.
+217 + 178 lines.
 
 ```ts
 import { safeFetch } from '@/lib/safe-fetch';
@@ -49,6 +49,62 @@ Node 18+ on the server. `safe-fetch.ts` imports `node:dns/promises`, so it
 cannot go in a browser bundle. `capped-body.ts` imports nothing and works in a
 browser too — use it there for any third-party body.
 
+## Next.js: this fetch turns `revalidate` off
+
+**`safeFetch` always sends `cache: 'no-store'` and drops any `next` option
+you pass, and you cannot opt out.** That is on purpose. On a cacheable fetch
+Next reads a second copy of the whole body to store it, outside the 8 MB cap,
+so an attacker-chosen URL could fill your server's memory. Do not delete the
+override to get caching back.
+
+What it does to a route or page with `export const revalidate = N` (ISR),
+tested with `next build` on Next 15.5.28:
+
+- **The build passes, and the route is no longer static.** Next sees the
+  `no-store` fetch and makes the route dynamic (`ƒ` in the build output). It
+  ignores your `revalidate` without a warning, so every request fetches the
+  feed again.
+- **A `catch` around `safeFetch` runs during the build.** Next stops the
+  prerender by throwing its own error into your code: `Dynamic server usage:
+  Route /x couldn't be rendered statically because it used revalidate: 0
+  fetch`. If your `catch` retries or waits, each retry gets the same error,
+  and the prerender can pass Next's 60-second limit and fail the build. A real
+  app hit exactly this on its first build with this recipe: its parser retried
+  every feed. Call `unstable_rethrow(err)` (from `next/navigation`) first in
+  each such `catch`, so Next gets its error back.
+
+To keep a cache, pick one:
+
+- **Cache the result, not the response.** Wrap the fetch, the capped read
+  and your parse in `unstable_cache` (from `next/cache`). In the same test the
+  route stayed static (`○`, revalidate 1m), the cache entry held only the
+  value the function returned, and under `next start` the route served the
+  cached body, then a fresh one after the 60 s. The response never goes through Next's data
+  cache, so the cap still holds. Return plain data, never the `Response`.
+  It suits a fixed list of feeds: the URL is part of the cache key, so a URL
+  taken from the request adds one cache entry per distinct URL. Tested on a
+  route handler, on Next 15.5.28 only.
+
+  ```ts
+  import { unstable_cache } from 'next/cache';
+
+  export const revalidate = 300;
+
+  const getFeed = unstable_cache(async (url: string) => {
+    const res = await safeFetch(url, { signal: AbortSignal.timeout(8_000) });
+    if (!res.ok) throw new Error(`feed answered ${res.status}`);
+    return parse(await readCappedText(res));   // your parser: plain data out
+  }, ['feed'], { revalidate: 300 });
+  ```
+
+- **Render on request, cache at the CDN.** Set
+  `export const dynamic = 'force-dynamic'`, so the build does not try to
+  prerender the route, and answer with a `Cache-Control` such as
+  `public, max-age=60, s-maxage=300, stale-while-revalidate=600`. That is the
+  header the live site's feed route sends (`app/api/feed/route.ts` at
+  `cd940d36`), with no `revalidate` at all. The first request after a CDN miss
+  pays for the whole fetch.
+
 ## What it refuses
 
 Each hop, the first request and every redirect, is checked twice: once on the
@@ -65,8 +121,9 @@ URL as written, then on every address DNS returns for its host.
   and refused.
 - **IPv6**: `::` and all of `::/96` (loopback, and v4-mapped in the hex form
   Node rewrites it to — the bypass that withdrew the last guard), NAT64
-  `64:ff9b::`, 6to4 `2002::`, Teredo, link-local, site-local, unique-local and
-  discard-only.
+  `64:ff9b::`, 6to4 `2002::`, Teredo, link-local, site-local, unique-local,
+  discard-only and multicast `ff00::/8`. The live site's copy has no multicast
+  rule; this recipe adds it (see [Provenance](#provenance)).
 - **A public name that resolves to any of the above**, such as
   `127.0.0.1.nip.io`. A name that does not resolve is refused too: it fails
   closed.
@@ -100,8 +157,9 @@ http.
 literals, redirects, DNS and the body cap — and needs no network except one
 DNS lookup, which it reports as SKIP when there is none. Every rule in both
 files was removed in turn — each range, each name, the scheme check, the
-per-hop checks, the redirect cap, the three body caps: 42 mutations — and the
-test failed for every one.
+per-hop checks, the redirect cap, the three body caps: 42 mutations when the
+recipe shipped, and the multicast rule added since — and the test failed for
+every one.
 
 ```bash
 npm i -D tsx typescript
@@ -110,7 +168,11 @@ npx tsx tests/ssrf.test.ts
 
 ## Provenance
 
-`boostmebitch` `origin/main` at `815c551f`, byte-identical. MIT. Rows in
-[`../../PROVENANCE.tsv`](../../PROVENANCE.tsv). Why this guard and not the
+`boostmebitch` `origin/main` at `815c551f`. MIT. `capped-body.ts` is
+byte-identical. `safe-fetch.ts` is `patched`: one rule added to `PRIVATE_V6`,
+IPv6 multicast `ff00::/8`, which the site's list does not have. A connect to a
+multicast address fails anyway, so the rule makes the refusal explicit; it
+closes no reachable hole. Do not diff the file against the site and "fix" the
+difference. Rows in [`../../PROVENANCE.tsv`](../../PROVENANCE.tsv). Why this guard and not the
 other two live ones:
 [`../../comparisons/feed-parsing.md`](../../comparisons/feed-parsing.md#feed-fetching).

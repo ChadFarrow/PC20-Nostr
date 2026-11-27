@@ -54,7 +54,7 @@ is relative to the repo root; prefix `raw_base` to fetch one.
 
 - **Copy first, change after, in a separate step.** A recipe file is
   byte-identical to code that serves real traffic (`extracted`), or to that
-  code plus a named security fix (`patched`). Change it while copying and
+  code plus a named fix (`patched`). Change it while copying and
   nobody can tell your bug from the original. A file marked `authored` was
   written for this catalog and no site runs it; its README says so first.
 - **Take `catalog/recipes/`, not `catalog/modules/`.** A module is evidence of

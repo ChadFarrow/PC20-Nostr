@@ -22,7 +22,11 @@
   "files": [
     {
       "from": "files/utils/xmlParser.ts",
-      "to": "lib/feed/utils/xmlParser.ts"
+      "to": "lib/feed/utils/xmlParser.ts",
+      "state": "patched",
+      "fixes": [
+        "Removed MSP's rewrite of one payment recipient (MSP's lines 535-545 at b2216ec, with the two names it imported). In MSP it is deliberate policy, not a bug: a recipient paying the legacy MSP 1.0 support node (a fixed node pubkey) came back as MSP 2.0's Lightning address, musicsideproject@getalby.com, with the same split, so support payments keep flowing after an import into MSP's editor. In any other app it made the parse return a payment destination the feed does not contain. Now every recipient comes back as the feed names it. Nothing else changed: the diff against the site is deletions only."
+      ]
     },
     {
       "from": "files/types/feed.ts",
@@ -64,26 +68,20 @@
   "env": [],
   "rename": [
     {
-      "file": "files/utils/xmlParser.ts",
-      "line": 538,
-      "current": "if (address.toLowerCase() === LEGACY_MSP_NODE_PUBKEY) {",
-      "why": "MSP policy, and it changes a payment destination: a recipient paying the legacy MSP 1.0 support node (a fixed node pubkey) is returned as MSP 2.0's Lightning address, musicsideproject@getalby.com, with the same split. MSP's own comment says it does this so support payments keep flowing after an import into MSP's editor. Delete this if-block (lines 538-545) so the parse returns the destination the feed names; keep it only if your app is MSP."
-    },
-    {
       "file": "files/types/feed.ts",
       "line": 438,
       "current": "export const MSP_SUPPORT_RECIPIENT = { name: 'MSP 2.0', address: 'musicsideproject@getalby.com' } as const;",
-      "why": "Used only by the rewrite above and by MSP's editor helpers (createSupportRecipients), which the parser never calls. Once the rewrite is deleted nothing in the parse reads it, and the import of LEGACY_MSP_NODE_PUBKEY and MSP_SUPPORT_RECIPIENT at xmlParser.ts line 4 becomes unused: remove those two names from it if your lint refuses unused imports."
+      "why": "MSP's own support address. The parser does not read it: the only parse path that did, MSP's rewrite of the legacy MSP 1.0 node, is removed in this recipe (see 'fixes'). Only MSP's editor helpers in this file use it (COMMUNITY_SUPPORT_RECIPIENTS, createSupportRecipients, isCommunitySupport), and the parser calls none of them; LEGACY_MSP_NODE_PUBKEY beside it is now read by nothing. Leave them, or delete them if you do not want MSP's address in your bundle."
     },
     {
       "file": "files/utils/xmlParser.ts",
-      "line": 1051,
+      "line": 1039,
       "current": "const isMspUrl = (url: string): boolean => {",
       "why": "Names MSP's own hosts (musicsideproject.com, the legacy msp.podtards.com). Only fetchFeedFromUrl uses it. Delete it with fetchFeedFromUrl, or replace the hosts with your own."
     },
     {
       "file": "files/utils/xmlParser.ts",
-      "line": 1121,
+      "line": 1109,
       "current": "response = await fetch(`/api/proxy-feed?url=${encodeURIComponent(url)}`, {",
       "why": "fetchFeedFromUrl falls back to a same-origin route this recipe does not ship. Build that route with the safe-feed-fetch recipe, or fetch the XML yourself and call parseRssFeed(xml)."
     }

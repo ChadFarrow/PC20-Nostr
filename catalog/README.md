@@ -51,14 +51,14 @@ a fork of it), and
 this against an explicit allowlist — it was written after code from an
 unreleased prototype reached the catalog by mistake.
 
-Three recipes now carry files that are not extractions, and they are labelled
+Five recipes now carry files that are not extractions, and they are labelled
 rather than quietly mixed in. Every file in a recipe declares one of three
 states, checked by `check-recipes.sh` step 2:
 
 | State | Means | Promise |
 |---|---|---|
 | `extracted` | byte-identical to a live site | this works somewhere today |
-| `patched` | a site file plus a named security fix | this is what the site runs, minus a bug it has |
+| `patched` | a site file plus a named fix | this is what the site runs, minus one named change: a bug it has, or a rule that is right only there |
 | `authored` | written for this catalog | **no site runs it** — and its README says so first |
 
 `authored` exists because two features were worth having and could not be
