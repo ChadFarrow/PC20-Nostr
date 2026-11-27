@@ -4,8 +4,8 @@
  * The source repo has its own 924-line suite and a 24-feed round-trip corpus;
  * those test the editor around this parser too, so they are not copied here.
  * This file pins what a stranger needs to know: which tags come out typed,
- * which come out as raw pass-through, and the four places the parser changes
- * what the feed says.
+ * which come out as raw pass-through, the three places the parser changes
+ * what the feed says, and the one MSP rewrite this recipe removed.
  *
  *   npm i -D tsx typescript fast-xml-parser
  *   npx tsx tests/parse.test.ts
@@ -83,18 +83,15 @@ eq(Object.keys(a.unknownChannelElements ?? {}).sort(), ['podcast:futureTag', 'po
    'podroll, liveItem and an unknown future tag are raw pass-through on the channel');
 eq(Object.keys(a.tracks[0].unknownItemElements ?? {}), ['podcast:chapters'], 'chapters is raw pass-through on the item');
 
-// --- the four places the parse changes what the feed says ------------------
+// --- payment destinations come back as the feed names them -----------------
+// MSP's own copy rewrites a recipient paying the legacy MSP 1.0 support node
+// into MSP 2.0's Lightning address. This recipe removes that rewrite (the
+// 'fixes' entry in feature.json); pinned so it cannot come back unnoticed.
+eq(a.value.recipients[1], { name: 'Old support node', address: LEGACY_NODE, split: 5, type: 'node' },
+   'the legacy MSP 1.0 node is returned as the feed names it, not rewritten to MSP 2.0');
+
+// --- the three places the parse changes what the feed says -----------------
 // Pinned so the README's caveats cannot drift from the code.
-// Two right answers: the shipped file rewrites the recipient, and the file
-// after the rename entry is applied returns what the feed says.
-const legacy = a.value.recipients[1];
-if (legacy.address === LEGACY_NODE && legacy.split === 5) {
-  ok('legacy MSP 1.0 node returned as the feed names it (rename entry applied)');
-} else if (legacy.address === 'musicsideproject@getalby.com' && legacy.split === 5) {
-  ok('KNOWN, shipped file: legacy MSP 1.0 node rewritten to MSP 2.0 - delete xmlParser.ts lines 538-545 (feature.json rename)');
-} else {
-  fail(`legacy recipient came back as ${JSON.stringify(legacy)}`);
-}
 eq([a.tracks[0].enclosureUrl, a.op3], ['https://example.com/1.mp3', true],
    'KNOWN: the OP3 analytics prefix is stripped from enclosures, and album.op3 records that it was there');
 const again = parseRssFeed(feed);

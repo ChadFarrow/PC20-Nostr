@@ -5,7 +5,7 @@
   "raw_base": "https://raw.githubusercontent.com/ChadFarrow/PC20-Nostr/main/",
   "states": {
     "extracted": "byte-identical to a live site",
-    "patched": "a live-site file plus a named security fix",
+    "patched": "a live-site file plus a named fix the site does not have",
     "authored": "written for this catalog; no site runs it"
   },
   "recipes": [
@@ -107,7 +107,8 @@
       "tier": "wired",
       "summary": "Parse a Podcasting 2.0 RSS feed into typed data: channel and items, value blocks and recipients, persons, funding, publisher, block, locked, images and transcripts. Tags it does not model are kept raw, so nothing is silently dropped.",
       "states": [
-        "extracted"
+        "extracted",
+        "patched"
       ],
       "files": 8,
       "dependencies": {
@@ -155,7 +156,8 @@
       "tier": "drop-in",
       "summary": "Fetch a user-supplied feed, chapters or transcript URL on a server without opening an SSRF hole: every redirect hop re-checked, every resolved address checked, private and special-use IPv4 and IPv6 refused, and the body read under a byte cap.",
       "states": [
-        "extracted"
+        "extracted",
+        "patched"
       ],
       "files": 2,
       "dependencies": {},

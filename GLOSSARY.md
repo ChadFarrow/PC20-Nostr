@@ -162,5 +162,5 @@ to avoid this.
 
 **Extracted / patched / authored** — this repo's labels for where a file came
 from. Extracted is byte-identical to a live site, patched is a site's file plus
-a named security fix, authored means nobody runs it in production. Every file
+a named fix, authored means nobody runs it in production. Every file
 in a recipe declares one. See [catalog/recipes/](catalog/recipes/).

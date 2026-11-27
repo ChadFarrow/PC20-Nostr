@@ -8,7 +8,8 @@ Terms not familiar? → [`../../GLOSSARY.md`](../../GLOSSARY.md).
 Each recipe is a directory holding the working code, a manifest describing
 what it needs, and a README explaining how to install it and what will break
 if you skip a step. The code is byte-identical to what is running in
-production — not a tidied-up illustration of it.
+production — not a tidied-up illustration of it — or, where a file says
+`patched`, that code plus one named fix.
 
 ## Available now
 
@@ -76,9 +77,10 @@ difference between a promise the catalog can keep and one it cannot.
 
 - **`extracted`** — byte-identical to a live site. `../PROVENANCE.tsv` records
   the commit, and `../check-drift.sh` re-checks it.
-- **`patched`** — a live-site file plus a named security fix the site does not
-  have. `feature.json` lists what diverged and why. Do not diff it against the
-  site and "correct" the difference.
+- **`patched`** — a live-site file plus a named fix the site does not have:
+  a security fix, or the removal of a rule that is right only on that site.
+  `feature.json` lists what diverged and why. Do not diff it against the site
+  and "correct" the difference.
 - **`authored`** — written for this catalog. **No site runs it**, so it cannot
   make the promise every other page here makes, and its README says so in the
   first line. It exists where the feature was worth having and extraction was

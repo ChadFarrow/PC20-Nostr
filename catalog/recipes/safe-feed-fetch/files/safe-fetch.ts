@@ -83,6 +83,10 @@ const PRIVATE_V6 = [
   /^2002:/i, // 6to4 (embeds an arbitrary IPv4)
   /^2001:0?:/i, // Teredo 2001::/32 (also embeds an IPv4)
   /^100:/i, // 100::/64 discard-only
+  // ff00::/8 multicast. A connect to one fails anyway; this makes the refusal
+  // explicit. Four hex digits on purpose: the first group of a multicast
+  // address is ff00-ffff, while `ff::1` is 00ff:: and is not multicast.
+  /^ff[0-9a-f]{2}:/i,
 ];
 
 /**

@@ -1,12 +1,12 @@
 /**
  * Proof for the safety claims in this recipe's README.
  *
- * The files are extracted, so a live site's traffic vouches that they FETCH.
- * Traffic never vouches that they REFUSE, which is the whole value of the
- * recipe, so every refusal the README promises is pinned here. The address
- * list is the one comparisons/image-proxy-ssrf.md used to withdraw the last
- * guard this catalog shipped, plus the encodings this guard's own comments
- * name.
+ * The files come from a live site (safe-fetch.ts with one added rule, IPv6
+ * multicast), so its traffic vouches that they FETCH. Traffic never vouches
+ * that they REFUSE, which is the whole value of the recipe, so every refusal
+ * the README promises is pinned here. The address list is the one
+ * comparisons/image-proxy-ssrf.md used to withdraw the last guard this
+ * catalog shipped, plus the encodings this guard's own comments name.
  *
  *   npm i -D tsx typescript
  *   npx tsx tests/ssrf.test.ts
@@ -77,6 +77,12 @@ const MUST_REFUSE: [string, string][] = [
   ['http://[fd00::1]/', 'unique-local'],
   ['http://[fc00::1]/', 'unique-local fc'],
   ['http://[100::1]/', 'discard-only 100::/64'],
+  // ff00::/8 multicast: the rule this recipe adds to the site's list.
+  ['http://[ff02::1]/', 'multicast all-nodes ff02::1'],
+  ['http://[ff05::1:3]/', 'multicast site-local DHCP servers'],
+  ['http://[ff0e::1]/', 'multicast global scope'],
+  ['http://[ff00::]/', 'multicast ff00::/8 lower edge'],
+  ['http://[ffff::1]/', 'multicast ff00::/8 upper edge'],
   ['file:///etc/passwd', 'file scheme'],
   ['gopher://example.com/', 'gopher scheme'],
   ['ftp://example.com/feed.xml', 'ftp scheme'],
@@ -95,6 +101,7 @@ const MUST_ALLOW: [string, string][] = [
   ['https://fdrecords.com/feed.xml', 'public name starting fd'],
   ['https://fcc.gov/', 'public name starting fc'],
   ['https://fe80.example.com/', 'public name starting fe80'],
+  ['https://ffmpeg.org/', 'public name starting ff'],
   // The edges of each refused range, so a widened or narrowed rule shows.
   ['http://172.32.0.1/', 'just above 172.16/12'],
   ['http://100.128.0.1/', 'just above 100.64/10'],
@@ -107,7 +114,7 @@ for (const [url, why] of MUST_ALLOW) {
 
 // isPrivateIp is what the post-DNS check runs on every resolved address, in
 // the forms the resolver hands back rather than the forms a URL parser makes.
-for (const addr of ['127.0.0.1', '::ffff:127.0.0.1', '::ffff:7f00:1', '169.254.169.254', 'fe80::1%en0']) {
+for (const addr of ['127.0.0.1', '::ffff:127.0.0.1', '::ffff:7f00:1', '169.254.169.254', 'fe80::1%en0', 'ff02::1']) {
   isPrivateIp(addr) ? ok(`resolved address ${addr} counts as private`)
                     : fail(`resolved address ${addr} counts as public`);
 }

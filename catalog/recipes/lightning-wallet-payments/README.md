@@ -31,9 +31,9 @@ flowchart LR
 A wallet pays what the **invoice** says, not what you asked for. These files
 decode every invoice first and refuse one whose amount is wrong.
 
-**These files are patched, not byte-identical to the site they came from** —
-the only recipe here that is. Three more fixes ride along: SSRF guards, hand-
-followed redirects, and no secrets in the console. Each is named in
+**These files are patched, not byte-identical to the site they came from.**
+Three more fixes ride along: SSRF guards, hand-followed redirects, and no
+secrets in the console. Each is named in
 `feature.json` under `fixes`, and explained in
 [`../../comparisons/lightning-payment-safety.md`](../../comparisons/lightning-payment-safety.md).
 Do not diff these against the live site and "fix" the difference.

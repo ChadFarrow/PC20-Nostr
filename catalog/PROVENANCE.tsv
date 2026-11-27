@@ -13,7 +13,7 @@ recipes/lightning-wallet-payments/files/webln-service.ts	ITDV-Lightning	origin/m
 recipes/lightning-wallet-payments/files/lnurl-service.ts	ITDV-Lightning	origin/main	4bc69b2	lib/lnurl-service.ts	patched
 recipes/lightning-wallet-payments/files/nwc-service.ts	ITDV-Lightning	origin/main	4bc69b2	lib/nwc-service.ts	patched
 recipes/lightning-wallet-payments/files/safe-storage.ts	ITDV-Lightning	origin/main	4bc69b2	lib/safe-storage.ts	extracted
-recipes/podcast-feed-parser/files/utils/xmlParser.ts	MSP-2.0	origin/master	b2216ec	src/utils/xmlParser.ts	extracted
+recipes/podcast-feed-parser/files/utils/xmlParser.ts	MSP-2.0	origin/master	b2216ec	src/utils/xmlParser.ts	patched
 recipes/podcast-feed-parser/files/types/feed.ts	MSP-2.0	origin/master	b2216ec	src/types/feed.ts	extracted
 recipes/podcast-feed-parser/files/utils/publisherParties.ts	MSP-2.0	origin/master	b2216ec	src/utils/publisherParties.ts	extracted
 recipes/podcast-feed-parser/files/utils/urlValidation.ts	MSP-2.0	origin/master	b2216ec	src/utils/urlValidation.ts	extracted
@@ -21,7 +21,7 @@ recipes/podcast-feed-parser/files/utils/comparison.ts	MSP-2.0	origin/master	b221
 recipes/podcast-feed-parser/files/utils/addressUtils.ts	MSP-2.0	origin/master	b2216ec	src/utils/addressUtils.ts	extracted
 recipes/podcast-feed-parser/files/utils/audioUtils.ts	MSP-2.0	origin/master	b2216ec	src/utils/audioUtils.ts	extracted
 recipes/podcast-feed-parser/files/utils/videoUtils.ts	MSP-2.0	origin/master	b2216ec	src/utils/videoUtils.ts	extracted
-recipes/safe-feed-fetch/files/safe-fetch.ts	boostmebitch	origin/main	815c551f	lib/safe-fetch.ts	extracted
+recipes/safe-feed-fetch/files/safe-fetch.ts	boostmebitch	origin/main	815c551f	lib/safe-fetch.ts	patched
 recipes/safe-feed-fetch/files/capped-body.ts	boostmebitch	origin/main	815c551f	lib/capped-body.ts	extracted
 recipes/podcast-index-client/files/pi.ts	boostmebitch	origin/main	815c551f	services/nostr-index/src/pi.ts	extracted
 recipes/musicl-playlist-feed/files/musicl-feed.ts	stablekraft-app	origin/main	826bc612	lib/playlist/musicl-feed.ts	extracted

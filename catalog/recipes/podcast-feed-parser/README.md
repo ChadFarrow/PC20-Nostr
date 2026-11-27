@@ -18,11 +18,9 @@ import goes through it.
 
 ## Difficulty: wired
 
-Eight files, one package, and four places where the parse changes what the
-feed says — one of them a payment destination, which you delete on install
-(see [What to rename](#what-to-rename)). Read
-[What will bite you](#what-will-bite-you) before you pay anyone from its
-output.
+Eight files, one package, and three places where the parse changes what the
+feed says. Read [What will bite you](#what-will-bite-you) before you play or
+store anything from its output.
 
 ## What you get
 
@@ -37,7 +35,7 @@ output.
 | `files/utils/audioUtils.ts` | `lib/feed/utils/audioUtils.ts` |
 | `files/utils/videoUtils.ts` | `lib/feed/utils/videoUtils.ts` |
 
-2,706 lines. The parser is 1,243 of them and the types 830; the other six come
+2,694 lines. The parser is 1,231 of them and the types 830; the other six come
 along because the parser imports them. `audioUtils` and `videoUtils` (325
 lines) are there for one constant. The prefix `lib/feed/` is yours to change,
 but **keep `utils/` and `types/` as siblings** — the files import each other by
@@ -83,19 +81,15 @@ into `12345` — a different payment target.
 
 ## What to rename
 
-Four entries in `feature.json` `rename`. The one that matters:
+Three entries in `feature.json` `rename`, all MSP names. None changes what
+the parse returns, so you can leave them.
 
-**Delete `files/utils/xmlParser.ts` lines 538–545. They rewrite a payment
-recipient.** A recipient paying the legacy MSP 1.0 support node (one fixed node
-pubkey) comes back as MSP 2.0's Lightning address,
-`musicsideproject@getalby.com`, with the same split. MSP's own comment says it
-does this so support payments keep flowing after a feed is imported into MSP's
-editor. In any other app it means the parse returns a destination the feed does
-not contain. The recipe ships the file unchanged because it is byte-identical
-to what MSP runs; the `rename` entry tells an agent to delete the block.
+`MSP_SUPPORT_RECIPIENT` in `types/feed.ts` is MSP's own support address. The
+parser does not read it; only MSP's editor helpers in the same file do, and the
+parser calls none of them.
 
-The other three are MSP's hosts and route in `fetchFeedFromUrl`
-(`isMspUrl` at 1051, `/api/proxy-feed` at 1121). Delete `fetchFeedFromUrl` and
+The other two are MSP's hosts and route in `fetchFeedFromUrl`
+(`isMspUrl` at 1039, `/api/proxy-feed` at 1109). Delete `fetchFeedFromUrl` and
 `isMspUrl` if you fetch the XML yourself, which you should on a server.
 
 ## What will bite you
@@ -121,9 +115,10 @@ podcast feed parses fine into it; the field names just say album.
 
 ## Tests
 
-`tests/parse.test.ts` pins every claim above, the four rewrites included, so
-this README cannot drift from the code. It passes on the file as shipped and
-again after you delete the MSP block, and says which one it saw:
+`tests/parse.test.ts` pins every claim above, the three rewrites included, so
+this README cannot drift from the code. It also pins that a recipient paying
+the legacy MSP 1.0 node comes back as the feed names it, and fails on MSP's own
+copy of the parser:
 
 ```bash
 npm i -D tsx typescript fast-xml-parser
@@ -132,6 +127,15 @@ npx tsx tests/parse.test.ts
 
 ## Provenance
 
-`MSP-2.0` `origin/master` at `b2216ec`, byte-identical. MIT. Rows in
+`MSP-2.0` `origin/master` at `b2216ec`. MIT. Seven files are byte-identical.
+`utils/xmlParser.ts` is `patched`: MSP's rewrite of one payment recipient is
+removed. In MSP, a recipient paying the legacy MSP 1.0 support node (one fixed
+node pubkey) comes back as MSP 2.0's Lightning address,
+`musicsideproject@getalby.com`, with the same split. That is MSP's policy, so
+support payments keep flowing after an import into its editor. In any other
+app it returned a payment destination the feed does not contain. The removal
+is MSP's lines 535–545 and the two names they imported; the diff against MSP
+is deletions only, so the parse is otherwise MSP's. Copy the file as it is,
+and do not diff it against MSP and "fix" the difference. Rows in
 [`../../PROVENANCE.tsv`](../../PROVENANCE.tsv);
 [`../../check-drift.sh`](../../check-drift.sh) re-checks them.
